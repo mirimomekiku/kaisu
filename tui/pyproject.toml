@@ -1,0 +1,12 @@
+[project]
+name = "kaisu-tui"
+version = "0.1.0"
+description = "Terminal UI for Kaisu, a yt-dlp video downloader"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "textual>=8.2.8",
+    # Keep in sync with bin/VERSIONS.json (the version the desktop app ships with).
+    # [default] adds yt-dlp-ejs (YouTube challenge solver), mutagen, certifi, etc. that the standalone binary bundles.
+    "yt-dlp[default]==2026.8.19",
+]
