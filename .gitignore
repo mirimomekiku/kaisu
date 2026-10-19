@@ -1,0 +1,23 @@
+# Node & Frontend
+node_modules/
+desktop/dist/
+desktop/node_modules/
+
+# Rust & Tauri
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
+
+# Python
+.venv/
+tui/.venv/
+__pycache__/
+*.pyc
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Binaries are fetched by `node scripts/fetch-binaries.mjs`
+bin/*
+!bin/VERSIONS.json
+desktop/src-tauri/bin/*
