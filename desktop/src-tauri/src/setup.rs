@@ -67,6 +67,8 @@ pub struct SetupInfo {
     pub platform: Platform,
     pub manual_steps: Vec<String>,
     pub managed_dir: String,
+    /// Free space where the tools will be put, when it can be read.
+    pub free_bytes: Option<u64>,
 }
 
 /// `(ID, ID_LIKE...)` from /etc/os-release, lower-cased.
@@ -446,6 +448,7 @@ pub async fn check_setup(app: AppHandle, engine: State<'_, Engine>) -> Result<Se
         platform: platform(),
         manual_steps: manual_steps(),
         managed_dir: engine::managed_dir(&app)?.display().to_string(),
+        free_bytes: engine::managed_dir(&app).ok().and_then(|d| crate::download::free_space_for(&d).ok()),
     })
 }
 

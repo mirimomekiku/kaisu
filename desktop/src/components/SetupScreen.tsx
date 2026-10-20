@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AlertCircle, Check, Circle, Copy, Download, Film, Loader2, Wrench } from "lucide-react";
 import { errorText, runSetup, type ComponentId, type EngineInfo, type SetupInfo } from "../lib/api";
+import { formatBytes } from "../lib/format";
+import { checkProxy } from "../lib/validate";
 
 interface Props {
   info: SetupInfo;
@@ -8,7 +10,17 @@ interface Props {
   onDone: (engine: EngineInfo) => void;
   /** Offered when the essentials work but an optional helper is still missing. */
   onSkip?: () => void;
+  /** The proxy in use, so setup can go through it. */
+  proxy: string;
+  onProxy: (proxy: string) => void;
+  /** Looks at the computer again (after the tools were installed by hand). */
+  onRecheck: () => Promise<void>;
 }
+
+/** Roughly what each download weighs, so people know what to expect. */
+const SIZE_HINT: Record<ComponentId, string> = { ytdlp: "about 35 MB", ffmpeg: "about 100 MB", js: "about 40 MB" };
+/** Space needed for the downloads plus unpacking. */
+const NEEDED_BYTES = 600 * 1024 * 1024;
 
 const PARTS: Array<{ id: ComponentId; name: string; detail: string }> = [
   { id: "ytdlp", name: "Video downloader", detail: "yt-dlp: finds and downloads the video" },
@@ -25,19 +37,47 @@ function osLabel(p: SetupInfo["platform"]): string {
 
 type Phase = "idle" | "running" | "failed";
 
-export default function SetupScreen({ info, onDone, onSkip }: Props) {
+export default function SetupScreen({ info, onDone, onSkip, proxy, onProxy, onRecheck }: Props) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<Partial<Record<ComponentId, number>>>({});
   const [label, setLabel] = useState<Partial<Record<ComponentId, string>>>({});
   const [finished, setFinished] = useState<Partial<Record<ComponentId, boolean>>>({});
   const [copied, setCopied] = useState<string | null>(null);
+  const [proxyText, setProxyText] = useState(proxy);
+  const [checking, setChecking] = useState(false);
+  const [recheckNote, setRecheckNote] = useState<string | null>(null);
+  const [seconds, setSeconds] = useState(0);
+  const proxyProblem = checkProxy(proxyText);
+  const lowSpace = info.free_bytes !== null && info.free_bytes < NEEDED_BYTES;
+
+  useEffect(() => {
+    if (phase !== "running") return;
+    setSeconds(0);
+    const timer = setInterval(() => setSeconds((s) => s + 1), 1000);
+    return () => clearInterval(timer);
+  }, [phase]);
+
+  const recheck = async () => {
+    setChecking(true);
+    setRecheckNote(null);
+    try {
+      await onRecheck();
+      setRecheckNote("Looked again. If everything was found, this screen closes by itself.");
+    } catch (e) {
+      setRecheckNote(errorText(e));
+    } finally {
+      setChecking(false);
+    }
+  };
 
   const ready = (id: ComponentId) => info.engine[id].ready || finished[id] === true;
   const missing = PARTS.filter((p) => !info.engine[p.id].ready);
   const essentialsReady = info.engine.ytdlp.ready;
 
   const start = async () => {
+    if (proxyProblem) return;
+    onProxy(proxyText.trim());
     setPhase("running");
     setError(null);
     try {
@@ -106,7 +146,7 @@ export default function SetupScreen({ info, onDone, onSkip }: Props) {
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="font-bold">{part.name}</div>
-                    <div className="dim">{active ? label[part.id] : part.detail}</div>
+                    <div className="dim">{active ? label[part.id] : `${part.detail} (${SIZE_HINT[part.id]})`}</div>
                   </div>
                   <span className="dim shrink-0">{isReady ? "Ready" : active && pct !== undefined ? `${Math.round(pct)}%` : "Needed"}</span>
                 </div>
@@ -127,11 +167,20 @@ export default function SetupScreen({ info, onDone, onSkip }: Props) {
           </div>
         )}
 
+        {lowSpace && (
+          <div className="alert mx-4 mb-3" role="alert">
+            <AlertCircle className="w-4 h-4 shrink-0" style={{ color: "#b3261e" }} />
+            <div>
+              Only {formatBytes(info.free_bytes ?? 0)} is free where the tools go. Setup needs about {formatBytes(NEEDED_BYTES)}. Free up some space first.
+            </div>
+          </div>
+        )}
+
         <div className="px-4 pb-3 flex items-center gap-3 flex-wrap">
           {info.platform.auto_install ? (
             <button onClick={start} disabled={phase === "running"} className="btn primary" style={{ height: 24, padding: "0 18px" }}>
               {phase === "running" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-              {phase === "running" ? "Setting up…" : phase === "failed" ? "Try again" : "Set up automatically"}
+              {phase === "running" ? `Setting up… ${seconds}s` : phase === "failed" ? "Try again" : "Set up automatically"}
             </button>
           ) : (
             <span className="inline-flex items-center gap-1.5" style={{ color: "#9a6a00" }}>
@@ -151,6 +200,31 @@ export default function SetupScreen({ info, onDone, onSkip }: Props) {
           </p>
         )}
 
+        <details className="px-4 pb-3" open={phase === "failed" && !!proxyText}>
+          <summary className="cursor-default select-none font-bold">Behind a proxy or firewall?</summary>
+          <div className="mt-2 flex flex-col gap-1.5">
+            <label className="flex items-center gap-2">
+              Proxy
+              <input
+                value={proxyText}
+                onChange={(e) => setProxyText(e.target.value)}
+                placeholder="none (e.g. socks5://127.0.0.1:1080)"
+                spellCheck={false}
+                aria-label="Setup proxy"
+                aria-invalid={!!proxyProblem}
+                disabled={phase === "running"}
+                className="field mono flex-1"
+              />
+            </label>
+            {proxyProblem && (
+              <p className="m-0" role="alert" style={{ color: "#b3261e" }}>
+                {proxyProblem}
+              </p>
+            )}
+            <p className="dim m-0">The downloads go through it. You can change it later in Settings.</p>
+          </div>
+        </details>
+
         <details className="px-4 pb-4" open={!info.platform.auto_install}>
           <summary className="cursor-default select-none font-bold">Prefer to install them yourself?</summary>
           <div className="mt-2 flex flex-col gap-1.5">
@@ -165,6 +239,16 @@ export default function SetupScreen({ info, onDone, onSkip }: Props) {
                 )}
               </div>
             ))}
+            <div className="flex items-center gap-2 flex-wrap">
+              <button onClick={recheck} disabled={checking} className="btn small">
+                {checking ? <Loader2 className="w-3 h-3 animate-spin" /> : null} I've installed them, check again
+              </button>
+              {recheckNote && (
+                <span className="dim" role="status">
+                  {recheckNote}
+                </span>
+              )}
+            </div>
             <p className="dim m-0">
               Tools Kaisu installs itself go in <span className="mono selectable">{info.managed_dir}</span>
             </p>
