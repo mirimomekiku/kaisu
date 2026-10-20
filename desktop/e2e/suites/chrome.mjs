@@ -196,6 +196,7 @@ check("empty area: Select all works", await page.getByRole("region", { name: "Se
 await results(page).getByLabel("Select all").uncheck();
 
 // keyboard
+await page.bringToFront();
 await results(page).getByRole("button", { name: /result 2$/ }).focus();
 await page.keyboard.press("ContextMenu");
 check("keyboard: Menu key opens it", await menu(page).count() === 1);
