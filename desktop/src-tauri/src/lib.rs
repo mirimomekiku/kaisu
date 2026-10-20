@@ -2,6 +2,7 @@ mod download;
 mod engine;
 mod files;
 mod links;
+mod meta;
 mod net;
 mod output;
 mod proc;
@@ -80,6 +81,8 @@ pub fn run() {
             download::get_media_info,
             download::start_download,
             download::cancel_download,
+            download::preview_command,
+            files::check_folder,
             download::free_space,
             search::search_media,
             net::test_proxy,

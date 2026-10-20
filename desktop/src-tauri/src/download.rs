@@ -18,6 +18,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 
 use crate::{
     engine::{self, Engine},
+    meta::{self, AudioExtras, CoverMode, CoverOptions, LyricsMode, MetaOptions},
     net,
     output::{self, Clip, OutputOptions, PlaylistCtx},
     proc,
@@ -121,6 +122,11 @@ pub struct ExtraOptions {
     pub playlist: Option<PlaylistCtx>,
     /// Download only part of the video.
     pub clip: Option<Clip>,
+    /// Tags the user typed in.
+    pub meta: Option<MetaOptions>,
+    pub cover: Option<CoverOptions>,
+    pub lyrics: Option<LyricsMode>,
+    pub audio: Option<AudioExtras>,
 }
 
 #[derive(Deserialize)]
@@ -141,6 +147,8 @@ pub enum DownloadEvent {
     /// The real title, learned from yt-dlp (items added from a pasted link only know their URL at first).
     Meta { title: String },
     Log { line: String },
+    /// The finished file was looked at: `ok: false` means it may be damaged or cut off.
+    Checked { ok: bool, note: Option<String> },
     Done { path: Option<String> },
     Cancelled,
     Error { message: String },
@@ -297,6 +305,8 @@ fn build_args(
     push(&["--progress-template", "postprocess:KAISU_PP|%(progress.status)s"]);
     push(&["--print", "after_move:KAISU_DONE|%(filepath)s"]);
     push(&["--print", "before_dl:KAISU_META|%(title)s"]);
+    push(&["--print", "after_move:KAISU_TAGS|%(artist,uploader)s|%(track,title)s|%(duration)s"]);
+    push(&["--trim-filenames", "150"]);
     let template = output::build_template(&extra.output, matches!(req.preset, Preset::Audio), extra.playlist.as_ref(), extra.clip.as_ref())?;
     push(&["-o", template.as_str()]);
     if let Some(clip) = &extra.clip {
@@ -312,10 +322,14 @@ fn build_args(
     match req.preset {
         Preset::Audio => {
             push(&["-f", custom_format.unwrap_or("ba/b"), "-x", "--audio-format", extra.audio_format.as_arg()]);
-            push(&["--audio-quality", "0", "--embed-metadata"]);
-            // WAV can't carry cover art.
-            if !matches!(extra.audio_format, AudioFormat::Wav) {
-                push(&["--embed-thumbnail", "--convert-thumbnails", "jpg"]);
+            let audio = extra.audio.clone().unwrap_or_default();
+            push(&["--audio-quality", audio.quality()?.as_str(), "--embed-metadata"]);
+            for arg in audio.args() {
+                push(&[arg.as_str()]);
+            }
+            let cover = extra.cover.clone().unwrap_or_default();
+            for arg in cover.audio_args(matches!(extra.audio_format, AudioFormat::Wav))? {
+                push(&[arg.as_str()]);
             }
         }
         video => {
@@ -339,6 +353,17 @@ fn build_args(
         SponsorBlock::Off => {}
         SponsorBlock::Mark => push(&["--sponsorblock-mark", "all"]),
         SponsorBlock::Remove => push(&["--sponsorblock-remove", "sponsor,selfpromo,interaction"]),
+    }
+    if let Some(meta) = extra.meta.as_ref().filter(|m| !m.is_empty()) {
+        for arg in meta.args()? {
+            push(&[arg.as_str()]);
+        }
+    }
+    if let Some(cover) = &extra.cover {
+        // A custom picture is added after the download; make sure it exists now rather than at the end.
+        if cover.mode == CoverMode::Custom && !matches!(req.preset, Preset::Audio) {
+            return Err("Custom cover art is only for audio downloads.".into());
+        }
     }
     let subtitle_args = match &extra.subs {
         Some(subs) => subs.args(matches!(req.preset, Preset::Audio))?,
@@ -415,6 +440,84 @@ impl ProgressState {
     }
 }
 
+/// `artist|track|duration`, where the track itself may contain `|`.
+fn parse_tags(rest: &str) -> Option<(String, String, Option<f64>)> {
+    let parts: Vec<&str> = rest.split('|').collect();
+    if parts.len() < 3 {
+        return None;
+    }
+    let clean = |s: &str| if s.trim() == "NA" { String::new() } else { s.trim().to_string() };
+    let artist = clean(parts[0]);
+    let track = clean(&parts[1..parts.len() - 1].join("|"));
+    Some((artist, track, parse_num(parts[parts.len() - 1])))
+}
+
+/// What happens to a finished file: custom cover art, lyrics, then a check that it plays. None of it can fail the
+/// download itself; problems are reported in the log, and a damaged file is flagged.
+async fn finish_file(req: &DownloadRequest, ffmpeg_dir: &std::path::Path, file: PathBuf, tags: Option<(String, String, Option<f64>)>, on_event: &Channel<DownloadEvent>) {
+    let exe = if cfg!(windows) { ".exe" } else { "" };
+    let ffmpeg = ffmpeg_dir.join(format!("ffmpeg{exe}"));
+    let ffprobe = ffmpeg_dir.join(format!("ffprobe{exe}"));
+    let log = |line: String| {
+        let _ = on_event.send(DownloadEvent::Log { line });
+    };
+    let audio = matches!(req.preset, Preset::Audio);
+    let extra = &req.extra;
+
+    if audio {
+        if let Some(cover) = extra.cover.as_ref().filter(|c| c.mode == CoverMode::Custom) {
+            match meta::validate_cover(cover.path.as_deref().unwrap_or("")) {
+                Ok(img) => match meta::apply_custom_cover(&ffmpeg, &file, &img).await {
+                    Ok(()) => log("[kaisu] Added your cover art.".into()),
+                    Err(e) => log(format!("[kaisu] Couldn't add the cover art: {e}")),
+                },
+                Err(e) => log(format!("[kaisu] Couldn't add the cover art: {e}")),
+            }
+        }
+
+        let mode = extra.lyrics.unwrap_or_default();
+        if mode != LyricsMode::Off {
+            let (found_artist, found_title, duration) = tags.clone().unwrap_or_default();
+            let typed = extra.meta.as_ref();
+            let artist = typed.and_then(|m| m.artist.clone()).filter(|a| !a.trim().is_empty()).unwrap_or(found_artist);
+            let title = typed.and_then(|m| m.title.clone()).filter(|a| !a.trim().is_empty()).unwrap_or(found_title);
+            let (artist, title) = meta::tidy_for_lookup(&artist, &title);
+            match crate::setup::client(extra.proxy.as_deref()) {
+                Err(e) => log(format!("[kaisu] Lyrics: {e}")),
+                Ok(client) => match meta::fetch_lyrics(&client, &artist, &title, duration).await {
+                    Ok(None) => log(format!("[kaisu] Lyrics: none found for {artist} - {title}.")),
+                    Err(e) => log(format!("[kaisu] Lyrics: {e}")),
+                    Ok(Some(lyrics)) => {
+                        if mode.file() {
+                            match meta::write_lyrics_file(&file, &lyrics).await {
+                                Ok(p) => log(format!("[kaisu] Saved lyrics to {}.", p.display())),
+                                Err(e) => log(format!("[kaisu] Lyrics: {e}")),
+                            }
+                        }
+                        if mode.embed() {
+                            match meta::embed_lyrics(&ffmpeg, &file, &lyrics).await {
+                                Ok(()) => log("[kaisu] Embedded the lyrics.".into()),
+                                Err(e) => log(format!("[kaisu] Lyrics: {e}")),
+                            }
+                        }
+                    }
+                },
+            }
+        }
+    }
+
+    // A clip is only as long as the clip; otherwise compare with the video's own length.
+    let expected = match &extra.clip {
+        Some(c) => Some(c.end - c.start),
+        None => tags.as_ref().and_then(|t| t.2),
+    };
+    let verdict = meta::verify_file(&ffprobe, &file, expected).await;
+    if let Some(note) = &verdict.note {
+        log(format!("[kaisu] Check: {note}"));
+    }
+    let _ = on_event.send(DownloadEvent::Checked { ok: verdict.ok, note: verdict.note });
+}
+
 // ---- commands ---------------------------------------------------------------------------
 
 #[tauri::command]
@@ -486,6 +589,7 @@ async fn run_download(
 
     let mut progress = ProgressState::new(req.preset);
     let mut final_path: Option<String> = None;
+    let mut tags: Option<(String, String, Option<f64>)> = None;
     let mut lines = BufReader::new(stdout).lines();
     while let Ok(Some(line)) = lines.next_line().await {
         if let Some(rest) = line.strip_prefix("KAISU|") {
@@ -501,6 +605,8 @@ async fn run_download(
             if !title.is_empty() && title != "NA" {
                 let _ = on_event.send(DownloadEvent::Meta { title: title.to_string() });
             }
+        } else if let Some(rest) = line.strip_prefix("KAISU_TAGS|") {
+            tags = parse_tags(rest);
         } else if let Some(path) = line.strip_prefix("KAISU_DONE|") {
             final_path = Some(path.trim().to_string());
         } else if req.extra.verbose {
@@ -519,11 +625,28 @@ async fn run_download(
         return Ok(());
     }
     if status.success() {
+        if let Some(path) = &final_path {
+            let _ = on_event.send(DownloadEvent::Processing);
+            finish_file(req, &ffmpeg_dir, PathBuf::from(path), tags, on_event).await;
+        }
         let _ = on_event.send(DownloadEvent::Done { path: final_path });
         Ok(())
     } else {
         Err(proc::clean_stderr(&stderr_text))
     }
+}
+
+/// The command Kaisu would run for a download, for the "show command" button and for copying into a terminal.
+#[tauri::command]
+pub fn preview_command(req: DownloadRequest) -> Result<String, String> {
+    let url = validate_url(&req.url)?.to_string();
+    let args = build_args(&req, &url, std::path::Path::new("<ffmpeg folder>"), None)?;
+    Ok(std::iter::once("yt-dlp".to_string()).chain(args.iter().map(|a| shell_quote(a))).collect::<Vec<_>>().join(" "))
+}
+
+fn shell_quote(arg: &str) -> String {
+    let plain = !arg.is_empty() && arg.chars().all(|c| c.is_ascii_alphanumeric() || "-_./=:,@%+".contains(c));
+    if plain { arg.to_string() } else { format!("'{}'", arg.replace('\'', "'\\''")) }
 }
 
 #[tauri::command]
@@ -565,6 +688,16 @@ pub struct MediaInfo {
     webpage_url: Option<String>,
     is_live: bool,
     subtitles: Vec<SubtitleTrack>,
+    artist: Option<String>,
+    track: Option<String>,
+    album: Option<String>,
+    release_year: Option<u32>,
+    genre: Option<String>,
+    /// yt-dlp's word for who may watch: `public`, `needs_auth`, `subscriber_only`, `premium_only`, `private`...
+    availability: Option<String>,
+    age_limit: Option<u32>,
+    /// `is_live`, `is_upcoming`, `was_live`, `not_live`...
+    live_status: Option<String>,
     formats: Vec<FormatInfo>,
 }
 
@@ -662,6 +795,14 @@ pub async fn get_media_info(
         webpage_url: text("webpage_url"),
         is_live: v.get("is_live").and_then(|l| l.as_bool()).unwrap_or(false),
         subtitles: subs::tracks(&v),
+        artist: text("artist").or_else(|| v.get("artists").and_then(|a| a.as_array()).and_then(|a| a.first()).and_then(|a| a.as_str()).map(str::to_string)),
+        track: text("track"),
+        album: text("album"),
+        release_year: v.get("release_year").and_then(|y| y.as_u64()).map(|y| y as u32),
+        genre: text("genre"),
+        availability: text("availability"),
+        age_limit: v.get("age_limit").and_then(|a| a.as_u64()).map(|a| a as u32),
+        live_status: text("live_status"),
         formats: parse_formats(&v),
     })
 }
@@ -683,6 +824,52 @@ mod tests {
 
     fn args(r: &DownloadRequest) -> Result<Vec<String>, String> {
         build_args(r, "https://example.com/v", Path::new("/bin"), None)
+    }
+
+    #[test]
+    fn audio_extras_cover_and_tags_reach_yt_dlp() {
+        let mut r = req(Preset::Audio);
+        r.extra.audio = Some(AudioExtras { quality: Some("192K".into()), normalize: true, trim_silence: false });
+        r.extra.cover = Some(CoverOptions { mode: CoverMode::Square, path: None });
+        r.extra.meta = Some(MetaOptions { artist: Some("A: B".into()), year: Some("2001".into()), ..Default::default() });
+        let a = args(&r).unwrap();
+        let at = |flag: &str| a.iter().position(|x| x == flag).map(|i| a[i + 1].clone());
+        assert_eq!(at("--audio-quality").as_deref(), Some("192K"));
+        assert!(a.iter().any(|x| x.starts_with("ExtractAudio+ffmpeg_o:-af loudnorm")));
+        assert!(a.iter().any(|x| x.contains("crop=min(iw")));
+        assert!(a.iter().any(|x| x == "A\\: B:%(meta_artist)s"));
+        assert!(a.iter().any(|x| x == "2001:%(meta_date)s"));
+        assert!(a.iter().any(|x| x.starts_with("KAISU_TAGS") || x.contains("KAISU_TAGS")));
+        assert!(a.windows(2).any(|w| w[0] == "--trim-filenames"));
+    }
+
+    #[test]
+    fn bad_extras_are_refused_before_running() {
+        let mut r = req(Preset::Audio);
+        r.extra.audio = Some(AudioExtras { quality: Some("--exec".into()), ..Default::default() });
+        assert!(args(&r).is_err());
+        let mut r = req(Preset::Best);
+        r.extra.cover = Some(CoverOptions { mode: CoverMode::Custom, path: Some("/x.jpg".into()) });
+        assert!(args(&r).is_err(), "custom covers are audio-only");
+        let mut r = req(Preset::Audio);
+        r.extra.meta = Some(MetaOptions { year: Some("abcd".into()), ..Default::default() });
+        assert!(args(&r).is_err());
+    }
+
+    #[test]
+    fn tags_line_is_parsed() {
+        assert_eq!(parse_tags("Daft Punk|One More Time|320.5"), Some(("Daft Punk".into(), "One More Time".into(), Some(320.5))));
+        assert_eq!(parse_tags("NA|A | B|NA"), Some((String::new(), "A | B".into(), None)));
+        assert_eq!(parse_tags("x|y"), None);
+    }
+
+    #[test]
+    fn preview_quotes_awkward_arguments() {
+        assert_eq!(shell_quote("plain-arg_1.mp4"), "plain-arg_1.mp4");
+        assert_eq!(shell_quote("has space"), "'has space'");
+        assert_eq!(shell_quote("it's"), "'it'\\''s'");
+        let p = preview_command(req(Preset::Best)).unwrap();
+        assert!(p.starts_with("yt-dlp --no-playlist") && p.ends_with("-- https://example.com/v"));
     }
 
     #[test]

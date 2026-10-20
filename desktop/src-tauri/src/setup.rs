@@ -142,7 +142,7 @@ fn with_proxy(builder: reqwest::ClientBuilder, proxy: Option<&str>) -> Result<re
     }
 }
 
-fn client(proxy: Option<&str>) -> Result<reqwest::Client, String> {
+pub(crate) fn client(proxy: Option<&str>) -> Result<reqwest::Client, String> {
     with_proxy(
         reqwest::Client::builder().user_agent("kaisu").connect_timeout(Duration::from_secs(20)).read_timeout(Duration::from_secs(45)),
         proxy,

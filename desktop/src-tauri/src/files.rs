@@ -164,6 +164,78 @@ fn write_export(p: &Path, contents: &str) -> Result<(), String> {
     std::fs::write(p, contents).map_err(|e| format!("Couldn't save the file: {e}"))
 }
 
+#[derive(serde::Serialize, Debug)]
+pub struct FolderCheck {
+    pub exists: bool,
+    pub free: u64,
+}
+
+/// Longest folder path we accept on Windows, leaving room for the file name inside the old 260-character limit.
+const MAX_FOLDER_CHARS_WINDOWS: usize = 150;
+
+const WINDOWS_RESERVED: &[&str] = &[
+    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7",
+    "LPT8", "LPT9",
+];
+
+/// Problems with a folder name that depend only on the text (so they can be tested anywhere).
+fn folder_text_problem(path: &str, windows: bool) -> Option<String> {
+    if path.trim().is_empty() {
+        return Some("Choose a download folder.".into());
+    }
+    let absolute = if windows {
+        let b = path.as_bytes();
+        (b.len() > 2 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b[2] == b'\\' || b[2] == b'/')) || path.starts_with("\\\\")
+    } else {
+        Path::new(path).is_absolute()
+    };
+    if !absolute {
+        return Some("The download folder must be a full path.".into());
+    }
+    if windows {
+        if path.chars().count() > MAX_FOLDER_CHARS_WINDOWS {
+            return Some(format!("That folder's path is too long for Windows (over {MAX_FOLDER_CHARS_WINDOWS} characters). Choose a shorter one."));
+        }
+        for part in path.split(['\\', '/']) {
+            let stem = part.split('.').next().unwrap_or("").trim_end().to_ascii_uppercase();
+            if WINDOWS_RESERVED.contains(&stem.as_str()) {
+                return Some(format!("\"{part}\" is a reserved name on Windows and can't be used for a folder."));
+            }
+            if part.ends_with(' ') || (part.ends_with('.') && part != "." && part != "..") {
+                return Some(format!("Windows doesn't allow folder names that end with a space or a dot (\"{part}\")."));
+            }
+        }
+    }
+    None
+}
+
+/// Checks that downloads can really go into this folder: it is (or can be made) a folder, it can be written to, and how
+/// much space is left. Nothing is created.
+#[tauri::command]
+pub fn check_folder(path: String) -> Result<FolderCheck, String> {
+    if let Some(problem) = folder_text_problem(&path, cfg!(windows)) {
+        return Err(problem);
+    }
+    let dir = PathBuf::from(&path);
+    if dir.is_file() {
+        return Err("That is a file, not a folder.".into());
+    }
+    let mut probe = dir.as_path();
+    while !probe.exists() {
+        probe = probe.parent().ok_or("That folder's drive isn't available.")?;
+    }
+    if !probe.is_dir() {
+        return Err("That location isn't a folder.".into());
+    }
+    let test = probe.join(format!(".kaisu-write-test-{}", std::process::id()));
+    std::fs::write(&test, b"").map_err(|_| {
+        if probe == dir { "Kaisu can't write to that folder. Choose another one.".to_string() } else { format!("Kaisu can't create the folder inside {}.", probe.display()) }
+    })?;
+    let _ = std::fs::remove_file(&test);
+    let free = crate::download::free_space_for(&dir)?;
+    Ok(FolderCheck { exists: dir.is_dir(), free })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -263,6 +335,33 @@ mod tests {
         assert!(write_export(&dir, "x").is_err());
         assert!(write_export(Path::new("h.csv"), "x").is_err());
         assert!(write_export(&dir.join("missing").join("h.csv"), "x").is_err());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn folder_names_are_checked_by_text() {
+        assert!(folder_text_problem("", false).is_some());
+        assert!(folder_text_problem("relative/dir", false).is_some());
+        assert!(folder_text_problem("/home/u/Music", false).is_none());
+        assert!(folder_text_problem("C:\\Users\\u\\Music", true).is_none());
+        assert!(folder_text_problem("C:\\Users\\CON\\x", true).is_some());
+        assert!(folder_text_problem("C:\\Users\\nul.txt", true).is_some());
+        assert!(folder_text_problem("C:\\Users\\u\\Music.", true).is_some());
+        assert!(folder_text_problem(&format!("C:\\{}", "a".repeat(200)), true).is_some());
+        assert!(folder_text_problem("/home/u/CON", false).is_none(), "reserved names only matter on Windows");
+    }
+
+    #[test]
+    fn folder_check_finds_space_and_refuses_files() {
+        let dir = std::env::temp_dir().join(format!("kaisu-fc-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let ok = check_folder(dir.join("not-made-yet").display().to_string()).unwrap();
+        assert!(!ok.exists && ok.free > 0);
+        assert!(check_folder(dir.display().to_string()).unwrap().exists);
+        let file = dir.join("f.txt");
+        std::fs::write(&file, b"x").unwrap();
+        assert!(check_folder(file.display().to_string()).is_err());
+        assert!(!dir.join("not-made-yet").exists(), "checking must not create anything");
         std::fs::remove_dir_all(&dir).ok();
     }
 }
