@@ -1157,3 +1157,65 @@ input[type="radio"] {
   border-bottom: 1px solid #d9b25a;
   color: #5a3d00;
 }
+
+/* ---- first-run tour --------------------------------------------------------- */
+.tour-block {
+  position: fixed;
+  inset: 0;
+  z-index: 940;
+}
+.tour-spot {
+  position: fixed;
+  z-index: 941;
+  border-radius: 7px;
+  border: 2px solid #5aa6f3;
+  box-shadow: 0 0 0 9999px rgba(10, 18, 30, 0.5), 0 0 14px 2px rgba(90, 166, 243, 0.8);
+  pointer-events: none;
+  transition: all 0.2s ease;
+}
+.tour-dim {
+  position: fixed;
+  inset: 0;
+  z-index: 941;
+  background: rgba(10, 18, 30, 0.5);
+  pointer-events: none;
+}
+.tour-card {
+  position: fixed;
+  z-index: 942;
+  width: 330px;
+  max-width: calc(100vw - 24px);
+  border-radius: 9px;
+  border: 1px solid #6b6b6b;
+  background: linear-gradient(#fbfbfb, #e9e9e9);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.5), inset 0 1px 0 #fff;
+  padding: 14px 16px 12px;
+}
+.tour-dots {
+  display: flex;
+  gap: 5px;
+}
+.tour-dots i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #b9bec6;
+  border: 1px solid #8e949d;
+}
+.tour-dots i.on {
+  background: linear-gradient(#8fc4ff, #2f78d6);
+  border-color: #1f5bb0;
+}
+
+/* ---- search source picker --------------------------------------------------- */
+.source-select {
+  height: 22px;
+  margin-right: 6px;
+  padding: 0 4px;
+  font-size: 11px;
+  border: 1px solid #7a7a7a;
+  border-radius: 4px;
+  background: linear-gradient(#fdfdfd, #dcdcdc);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+}

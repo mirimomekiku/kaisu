@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { Calendar, CheckCircle2, Clock, Download, Eye, Music, Radio, ThumbsUp, Video } from "lucide-react";
 import FileActions from "./FileActions";
-import type { Clip, FormatInfo, MediaInfo, Preset } from "../lib/api";
+import type { Clip, FormatInfo, MediaInfo, Preset, SubtitleOptions } from "../lib/api";
+import { SUBTITLE_MODE_LABEL, defaultSelection, parseLangs, toOptions } from "../lib/subtitles";
 import { PRESET_LABEL, clipLabel, formatBytes, formatClock, formatCount, formatDuration, formatUploadDate, parseTimeInput } from "../lib/format";
-import type { HistoryItem, Mode } from "../lib/storage";
+import type { HistoryItem, Mode, SubtitleMode } from "../lib/storage";
 
 export interface DownloadChoice {
   preset: Preset;
@@ -12,11 +13,15 @@ export interface DownloadChoice {
   clip: Clip | null;
   /** Rough size in bytes, for the low-disk-space check. */
   estimate: number | null;
+  /** Subtitles chosen for this download. */
+  subs: SubtitleOptions | null;
 }
 
 interface Props {
   info: MediaInfo;
   mode: Mode;
+  /** The subtitle settings to start from. */
+  subtitleDefaults: { mode: SubtitleMode; langs: string; auto: boolean };
   /** Name of the audio file type that "Audio only" produces, e.g. "MP3". */
   audioLabel: string;
   /** Short descriptions of advanced options that will apply (advanced mode only). */
@@ -59,7 +64,7 @@ function estimateSize(videos: FormatInfo[], audios: FormatInfo[], kind: "video" 
   return pick.filesize + (pick.kind === "video" ? bestAudio : 0);
 }
 
-export default function MediaCard({ info, mode, audioLabel, activeOptions, downloads, onDownload, onOpen, onReveal }: Props) {
+export default function MediaCard({ info, mode, subtitleDefaults, audioLabel, activeOptions, downloads, onDownload, onOpen, onReveal }: Props) {
   const advanced = mode === "advanced";
   const [kind, setKind] = useState<"video" | "audio">("video");
   const [quality, setQuality] = useState<Quality>("best");
@@ -70,6 +75,10 @@ export default function MediaCard({ info, mode, audioLabel, activeOptions, downl
   const [clipStart, setClipStart] = useState("0:00");
   const [clipEnd, setClipEnd] = useState(info.duration_secs ? formatClock(info.duration_secs) : "");
   const [precise, setPrecise] = useState(false);
+  const [subOpen, setSubOpen] = useState(false);
+  const [subMode, setSubMode] = useState<SubtitleMode>(subtitleDefaults.mode);
+  const [subLangs, setSubLangs] = useState<string[]>(() => (subtitleDefaults.mode === "off" ? [] : defaultSelection(info.subtitles, parseLangs(subtitleDefaults.langs))));
+  const subAuto = subtitleDefaults.auto;
   // The chooser starts open for new videos and tucked away for ones already downloaded.
   const newest = downloads[0]?.item.id;
   const [open, setOpen] = useState(downloads.length === 0);
@@ -123,10 +132,20 @@ export default function MediaCard({ info, mode, audioLabel, activeOptions, downl
 
   const submit = async () => {
     if (clipOpen && !clip) return;
-    const started = await onDownload({ preset: kind === "audio" ? "audio" : quality, formatId: formatId(), clip, estimate });
+    const started = await onDownload({ preset: kind === "audio" ? "audio" : quality, formatId: formatId(), clip, estimate, subs: toOptions(subMode, subLangs, subAuto || subLangs.some((c) => info.subtitles.find((t) => t.code === c)?.auto)) });
     if (started === false) return;
     setOpen(false);
     setJustAdded(true);
+  };
+  /** Choosing a format with nothing ticked yet starts from the languages in the settings. */
+  const changeSubMode = (mode: SubtitleMode) => {
+    setSubMode(mode);
+    if (mode !== "off" && subLangs.length === 0) setSubLangs(defaultSelection(info.subtitles, parseLangs(subtitleDefaults.langs)));
+  };
+  const toggleLang = (code: string) => {
+    setSubLangs((prev) => (prev.includes(code) ? prev.filter((c) => c !== code) : [...prev, code]));
+    // Ticking a language means they want it, so don't leave the mode on "none".
+    if (subMode === "off") setSubMode("embed");
   };
   const stats = [
     info.view_count != null && { icon: Eye, text: `${formatCount(info.view_count)} views` },
@@ -288,6 +307,43 @@ export default function MediaCard({ info, mode, audioLabel, activeOptions, downl
                         </p>
                       )
                     )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {info.subtitles.length > 0 && !info.is_live && (
+              <div className="flex flex-col gap-2">
+                <button type="button" aria-expanded={subOpen} onClick={() => setSubOpen((v) => !v)} className="disclosure self-start" style={{ fontWeight: "normal" }}>
+                  <span className={`tri ${subOpen ? "open" : ""}`} />
+                  Subtitles{subMode !== "off" && subLangs.length > 0 ? ` (${subLangs.join(", ")})` : ""}
+                </button>
+                {subOpen && (
+                  <div className="pl-3.5 flex flex-col gap-2" role="group" aria-label="Subtitles">
+                    <label className="flex items-center gap-2 w-fit">
+                      Save as
+                      <select value={subMode} onChange={(e) => changeSubMode(e.target.value as SubtitleMode)} className="field" aria-label="Subtitle format">
+                        {(Object.keys(SUBTITLE_MODE_LABEL) as SubtitleMode[]).map((m) => (
+                          <option key={m} value={m}>
+                            {SUBTITLE_MODE_LABEL[m]}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <ul className="m-0 p-0 list-none grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 max-h-40 overflow-auto">
+                      {info.subtitles.map((t) => (
+                        <li key={`${t.code}-${t.auto}`}>
+                          <label className="flex items-center gap-1.5">
+                            <input type="checkbox" checked={subLangs.includes(t.code)} onChange={() => toggleLang(t.code)} />
+                            <span className="truncate">
+                              {t.name}
+                              {t.auto ? " (automatic)" : ""} <span className="dim mono">{t.code}</span>
+                            </span>
+                          </label>
+                        </li>
+                      ))}
+                    </ul>
+                    {kind === "audio" && subMode !== "off" && <p className="m-0 dim">Audio files can't hold subtitles, so they are saved as separate .srt files.</p>}
                   </div>
                 )}
               </div>

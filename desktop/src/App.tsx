@@ -1,6 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
-import { readText } from "@tauri-apps/plugin-clipboard-manager";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, AlertTriangle, Download, Link2, Loader2, Search, X } from "lucide-react";
 import { useConfirm } from "./components/ConfirmDialog";
 import DownloadRow, { DownloadTable, QUEUE_VIEWS } from "./components/DownloadRow";
@@ -10,6 +8,7 @@ import MediaCard, { type DownloadChoice } from "./components/MediaCard";
 import SearchField from "./components/SearchField";
 import SearchResults, { SEARCH_VIEWS, type BatchQuality } from "./components/SearchResults";
 import SettingsPage, { type EngineState } from "./components/SettingsPage";
+import Tour from "./components/Tour";
 import ShortcutsDialog from "./components/ShortcutsDialog";
 import Sidebar, { type Page } from "./components/Sidebar";
 import TitleBar from "./components/TitleBar";
@@ -17,27 +16,31 @@ import WindowControls from "./components/WindowControls";
 import SetupScreen from "./components/SetupScreen";
 import StatusBar from "./components/StatusBar";
 import ViewSwitcher, { effectiveView } from "./components/ViewSwitcher";
+import { useAutoClear } from "./hooks/useAutoClear";
+import { useBatchFinish, useSessionStats, type WhenDone } from "./hooks/useBatchFinish";
+import { useClipboardOffer } from "./hooks/useClipboardOffer";
+import { useDownloadedFiles } from "./hooks/useDownloadedFiles";
+import { useDropLinks } from "./hooks/useDropLinks";
 import { sameDownload, useDownloads, type DownloadItem } from "./hooks/useDownloads";
+import { useQueuePersistence } from "./hooks/useQueuePersistence";
+import { useShortcuts } from "./hooks/useShortcuts";
+import { useSchedule } from "./hooks/useSchedule";
+import { useTrayBridge } from "./hooks/useTrayBridge";
 import {
   checkSetup,
   classifyLink,
   defaultDownloadDir,
   errorText,
-  fileExists,
+  exportText,
   freeSpace,
   getEngineInfo,
   getMediaInfo,
   getPlaylist,
-  openFile,
   openFolder,
   openUrl,
-  quitApp,
   revealEngine,
-  revealFile,
   searchMedia,
-  setTrayStatus,
-  systemPower,
-  trayAvailable,
+  setProxy,
   updateEngine,
   type Clip,
   type EngineInfo,
@@ -48,22 +51,26 @@ import {
   type PlaylistCtx,
   type Preset,
   type SearchResult,
+  type SearchSource,
   type SetupInfo,
+  type SubtitleOptions,
 } from "./lib/api";
+import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { friendlyError } from "./lib/errors";
+import { historyToCsv, historyToJson, type HistoryRow } from "./lib/history";
+import { validateRule } from "./lib/schedule";
+import { SEARCH_SOURCES, knownSource, sourceLabel } from "./lib/sources";
+import { parseLangs, toOptions } from "./lib/subtitles";
 import { clipKeyOf, clipLabel, formatBytes, formatEta, formatSpeed } from "./lib/format";
-import { extractUrls, isMediaHost, playlistOf, shortLink } from "./lib/links";
-import { notify } from "./lib/notify";
+import { extractUrls, playlistOf, shortLink } from "./lib/links";
 import {
   DEFAULT_SETTINGS,
   loadHistory,
   loadQueue,
   loadSettings,
   saveHistory,
-  saveQueue,
   saveSettings,
   type HistoryItem,
-  type SavedDownload,
   type Settings,
   type ViewMode,
 } from "./lib/storage";
@@ -76,13 +83,11 @@ const SEARCH_MAX = 48;
 const LISTING_PAGE = 200;
 const LISTING_MAX = 500;
 const LOW_DISK_BYTES = 2 * 1024 * 1024 * 1024;
-const COUNTDOWN_SECONDS = 30;
 
 /** What Simple mode always sends: sensible defaults, none of the advanced settings. */
-const SIMPLE_BASE: Omit<ExtraOptions, "output" | "playlist" | "clip"> = {
+const SIMPLE_BASE: Omit<ExtraOptions, "output" | "playlist" | "clip" | "proxy" | "subs"> = {
   sponsorblock: "off",
   cookies_from_browser: null,
-  subtitles: false,
   audio_format: "mp3",
   format_id: null,
   rate_limit: null,
@@ -112,9 +117,10 @@ interface DownloadReq {
   clip?: Clip | null;
   /** The title is only the link; yt-dlp supplies the real one once it starts. */
   placeholderTitle?: boolean;
+  channel?: string;
+  /** Subtitles picked for this one download; otherwise the settings decide (Advanced mode only). */
+  subs?: SubtitleOptions | null;
 }
-
-type WhenDone = "nothing" | "folder" | "quit" | "sleep" | "shutdown";
 
 const isFinishedStatus = (status: string) => status === "completed" || status === "error" || status === "cancelled";
 
@@ -140,18 +146,13 @@ export default function App() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [checked, setChecked] = useState<Set<string>>(new Set());
   const [batchNotice, setBatchNotice] = useState<string | null>(null);
-  const [existing, setExisting] = useState<Record<string, boolean>>({});
   const [flash, setFlash] = useState<{ text: string; error: boolean } | null>(null);
   const [note, setNote] = useState<{ title: string; subtitle?: string } | null>(null);
-  const [historyShown, setHistoryShown] = useState(0);
+  const [historyStats, setHistoryStats] = useState({ count: 0, bytes: 0 });
   const [queueLoaded, setQueueLoaded] = useState(false);
   const [restoredCount, setRestoredCount] = useState(0);
-  const [clipboardOffer, setClipboardOffer] = useState<string | null>(null);
-  const [dragging, setDragging] = useState(false);
+  const [tourOpen, setTourOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
-  const [trayOk, setTrayOk] = useState<boolean | null>(null);
-  const [whenDone, setWhenDone] = useState<WhenDone>("nothing");
-  const [countdown, setCountdown] = useState<{ action: "sleep" | "shutdown"; seconds: number } | null>(null);
 
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
@@ -160,17 +161,15 @@ export default function App() {
   const inspectToken = useRef(0);
   const searchToken = useRef(0);
   const lastAutoInspected = useRef("");
-  const lastOffered = useRef("");
   const searchInput = useRef<HTMLInputElement>(null);
-  const urlRef = useRef(url);
-  urlRef.current = url;
-  /** What happened since downloads last went idle, for the "finished" notification. */
-  const session = useRef({ completed: 0, failed: 0, lastDir: "", failedIds: new Set<string>() });
+  const session = useSessionStats();
   const confirm = useConfirm();
 
   const mode = settings.mode;
   const advanced = mode === "advanced";
   const engine: EngineInfo | null = setupInfo?.engine ?? null;
+  const source = knownSource(settings.searchSource);
+  const sourceName = sourceLabel(source);
   const effectiveOutDir = settings.outDir ?? defaultDir;
 
   const updateHistory = useCallback((next: HistoryItem[]) => {
@@ -191,6 +190,7 @@ export default function App() {
         path: item.path,
         timestamp: Date.now(),
         clip: item.clipKey,
+        channel: item.channel,
       };
       const rest = historyRef.current.filter((h) => !sameDownload({ url: h.url, preset: h.preset, clipKey: h.clip }, { url: entry.url, preset: entry.preset, clipKey: entry.clip }));
       updateHistory([entry, ...rest]);
@@ -198,17 +198,23 @@ export default function App() {
     [updateHistory],
   );
 
+  // The bandwidth schedule only applies in Advanced mode, like the other advanced options.
+  const usableRules = useMemo(() => settings.schedule.filter((rule) => validateRule(rule) === null), [settings.schedule]);
+  const schedule = useSchedule(usableRules, advanced);
+  const policy = useMemo(() => ({ blocked: schedule.paused, limit: schedule.limit }), [schedule.paused, schedule.limit]);
+
   const { items, enqueue, cancel, pause, resume, pauseAll, resumeAll, retry, remove, clearFinished, restore, hasActive } = useDownloads(
     advanced ? settings.concurrency : 2,
     handleCompleted,
+    policy,
   );
   const itemsRef = useRef(items);
   itemsRef.current = items;
-  const actionsRef = useRef({ pauseAll, resumeAll });
-  actionsRef.current = { pauseAll, resumeAll };
+  useQueuePersistence(items, queueLoaded);
 
   const changeSettings = useCallback((patch: Partial<Settings>) => {
     const next = { ...settingsRef.current, ...patch };
+    if (patch.proxy !== undefined) setProxy(patch.proxy);
     settingsRef.current = next;
     setSettings(next);
     saveSettings(next);
@@ -221,58 +227,11 @@ export default function App() {
   const showFlash = useCallback((text: string, error = false) => {
     setFlash({ text, error });
   }, []);
-  useEffect(() => {
-    if (!flash) return;
-    const t = setTimeout(() => setFlash(null), 6000);
-    return () => clearTimeout(t);
-  }, [flash]);
-  useEffect(() => {
-    if (!note) return;
-    const t = setTimeout(() => setNote(null), 4500);
-    return () => clearTimeout(t);
-  }, [note]);
-  useEffect(() => {
-    if (!batchNotice) return;
-    const t = setTimeout(() => setBatchNotice(null), 7000);
-    return () => clearTimeout(t);
-  }, [batchNotice]);
+  useAutoClear(flash, setFlash, 6000);
+  useAutoClear(note, setNote, 4500);
+  useAutoClear(batchNotice, setBatchNotice, 7000);
 
-  // Which downloaded files still exist? Re-checked whenever history changes or a tab is opened.
-  useEffect(() => {
-    const paths = [...new Set(history.map((h) => h.path).filter((p): p is string => Boolean(p)))];
-    if (paths.length === 0) {
-      setExisting({});
-      return;
-    }
-    let cancelled = false;
-    fileExists(paths)
-      .then((res) => {
-        if (!cancelled) setExisting(Object.fromEntries(paths.map((p, i) => [p, res[i]])));
-      })
-      .catch((e) => console.warn("file check failed", e));
-    return () => {
-      cancelled = true;
-    };
-  }, [history, page]);
-
-  const openDownloaded = useCallback(
-    (path: string) => {
-      openFile(path).catch((e) => {
-        showFlash(errorText(e), true);
-        setExisting((prev) => ({ ...prev, [path]: false }));
-      });
-    },
-    [showFlash],
-  );
-  const revealDownloaded = useCallback(
-    (path: string) => {
-      revealFile(path).catch((e) => {
-        showFlash(errorText(e), true);
-        setExisting((prev) => ({ ...prev, [path]: false }));
-      });
-    },
-    [showFlash],
-  );
+  const { existing, sizes, recheck, openDownloaded, revealDownloaded } = useDownloadedFiles(history, page, showFlash);
 
   const copyText = useCallback(
     (text: string, what: string) => {
@@ -308,6 +267,7 @@ export default function App() {
   useEffect(() => {
     (async () => {
       const [s, h, q] = await Promise.all([loadSettings(), loadHistory(), loadQueue()]);
+      setProxy(s.proxy);
       setSettings(s);
       setHistory(h);
       setSettingsLoaded(true);
@@ -317,37 +277,11 @@ export default function App() {
       }
       setQueueLoaded(true);
     })();
-    trayAvailable().then(setTrayOk).catch(() => setTrayOk(null));
     defaultDownloadDir().then(setDefaultDir).catch((e) => console.warn(e));
     checkSetup()
       .then(setSetupInfo)
       .catch((e) => setSetupError(errorText(e)));
   }, []);
-
-  // The queue is saved (at most once a second) so unfinished downloads can be resumed after a restart.
-  const saveTimer = useRef<number | null>(null);
-  useEffect(() => {
-    if (!queueLoaded || saveTimer.current !== null) return;
-    saveTimer.current = window.setTimeout(() => {
-      saveTimer.current = null;
-      const unfinished: SavedDownload[] = itemsRef.current
-        .filter((i) => i.status !== "completed")
-        .map((i) => ({
-          id: i.id,
-          title: i.title,
-          url: i.url,
-          thumbnail: i.thumbnail,
-          preset: i.preset,
-          outDir: i.outDir,
-          extra: i.extra,
-          status: i.status,
-          progress: i.progress,
-          clipKey: i.clipKey,
-          placeholderTitle: i.placeholderTitle,
-        }));
-      saveQueue(unfinished);
-    }, 1000);
-  }, [items, queueLoaded]);
 
   // ---- engine updates ----
   const checkForUpdate = useCallback(
@@ -452,7 +386,7 @@ export default function App() {
     setErrorMessage(null);
     setShowErrorDetails(false);
     try {
-      const found = await searchMedia(query, limit);
+      const found = await searchMedia(query, limit, knownSource(settingsRef.current.searchSource));
       if (token === searchToken.current) setSearch({ kind: "search", query, items: found, limit });
     } catch (err) {
       if (token === searchToken.current) setErrorMessage(errorText(err));
@@ -540,12 +474,17 @@ export default function App() {
     playlist_numbering: settings.playlistNumbering,
   });
 
-  const buildExtra = (formatId: string | null, ctx?: { playlist?: PlaylistCtx | null; clip?: Clip | null }): ExtraOptions => ({
+  const defaultSubs = (): SubtitleOptions | null =>
+    advanced ? toOptions(settings.subtitleMode, parseLangs(settings.subtitleLangs), settings.subtitleAuto) : null;
+
+  const buildExtra = (formatId: string | null, ctx?: { playlist?: PlaylistCtx | null; clip?: Clip | null; subs?: SubtitleOptions | null }): ExtraOptions => ({
+    // The proxy applies in both modes: it is about reaching the internet, not about choices.
+    proxy: settings.proxy.trim() || null,
+    subs: ctx?.subs !== undefined ? ctx.subs : defaultSubs(),
     ...(advanced
       ? {
           sponsorblock: settings.sponsorblock,
           cookies_from_browser: settings.cookiesBrowser,
-          subtitles: settings.subtitles,
           audio_format: settings.audioFormat,
           format_id: formatId,
           rate_limit: settings.rateLimit.trim() || null,
@@ -645,24 +584,49 @@ export default function App() {
         thumbnail: r.thumbnail,
         preset: r.preset,
         outDir: effectiveOutDir,
-        extra: buildExtra(r.formatId, { playlist: r.playlist, clip: r.clip }),
+        extra: buildExtra(r.formatId, { playlist: r.playlist, clip: r.clip, subs: r.subs }),
         clipKey: clipKeyOf(r.clip ?? null),
         placeholderTitle: r.placeholderTitle,
+        channel: r.channel,
       })),
     );
     setNote({ title: "Added to Downloads", subtitle: todo.length === 1 ? todo[0].title : `${todo.length} items` });
     return todo.length;
   };
 
-  const queueDownload = (target: string, title: string, thumbnail: string, preset: Preset, formatId: string | null, playlist?: PlaylistCtx | null) =>
-    submitDownloads([{ url: target, title, thumbnail, preset, formatId, playlist }]);
+  const queueDownload = (target: string, title: string, thumbnail: string, preset: Preset, formatId: string | null, playlist?: PlaylistCtx | null, channel?: string) =>
+    submitDownloads([{ url: target, title, thumbnail, preset, formatId, playlist, channel }]);
+
+  /** Queues earlier downloads again, each in the format it had. Clips can't be repeated from what history keeps. */
+  const downloadAgainMany = async (picked: HistoryItem[]) => {
+    const whole = picked.filter((h) => !h.clip);
+    if (whole.length < picked.length) showFlash(`${picked.length - whole.length} clip${picked.length - whole.length === 1 ? " was" : "s were"} skipped. Download clips again from their video.`);
+    if (whole.length === 0) return;
+    const added = await submitDownloads(whole.map((h) => ({ url: h.url, title: h.title, thumbnail: h.thumbnail, preset: h.preset, formatId: null, channel: h.channel })));
+    if (added > 0) setPage("downloads");
+  };
+
+  const exportHistory = async (rows: HistoryRow[], format: "csv" | "json") => {
+    try {
+      const target = await saveDialog({
+        title: "Export history",
+        defaultPath: `kaisu-history.${format}`,
+        filters: [{ name: format.toUpperCase(), extensions: [format] }],
+      });
+      if (!target) return;
+      await exportText(target, format === "csv" ? historyToCsv(rows) : historyToJson(rows));
+      setNote({ title: "History exported", subtitle: `${rows.length} item${rows.length === 1 ? "" : "s"}` });
+    } catch (e) {
+      showFlash(errorText(e), true);
+    }
+  };
 
   const downloadCurrent = async (choice: DownloadChoice) => {
     if (!media) return false;
     const key = clipKeyOf(choice.clip);
     const title = choice.clip ? `${media.info.title} (clip ${clipLabel(key)})` : media.info.title;
     const added = await submitDownloads(
-      [{ url: media.url, title, thumbnail: media.info.thumbnail ?? "", preset: choice.preset, formatId: choice.formatId, clip: choice.clip }],
+      [{ url: media.url, title, thumbnail: media.info.thumbnail ?? "", preset: choice.preset, formatId: choice.formatId, clip: choice.clip, channel: media.info.uploader ?? undefined, subs: choice.subs }],
       choice.estimate,
     );
     return added > 0;
@@ -671,7 +635,8 @@ export default function App() {
   const activeOptions = [
     settings.sponsorblock !== "off" && `SponsorBlock ${settings.sponsorblock}`,
     settings.cookiesBrowser && `cookies from ${settings.cookiesBrowser}`,
-    settings.subtitles && "subtitles",
+    settings.subtitleMode !== "off" && `subtitles (${settings.subtitleLangs.trim() || "none chosen"})`,
+    settings.proxy.trim() && "proxy",
     settings.rateLimit.trim() && `limit ${settings.rateLimit.trim()}/s`,
     settings.customArgs.trim() && "custom arguments",
     settings.audioFormat !== "mp3" && `audio ${settings.audioFormat.toUpperCase()}`,
@@ -701,6 +666,7 @@ export default function App() {
       formatId: null,
       playlist: listingCtx(r),
       placeholderTitle: search?.kind === "links",
+      channel: r.channel ?? undefined,
     }));
 
   const downloadPicked = async (picked: SearchResult[], kind: "video" | "audio", quality: BatchQuality) => {
@@ -737,176 +703,51 @@ export default function App() {
 
   const needsSetup = setupInfo !== null && ((!setupInfo.engine.ready && !setupSkipped) || setupRequested);
 
-  // ---- when downloads finish: notification, "when done" action ----
-  const prevBusy = useRef(0);
-  useEffect(() => {
-    // count failures once each
-    for (const i of items) {
-      if (i.status === "error" && !session.current.failedIds.has(i.id)) {
-        session.current.failedIds.add(i.id);
-        session.current.failed += 1;
-      }
-    }
-    const was = prevBusy.current;
-    prevBusy.current = busyCount;
-    if (!(was > 0 && busyCount === 0)) return;
-
-    const { completed, failed, lastDir } = session.current;
-    session.current = { completed: 0, failed: 0, lastDir: "", failedIds: new Set() };
-    if (completed + failed === 0) return;
-
-    const body = completed > 0 ? `${completed} downloaded${failed ? `, ${failed} failed` : ""}` : `${failed} failed`;
-    setNote({ title: completed > 0 ? "Downloads finished" : "Downloads failed", subtitle: body });
-    if (settingsRef.current.notifyWhenDone && !document.hasFocus()) notify("Kaisu: downloads finished", body);
-
-    const action = whenDone;
-    if (action !== "nothing" && completed > 0) {
-      setWhenDone("nothing");
-      const folder = lastDir || effectiveOutDir;
-      if (action === "folder" && folder) openFolder(folder).catch((e) => showFlash(errorText(e), true));
-      else if (action === "quit") quitApp().catch(() => {});
-      else if (action === "sleep" || action === "shutdown") setCountdown({ action, seconds: COUNTDOWN_SECONDS });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [busyCount, items]);
-
-  useEffect(() => {
-    if (!countdown) return;
-    if (countdown.seconds <= 0) {
-      systemPower(countdown.action).catch((e) => showFlash(errorText(e), true));
-      setCountdown(null);
-      return;
-    }
-    const t = setTimeout(() => setCountdown({ ...countdown, seconds: countdown.seconds - 1 }), 1000);
-    return () => clearTimeout(t);
-  }, [countdown, showFlash]);
-
-  // ---- tray, close button and background mode ----
-  useEffect(() => {
-    if (!settingsLoaded) return;
-    setTrayStatus(activeDownloads.length, queuedCount, pausedCount, settings.closeMode).catch(() => {});
-  }, [activeDownloads.length, queuedCount, pausedCount, settings.closeMode, settingsLoaded]);
-
-  useEffect(() => {
-    let dead = false;
-    const offs: Array<() => void> = [];
-    const on = (name: string, fn: (payload: unknown) => void) =>
-      listen(name, (e) => fn(e.payload))
-        .then((off) => (dead ? off() : offs.push(off)))
-        .catch(() => {});
-    on("tray-action", (action) => (action === "pause_all" ? actionsRef.current.pauseAll() : actionsRef.current.resumeAll()));
-    on("background-started", () => notify("Kaisu is still downloading", "It keeps going in the background. Open it again from the tray icon, or launch Kaisu again."));
-    return () => {
-      dead = true;
-      offs.forEach((off) => off());
-    };
-  }, []);
-
-  // ---- links dropped on the window ----
-  useEffect(() => {
-    let depth = 0;
-    const hasLink = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).some((t) => t === "text/uri-list" || t === "text/plain" || t === "text/html");
-    const onEnter = (e: DragEvent) => {
-      if (!hasLink(e)) return;
-      depth++;
-      setDragging(true);
-    };
-    const onOver = (e: DragEvent) => {
-      if (hasLink(e)) e.preventDefault(); // allows dropping here
-    };
-    const onLeave = () => {
-      depth = Math.max(0, depth - 1);
-      if (depth === 0) setDragging(false);
-    };
-    const onDrop = (e: DragEvent) => {
-      e.preventDefault();
-      depth = 0;
-      setDragging(false);
-      const text = e.dataTransfer?.getData("text/uri-list") || e.dataTransfer?.getData("text/plain") || "";
-      const links = extractUrls(text);
-      if (links.length === 1) submitLink(links[0]);
-      else if (links.length > 1) showLinks(links);
-      else showFlash("That doesn't contain a link Kaisu can use.", true);
-    };
-    document.addEventListener("dragenter", onEnter);
-    document.addEventListener("dragover", onOver);
-    document.addEventListener("dragleave", onLeave);
-    document.addEventListener("drop", onDrop);
-    return () => {
-      document.removeEventListener("dragenter", onEnter);
-      document.removeEventListener("dragover", onOver);
-      document.removeEventListener("dragleave", onLeave);
-      document.removeEventListener("drop", onDrop);
-    };
-  }, [submitLink, showLinks, showFlash]);
-
-  // ---- offer to download a video link that was just copied ----
-  useEffect(() => {
-    if (!settingsLoaded || !settings.watchClipboard || !engine?.ready) return;
-    const check = async () => {
-      if (!document.hasFocus()) return;
-      try {
-        const text = ((await readText()) ?? "").trim();
-        const links = extractUrls(text);
-        if (links.length !== 1 || links[0] !== text || !isMediaHost(text)) return;
-        if (text === lastOffered.current || text === urlRef.current.trim()) return;
-        lastOffered.current = text;
-        setClipboardOffer(text);
-      } catch {
-        /* the clipboard may be empty or hold something that isn't text */
-      }
-    };
-    check();
-    window.addEventListener("focus", check);
-    return () => window.removeEventListener("focus", check);
-  }, [settingsLoaded, settings.watchClipboard, engine?.ready]);
-
-  // ---- keyboard shortcuts ----
-  const shortcutHandler = useRef<(e: KeyboardEvent) => void>(() => {});
-  shortcutHandler.current = (e: KeyboardEvent) => {
-    if (e.isComposing) return;
-    // Dialogs and menus handle their own keys.
-    if (document.querySelector("[role=alertdialog], [role=dialog][aria-modal=true], [role=menu]")) return;
-    const mod = e.ctrlKey || e.metaKey;
-    const key = e.key.toLowerCase();
-    const typing = !!(e.target as HTMLElement).closest("input, textarea, select, [contenteditable=true]");
-
-    if (e.key === "F1" || (mod && key === "/")) {
-      e.preventDefault();
-      setShortcutsOpen(true);
-    } else if (mod && !e.altKey && ["f", "l", "k"].includes(key)) {
-      e.preventDefault();
+  // ---- behaviours that live in their own hooks ----
+  const { whenDone, setWhenDone, countdown, cancelCountdown } = useBatchFinish({
+    items,
+    busyCount,
+    session,
+    notifyWhenDone: settings.notifyWhenDone,
+    outDir: effectiveOutDir,
+    showFlash,
+    announce: setNote,
+  });
+  const trayOk = useTrayBridge({
+    active: activeDownloads.length,
+    queued: queuedCount,
+    paused: pausedCount,
+    closeMode: settings.closeMode,
+    ready: settingsLoaded,
+    pauseAll,
+    resumeAll,
+  });
+  const dragging = useDropLinks({
+    onLink: submitLink,
+    onLinks: showLinks,
+    onNothing: () => showFlash("That doesn't contain a link Kaisu can use.", true),
+  });
+  const clipboard = useClipboardOffer(settingsLoaded && settings.watchClipboard && !!engine?.ready, url);
+  useShortcuts({
+    page,
+    hasResults: !!search,
+    hasOpenVideo: !!visibleMedia,
+    anythingPaused: pausedCount > 0,
+    hasOutDir: !!effectiveOutDir,
+    selectedCount: checked.size,
+    showShortcuts: () => setShortcutsOpen(true),
+    goTo: setPage,
+    focusSearch: () => {
       setPage("search");
       searchInput.current?.focus();
       searchInput.current?.select();
-    } else if (mod && !e.altKey && ["1", "2", "3", "4"].includes(key)) {
-      e.preventDefault();
-      setPage((["search", "downloads", "history", "settings"] as Page[])[Number(key) - 1]);
-    } else if (mod && key === ",") {
-      e.preventDefault();
-      setPage("settings");
-    } else if (mod && key === "a" && !typing && page === "search" && search) {
-      e.preventDefault();
-      toggleAll(true);
-    } else if (mod && key === "d" && visibleMedia) {
-      e.preventDefault();
-      downloadCurrent({ preset: e.shiftKey ? "audio" : "best", formatId: null, clip: null, estimate: null });
-    } else if (mod && e.shiftKey && key === "p") {
-      e.preventDefault();
-      pausedCount > 0 ? resumeAll() : pauseAll();
-    } else if (mod && key === "o" && effectiveOutDir) {
-      e.preventDefault();
-      openFolder(effectiveOutDir).catch((err) => showFlash(errorText(err), true));
-    } else if (e.key === "Escape") {
-      if (checked.size > 0) setChecked(new Set());
-      else if (typing) (e.target as HTMLElement).blur();
-    }
-  };
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => shortcutHandler.current(e);
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, []);
+    },
+    selectAll: () => toggleAll(true),
+    clearSelection: () => setChecked(new Set()),
+    downloadOpenVideo: (asAudio) => void downloadCurrent({ preset: asAudio ? "audio" : "best", formatId: null, clip: null, estimate: null, subs: defaultSubs() }),
+    togglePauseAll: () => (pausedCount > 0 ? resumeAll() : pauseAll()),
+    openDownloadFolder: () => openFolder(effectiveOutDir).catch((err) => showFlash(errorText(err), true)),
+  });
 
   const listingTitle =
     search?.kind === "playlist" || search?.kind === "channel" ? `${search.title ?? ""}${search.total ? ` · ${search.total} video${search.total === 1 ? "" : "s"}` : ""}` : search?.kind === "links" ? search.title : undefined;
@@ -937,7 +778,7 @@ export default function App() {
           : runSearch(search.query, Math.min(search.limit + SEARCH_PAGE_SIZE, SEARCH_MAX))
       }
       onDownloadChecked={downloadChecked}
-      onDownloadOne={(r, preset) => queueDownload(r.url, r.title, r.thumbnail, preset, null, listingCtx(r))}
+      onDownloadOne={(r, preset) => queueDownload(r.url, r.title, r.thumbnail, preset, null, listingCtx(r), r.channel ?? undefined)}
       onCopy={copyText}
       onOpenInBrowser={(u) => openUrl(u).catch((e) => showFlash(errorText(e), true))}
       onSearchFor={searchFor}
@@ -997,7 +838,7 @@ export default function App() {
   }
 
   const lcd: LcdState = (() => {
-    if (searching || loadingMore) return { title: busyWhat === "list" ? "Loading the list…" : "Searching YouTube…", subtitle: search?.query ?? url.trim(), progress: null, busy: true };
+    if (searching || loadingMore) return { title: busyWhat === "list" ? "Loading the list…" : `Searching ${sourceName}…`, subtitle: search?.query ?? url.trim(), progress: null, busy: true };
     if (loadingInfo) return { title: "Looking up video…", subtitle: url.trim(), progress: null, busy: true };
     // A short confirmation ("Link copied", "Added to Downloads") wins for its few seconds, then progress returns.
     if (note) return { ...note, progress: activeDownloads.length > 0 ? activeDownloads.reduce((sum, i) => sum + i.progress, 0) / activeDownloads.length : null };
@@ -1014,10 +855,11 @@ export default function App() {
         progress: mean,
       };
     }
+    if (schedule.paused && (queuedCount > 0 || pausedCount > 0)) return { title: "Paused by your schedule", subtitle: "Downloads continue when the rule ends", progress: null };
     if (queuedCount > 0) return { title: "Waiting to download…", subtitle: `${queuedCount} in queue`, progress: null };
     if (pausedCount > 0) return { title: "Downloads paused", subtitle: `${pausedCount} paused. Press Resume to continue`, progress: null };
     if (engine && !engine.ready) return { title: "Helper tools missing", subtitle: "Open Settings, then Repair", progress: null };
-    return { title: "Kaisu", subtitle: "Paste a link or search YouTube", progress: null };
+    return { title: "Kaisu", subtitle: `Paste a link or search ${sourceName}`, progress: null };
   })();
 
   const viewKey = page === "search" ? "viewSearch" : page === "downloads" ? "viewQueue" : "viewHistory";
@@ -1036,7 +878,7 @@ export default function App() {
       : page === "downloads"
         ? `${items.length} download${items.length === 1 ? "" : "s"}${activeDownloads.length ? `, ${activeDownloads.length} active` : ""}`
         : page === "history"
-          ? `${historyShown === history.length ? history.length : `${historyShown} of ${history.length}`} item${history.length === 1 ? "" : "s"}`
+          ? `${historyStats.count === history.length ? history.length : `${historyStats.count} of ${history.length}`} item${history.length === 1 ? "" : "s"}${historyStats.bytes > 0 ? `, ${formatBytes(historyStats.bytes)}` : ""}`
           : "";
 
   const artwork = { src: visibleMedia?.thumbnail ?? null, caption: visibleMedia?.title ?? "No video selected" };
@@ -1066,13 +908,35 @@ export default function App() {
         <Lcd {...lcd} />
 
         <div className="toolbar-group end" data-tauri-drag-region>
+          <select
+            value={source}
+            onChange={(e) => {
+              const next = e.target.value as SearchSource;
+              changeSettings({ searchSource: next });
+              // Showing search results? Search the same words on the new site.
+              if (search?.kind === "search" && search.query) {
+                setMedia(null);
+                runSearch(search.query, SEARCH_PAGE_SIZE);
+              }
+            }}
+            className="source-select"
+            aria-label="Search source"
+            title="Where to search"
+          >
+            {SEARCH_SOURCES.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.label}
+              </option>
+            ))}
+          </select>
           <SearchField
             value={url}
             onChange={setUrl}
             onSubmit={handleSubmit}
             inputRef={searchInput}
             busy={searching || loadingInfo}
-            placeholder={advanced ? "Search or paste a link" : "Search YouTube or paste a link"}
+            placeholder={`Search ${sourceName} or paste a link`}
+            sourceName={sourceName}
           />
         </div>
       </header>
@@ -1094,7 +958,7 @@ export default function App() {
             Downloads finished. Kaisu will {countdown.action === "sleep" ? "put the computer to sleep" : "shut the computer down"} in {countdown.seconds} second
             {countdown.seconds === 1 ? "" : "s"}.
           </span>
-          <button className="btn small" onClick={() => setCountdown(null)}>
+          <button className="btn small" onClick={cancelCountdown}>
             Cancel
           </button>
         </div>
@@ -1130,23 +994,23 @@ export default function App() {
         </div>
       )}
 
-      {clipboardOffer && clipboardOffer !== url.trim() && (
+      {clipboard.offer && clipboard.offer !== url.trim() && (
         <div role="status" className="banner" style={{ background: "linear-gradient(#eef5ff,#dcebff)", borderColor: "#9fbde8", color: "#1d3f73" }}>
           <Link2 className="w-3.5 h-3.5" />
           <span>
-            You copied a link: <b className="selectable">{shortLink(clipboardOffer)}</b>
+            You copied a link: <b className="selectable">{shortLink(clipboard.offer)}</b>
           </span>
           <button
             className="btn small primary"
             onClick={() => {
-              const link = clipboardOffer;
-              setClipboardOffer(null);
-              submitLink(link);
+              const link = clipboard.offer;
+              clipboard.dismiss();
+              if (link) submitLink(link);
             }}
           >
             Look it up
           </button>
-          <button className="row-btn" aria-label="Dismiss" title="Dismiss" onClick={() => setClipboardOffer(null)}>
+          <button className="row-btn" aria-label="Dismiss" title="Dismiss" onClick={clipboard.dismiss}>
             <X className="w-3 h-3" />
           </button>
         </div>
@@ -1230,6 +1094,7 @@ export default function App() {
                     key={media?.url}
                     info={visibleMedia}
                     mode={mode}
+                    subtitleDefaults={advanced ? { mode: settings.subtitleMode, langs: settings.subtitleLangs, auto: settings.subtitleAuto } : { mode: "off", langs: settings.subtitleLangs, auto: true }}
                     audioLabel={audioLabel}
                     activeOptions={activeOptions}
                     downloads={downloadsOfCurrent}
@@ -1284,15 +1149,26 @@ export default function App() {
             <HistoryView
               items={history}
               exists={existing}
+              sizes={sizes}
+              sort={settings.historySort}
+              sortDesc={settings.historySortDesc}
+              onSortChange={(historySort, historySortDesc) => changeSettings({ historySort, historySortDesc })}
               view={settings.viewHistory}
               advanced={advanced}
               audioLabel={audioLabel}
               onOpen={openDownloaded}
               onReveal={revealDownloaded}
               onRemove={(id) => updateHistory(history.filter((h) => h.id !== id))}
+              onRemoveMany={(ids) => {
+                const gone = new Set(ids);
+                updateHistory(history.filter((h) => !gone.has(h.id)));
+              }}
               onClear={() => updateHistory([])}
-              onDownloadAgain={(item, preset) => queueDownload(item.url, item.title, item.thumbnail, preset, null)}
-              onShownChange={setHistoryShown}
+              onDownloadAgainMany={downloadAgainMany}
+              onExport={exportHistory}
+              onRecheck={recheck}
+              onDownloadAgain={(item, preset) => queueDownload(item.url, item.title, item.thumbnail, preset, null, null, item.channel)}
+              onShownChange={(count, bytes) => setHistoryStats((prev) => (prev.count === count && prev.bytes === bytes ? prev : { count, bytes }))}
             />
           )}
 
@@ -1311,6 +1187,8 @@ export default function App() {
               onOpenSetup={() => setSetupRequested(true)}
               onRevealEngine={() => revealEngine().catch((e) => showFlash(errorText(e), true))}
               onShowShortcuts={() => setShortcutsOpen(true)}
+              onShowTour={() => setTourOpen(true)}
+              scheduleState={schedule}
               trayAvailable={trayOk}
             />
           )}
@@ -1356,6 +1234,14 @@ export default function App() {
       />
 
       {confirm.dialog}
+      {(tourOpen || (settingsLoaded && queueLoaded && !settings.tourSeen && !!engine?.ready)) && (
+        <Tour
+          onFinish={() => {
+            setTourOpen(false);
+            changeSettings({ tourSeen: true });
+          }}
+        />
+      )}
       {shortcutsOpen && <ShortcutsDialog onClose={() => setShortcutsOpen(false)} />}
       {dragging && (
         <div className="drop-overlay" aria-hidden="true">

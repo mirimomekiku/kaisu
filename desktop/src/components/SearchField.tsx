@@ -6,11 +6,13 @@ interface Props {
   onSubmit: () => void;
   busy: boolean;
   placeholder: string;
+  /** What is searched, for the accessible name ("YouTube"). */
+  sourceName?: string;
   inputRef?: React.Ref<HTMLInputElement>;
 }
 
 /** The rounded Aqua search field. One box for both pasting a link and searching YouTube. */
-export default function SearchField({ value, onChange, onSubmit, busy, placeholder, inputRef }: Props) {
+export default function SearchField({ value, onChange, onSubmit, busy, placeholder, inputRef, sourceName = "YouTube" }: Props) {
   return (
     <form
       className="searchfield"
@@ -27,7 +29,7 @@ export default function SearchField({ value, onChange, onSubmit, busy, placehold
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        aria-label="Search YouTube or paste a link"
+        aria-label={`Search ${sourceName} or paste a link`}
         spellCheck={false}
         autoComplete="off"
         autoFocus

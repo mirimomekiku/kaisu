@@ -31,6 +31,8 @@ export interface DownloadItem {
   clipKey?: string;
   /** The title is only the link for now; yt-dlp will tell us the real one. */
   placeholderTitle?: boolean;
+  /** Who published it (for history columns and sorting). */
+  channel?: string;
 }
 
 export interface EnqueueInput {
@@ -42,6 +44,7 @@ export interface EnqueueInput {
   extra: ExtraOptions;
   clipKey?: string;
   placeholderTitle?: boolean;
+  channel?: string;
 }
 
 const MAX_LOG_LINES = 400;
@@ -56,11 +59,24 @@ const newId = () => `${Date.now().toString(36)}-${(nextId++).toString(36)}`;
 export const sameDownload = (a: { url: string; preset: Preset; clipKey?: string }, b: { url: string; preset: Preset; clipKey?: string }) =>
   a.url === b.url && a.preset === b.preset && (a.clipKey ?? "") === (b.clipKey ?? "");
 
+export interface SchedulePolicy {
+  /** Nothing should run right now (a pause rule is active). */
+  blocked: boolean;
+  /** Speed limit that replaces the one set on each download, while a limit rule is active. */
+  limit: string | null;
+}
+
+const NO_POLICY: SchedulePolicy = { blocked: false, limit: null };
+
 /** Download queue. Items wait as "queued" until a slot (`concurrency`) frees up; they can be paused and resumed. */
-export function useDownloads(concurrency: number, onCompleted: (item: DownloadItem) => void) {
+export function useDownloads(concurrency: number, onCompleted: (item: DownloadItem) => void, policy: SchedulePolicy = NO_POLICY) {
   const [items, setItems] = useState<DownloadItem[]>([]);
   const started = useRef(new Set<string>());
   const pausing = useRef(new Set<string>());
+  /** Downloads the schedule stopped (or restarted to change their speed limit); they carry on by themselves. */
+  const autoPaused = useRef(new Set<string>());
+  const policyRef = useRef(policy);
+  policyRef.current = policy;
   const itemsRef = useRef(items);
   itemsRef.current = items;
   const onCompletedRef = useRef(onCompleted);
@@ -93,7 +109,15 @@ export function useDownloads(concurrency: number, onCompleted: (item: DownloadIt
         }
         case "cancelled":
           // Pausing stops the process the same way cancelling does; the difference is what we keep.
-          if (pausing.current.delete(id)) patch(id, () => ({ status: "paused", speed: null, eta: null }));
+          if (pausing.current.delete(id)) {
+            if (autoPaused.current.has(id) && !policyRef.current.blocked) {
+              autoPaused.current.delete(id);
+              started.current.delete(id);
+              patch(id, () => ({ status: "queued", speed: null, eta: null }));
+            } else {
+              patch(id, () => ({ status: "paused", speed: null, eta: null }));
+            }
+          }
           else patch(id, () => ({ status: "cancelled", speed: null, eta: null }));
           break;
         case "error":
@@ -107,6 +131,7 @@ export function useDownloads(concurrency: number, onCompleted: (item: DownloadIt
 
   // Scheduler: start queued items while there are free slots.
   useEffect(() => {
+    if (policy.blocked) return;
     const running = items.filter((it) => isActive(it.status)).length;
     const free = Math.max(0, concurrency - running);
     if (free === 0) return;
@@ -124,11 +149,47 @@ export function useDownloads(concurrency: number, onCompleted: (item: DownloadIt
 
     for (const it of toStart) {
       startDownload(
-        { id: it.id, url: it.url, preset: it.preset, out_dir: it.outDir, extra: it.extra },
+        { id: it.id, url: it.url, preset: it.preset, out_dir: it.outDir, extra: policy.limit ? { ...it.extra, rate_limit: policy.limit } : it.extra },
         (e) => handleEvent(it.id, e),
       ).catch((err) => handleEvent(it.id, { kind: "error", message: errorText(err) }));
     }
-  }, [items, concurrency, handleEvent]);
+  }, [items, concurrency, handleEvent, policy.blocked, policy.limit]);
+
+  // The schedule changed. A pause rule stops what is running (and brings it back afterwards); a new speed limit
+  // only takes effect when a download starts, so running ones are restarted to pick it up.
+  const lastPolicy = useRef(policy);
+  useEffect(() => {
+    const before = lastPolicy.current;
+    lastPolicy.current = policy;
+    if (before.blocked === policy.blocked && before.limit === policy.limit) return;
+    const running = itemsRef.current.filter((it) => isActive(it.status));
+    if (policy.blocked) {
+      for (const it of running) {
+        autoPaused.current.add(it.id);
+        pausing.current.add(it.id);
+        cancelDownload(it.id).catch(() => pausing.current.delete(it.id));
+      }
+      return;
+    }
+    if (before.blocked) {
+      // Resume what the pause rule stopped.
+      for (const id of [...autoPaused.current]) {
+        const it = itemsRef.current.find((x) => x.id === id);
+        if (it?.status === "paused") {
+          autoPaused.current.delete(id);
+          started.current.delete(id);
+          setItems((prev) => prev.map((x) => (x.id === id && x.status === "paused" ? { ...x, status: "queued", speed: null, eta: null } : x)));
+        }
+        // Still stopping: the "cancelled" event will bring it back, because we are no longer blocked.
+      }
+      return;
+    }
+    for (const it of running) {
+      autoPaused.current.add(it.id);
+      pausing.current.add(it.id);
+      cancelDownload(it.id).catch(() => pausing.current.delete(it.id));
+    }
+  }, [policy]);
 
   const enqueue = useCallback((inputs: EnqueueInput | EnqueueInput[]) => {
     const list = Array.isArray(inputs) ? inputs : [inputs];
@@ -162,6 +223,7 @@ export function useDownloads(concurrency: number, onCompleted: (item: DownloadIt
 
   /** Stops a download but keeps what was downloaded so far; `resume` carries on from there. */
   const pause = useCallback((id: string) => {
+    autoPaused.current.delete(id);
     const it = itemsRef.current.find((x) => x.id === id);
     if (!it) return;
     if (it.status === "queued") {
@@ -177,6 +239,7 @@ export function useDownloads(concurrency: number, onCompleted: (item: DownloadIt
   }, []);
 
   const resume = useCallback((id: string) => {
+    autoPaused.current.delete(id);
     started.current.delete(id);
     pausing.current.delete(id);
     setItems((prev) => prev.map((x) => (x.id === id && x.status === "paused" ? { ...x, status: "queued", speed: null, eta: null } : x)));
@@ -228,6 +291,7 @@ export function useDownloads(concurrency: number, onCompleted: (item: DownloadIt
       log: [],
       clipKey: s.clipKey,
       placeholderTitle: s.placeholderTitle,
+      channel: s.channel,
     }));
     for (const r of restored) started.current.add(r.id);
     // Idempotent: restoring the same saved queue twice must not duplicate anything.

@@ -1,7 +1,10 @@
 import { load, type Store } from "@tauri-apps/plugin-store";
-import type { AudioFormat, Browser, CloseMode, ExtraOptions, Layout, NameStyle, Preset, SponsorBlock } from "./api";
+import type { AudioFormat, Browser, CloseMode, ExtraOptions, Layout, NameStyle, Preset, SearchSource, SponsorBlock } from "./api";
+import type { HistorySort } from "./history";
+import type { ScheduleRule } from "./schedule";
 
 export type Mode = "simple" | "advanced";
+export type SubtitleMode = "off" | "embed" | "file" | "both";
 
 /** How a list of items is laid out. Not every list offers every view. */
 export type ViewMode = "list" | "grid" | "compact" | "details";
@@ -18,7 +21,11 @@ export interface Settings {
   concurrency: number;
   sponsorblock: SponsorBlock;
   cookiesBrowser: Browser | null;
-  subtitles: boolean;
+  subtitleMode: SubtitleMode;
+  /** Preferred subtitle languages, comma separated ("en, es"). */
+  subtitleLangs: string;
+  /** Fall back to automatically generated captions. */
+  subtitleAuto: boolean;
   audioFormat: AudioFormat;
   rateLimit: string;
   customArgs: string;
@@ -34,6 +41,14 @@ export interface Settings {
   warnDuplicates: boolean;
   watchClipboard: boolean;
   closeMode: CloseMode;
+  // Network and searching.
+  searchSource: SearchSource;
+  proxy: string;
+  schedule: ScheduleRule[];
+  // History and onboarding.
+  historySort: HistorySort;
+  historySortDesc: boolean;
+  tourSeen: boolean;
 }
 
 export interface HistoryItem {
@@ -46,6 +61,8 @@ export interface HistoryItem {
   timestamp: number;
   /** Set for partial downloads (e.g. "80-165"), so a clip isn't mistaken for the whole video. */
   clip?: string;
+  /** Who published it. */
+  channel?: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -59,7 +76,9 @@ export const DEFAULT_SETTINGS: Settings = {
   concurrency: 2,
   sponsorblock: "off",
   cookiesBrowser: null,
-  subtitles: false,
+  subtitleMode: "off",
+  subtitleLangs: "en",
+  subtitleAuto: true,
   audioFormat: "mp3",
   rateLimit: "",
   customArgs: "",
@@ -73,6 +92,12 @@ export const DEFAULT_SETTINGS: Settings = {
   warnDuplicates: true,
   watchClipboard: true,
   closeMode: "downloads",
+  searchSource: "youtube",
+  proxy: "",
+  schedule: [],
+  historySort: "date",
+  historySortDesc: true,
+  tourSeen: false,
 };
 
 /** A download that was unfinished when the app closed. Stored so it can be resumed next time. */
@@ -88,6 +113,7 @@ export interface SavedDownload {
   progress: number;
   clipKey?: string;
   placeholderTitle?: boolean;
+  channel?: string;
 }
 
 const MAX_HISTORY = 500;
@@ -97,8 +123,11 @@ const getStore = () => (storePromise ??= load("kaisu.json", { defaults: {}, auto
 
 export async function loadSettings(): Promise<Settings> {
   try {
-    const saved = await (await getStore()).get<Partial<Settings>>("settings");
-    return { ...DEFAULT_SETTINGS, ...saved };
+    const saved = await (await getStore()).get<Partial<Settings> & { subtitles?: boolean }>("settings");
+    const merged: Settings = { ...DEFAULT_SETTINGS, ...saved };
+    // Before language choice existed there was one on/off switch for English subtitles.
+    if (saved?.subtitles === true && saved.subtitleMode === undefined) merged.subtitleMode = "embed";
+    return merged;
   } catch (e) {
     console.warn("Could not read settings", e);
     return DEFAULT_SETTINGS;

@@ -1,9 +1,12 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { AlertTriangle, FolderOpen, Keyboard, RefreshCw, Wrench } from "lucide-react";
-import type { AudioFormat, Browser, CloseMode, Component, EngineInfo, Layout, NameStyle, SponsorBlock } from "../lib/api";
+import { AlertTriangle, FolderOpen, Keyboard, RefreshCw, Route, Wrench } from "lucide-react";
+import { errorText, testProxy, type AudioFormat, type Browser, type CloseMode, type Component, type EngineInfo, type Layout, type NameStyle, type SponsorBlock } from "../lib/api";
+import type { ScheduleState } from "../lib/schedule";
+import { SUBTITLE_MODE_LABEL } from "../lib/subtitles";
+import ScheduleEditor from "./ScheduleEditor";
 import { LAYOUT_LABEL, NAME_LABEL, checkCustomName, previewPath } from "../lib/output";
-import type { Mode, Settings } from "../lib/storage";
+import type { Mode, Settings, SubtitleMode } from "../lib/storage";
 
 export type EngineState =
   | { kind: "idle" }
@@ -20,6 +23,8 @@ interface Props {
   onOpenSetup: () => void;
   onRevealEngine: () => void;
   onShowShortcuts: () => void;
+  onShowTour: () => void;
+  scheduleState: ScheduleState;
   /** null while still being checked. */
   trayAvailable: boolean | null;
 }
@@ -66,7 +71,16 @@ function componentLine(name: string, c: Component | undefined) {
   return `${name} ${c.version ?? "ready"}${c.source ? ` (${c.source})` : ""}`;
 }
 
-export default function SettingsPage({ settings, effectiveOutDir, engine, engineState, onChange, onCheckUpdate, onOpenSetup, onRevealEngine, onShowShortcuts, trayAvailable }: Props) {
+export default function SettingsPage({ settings, effectiveOutDir, engine, engineState, onChange, onCheckUpdate, onOpenSetup, onRevealEngine, onShowShortcuts, onShowTour, scheduleState, trayAvailable }: Props) {
+  const [proxyTest, setProxyTest] = useState<{ busy: boolean; text?: string; error?: boolean }>({ busy: false });
+  const runProxyTest = async () => {
+    setProxyTest({ busy: true });
+    try {
+      setProxyTest({ busy: false, text: await testProxy(settings.proxy) });
+    } catch (e) {
+      setProxyTest({ busy: false, text: errorText(e), error: true });
+    }
+  };
   const advanced = settings.mode === "advanced";
 
   const customError = advanced ? checkCustomName(settings.customName) : null;
@@ -237,12 +251,35 @@ export default function SettingsPage({ settings, effectiveOutDir, engine, engine
               ))}
             </select>
           </Row>
-          <div className="pref-row">
-            <label className="flex items-center gap-2">
-              <input type="checkbox" checked={settings.subtitles} onChange={(e) => onChange({ subtitles: e.target.checked })} />
-              Embed English subtitles when available
-            </label>
-          </div>
+          <Row label="Subtitles" hint="The starting choice for new downloads. You can change it for each video.">
+            <select value={settings.subtitleMode} onChange={(e) => onChange({ subtitleMode: e.target.value as SubtitleMode })} className="field" aria-label="Subtitles">
+              {(Object.keys(SUBTITLE_MODE_LABEL) as SubtitleMode[]).map((m) => (
+                <option key={m} value={m}>
+                  {SUBTITLE_MODE_LABEL[m]}
+                </option>
+              ))}
+            </select>
+          </Row>
+          {settings.subtitleMode !== "off" && (
+            <>
+              <Row label="Subtitle languages" hint='Language codes separated by commas, like "en, de". Playlists use these directly.'>
+                <input
+                  value={settings.subtitleLangs}
+                  onChange={(e) => onChange({ subtitleLangs: e.target.value })}
+                  spellCheck={false}
+                  aria-label="Subtitle languages"
+                  className="field mono"
+                  style={{ width: 140 }}
+                />
+              </Row>
+              <div className="pref-row">
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" checked={settings.subtitleAuto} onChange={(e) => onChange({ subtitleAuto: e.target.checked })} />
+                  Use automatic captions when there are no human-made ones
+                </label>
+              </div>
+            </>
+          )}
           <div className="pref-row">
             <label className="flex items-center gap-2">
               <input type="checkbox" checked={settings.verbose} onChange={(e) => onChange({ verbose: e.target.checked })} />
@@ -300,6 +337,45 @@ export default function SettingsPage({ settings, effectiveOutDir, engine, engine
         </Row>
       </Group>
 
+      <Group title="Network" hint="Send everything Kaisu does (searching, downloading, updating) through a proxy.">
+        <div className="pref-row" style={{ display: "block" }}>
+          <div className="flex items-center gap-2 flex-wrap">
+            <label className="flex items-center gap-2">
+              Proxy
+              <input
+                value={settings.proxy}
+                onChange={(e) => {
+                  onChange({ proxy: e.target.value });
+                  setProxyTest({ busy: false });
+                }}
+                placeholder="none (e.g. socks5://127.0.0.1:1080)"
+                spellCheck={false}
+                aria-label="Proxy"
+                className="field mono"
+                style={{ width: 280 }}
+              />
+            </label>
+            <button className="btn small" disabled={!settings.proxy.trim() || proxyTest.busy} onClick={runProxyTest}>
+              <Route className="w-3 h-3" /> {proxyTest.busy ? "Testing…" : "Test proxy"}
+            </button>
+          </div>
+          {proxyTest.text && (
+            <p className="mt-1.5 mb-0" role={proxyTest.error ? "alert" : "status"} style={{ color: proxyTest.error ? "#b3261e" : "#2f7a2b" }}>
+              {proxyTest.text}
+            </p>
+          )}
+          <p className="pref-hint mt-1.5 mb-0">
+            http, https, socks4 and socks5 are supported. If it needs a login, it is part of the address (user:password@host) and is stored unencrypted in Kaisu's settings file.
+          </p>
+        </div>
+      </Group>
+
+      {advanced && (
+        <Group title="Bandwidth schedule" hint="Slow downloads down, or hold them back, at certain times (for example while you work). Applies in Advanced mode.">
+          <ScheduleEditor rules={settings.schedule} onChange={(schedule) => onChange({ schedule })} state={scheduleState} />
+        </Group>
+      )}
+
       <Group title="Helpers">
         <div className="pref-row">
           <label className="flex items-center gap-2">
@@ -316,6 +392,11 @@ export default function SettingsPage({ settings, effectiveOutDir, engine, engine
         <Row label="Keyboard shortcuts" hint="Press F1 anywhere to see them.">
           <button onClick={onShowShortcuts} className="btn small">
             <Keyboard className="w-3 h-3" /> Show shortcuts
+          </button>
+        </Row>
+        <Row label="Quick tour" hint="A short walk through the main parts of the window.">
+          <button onClick={onShowTour} className="btn small">
+            Show the tour again
           </button>
         </Row>
       </Group>
