@@ -199,6 +199,7 @@ await results(page).getByLabel("Select all").uncheck();
 await results(page).getByRole("button", { name: /result 2$/ }).focus();
 await page.keyboard.press("ContextMenu");
 check("keyboard: Menu key opens it", await menu(page).count() === 1);
+await page.waitForFunction(() => document.activeElement?.textContent?.trim() === "Show details", null, { timeout: 5000 }).catch(() => {});
 check("keyboard: first item focused", (await page.evaluate(() => document.activeElement?.textContent?.trim())) === "Show details");
 await page.keyboard.press("ArrowDown");
 await page.keyboard.press("ArrowDown");
