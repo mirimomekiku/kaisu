@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { CheckCircle2, Film, Loader2, Music, Radio, Video, X } from "lucide-react";
 import type { Preset, SearchResult } from "../lib/api";
 import { formatCount, formatDuration } from "../lib/format";
@@ -74,15 +74,20 @@ export default function SearchResults(p: Props) {
   const n = p.checked.size;
   const [menu, setMenu] = useState<{ x: number; y: number; result: SearchResult | null } | null>(null);
 
+  // On Windows the Menu key also sends a `contextmenu` event (after the key goes up), aimed at the wrong place.
+  // Opening from the key already happened, so that follow-up event is ignored.
+  const keyOpenedAt = useRef(0);
   const openMenu = (e: React.MouseEvent, result: SearchResult | null) => {
     e.preventDefault();
     e.stopPropagation();
+    if (Date.now() - keyOpenedAt.current < 600) return;
     setMenu({ x: e.clientX, y: e.clientY, result });
   };
   /** The keyboard way in: the Menu key or Shift+F10 opens the same menu next to the focused row. */
   const menuKey = (result: SearchResult) => (e: React.KeyboardEvent) => {
     if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
       e.preventDefault();
+      keyOpenedAt.current = Date.now();
       const box = e.currentTarget.getBoundingClientRect();
       setMenu({ x: box.left + 24, y: box.bottom, result });
     }
