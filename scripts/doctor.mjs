@@ -39,9 +39,9 @@ function distroIds() {
 function linuxPackages() {
   const ids = distroIds();
   const is = (...n) => n.some((x) => ids.includes(x));
-  if (is("fedora", "rhel", "centos")) return "sudo dnf install webkit2gtk4.1-devel librsvg2-devel openssl-devel gcc";
-  if (is("debian", "ubuntu")) return "sudo apt install libwebkit2gtk-4.1-dev librsvg2-dev libssl-dev build-essential";
-  if (is("arch")) return "sudo pacman -S webkit2gtk-4.1 librsvg openssl base-devel";
+  if (is("fedora", "rhel", "centos")) return "sudo dnf install webkit2gtk4.1-devel librsvg2-devel openssl-devel libayatana-appindicator-gtk3-devel gcc";
+  if (is("debian", "ubuntu")) return "sudo apt install libwebkit2gtk-4.1-dev librsvg2-dev libssl-dev libayatana-appindicator3-dev build-essential";
+  if (is("arch")) return "sudo pacman -S webkit2gtk-4.1 librsvg openssl libayatana-appindicator base-devel";
   if (is("suse", "opensuse")) return "sudo zypper install webkit2gtk3-devel librsvg-devel libopenssl-devel gcc";
   return "Install the WebKitGTK 4.1, librsvg and OpenSSL development packages for your distribution.";
 }
@@ -76,6 +76,8 @@ if (win) {
   const libs = ["webkit2gtk-4.1", "librsvg-2.0", "openssl"];
   const missing = libs.filter((l) => !pc(l));
   add("System libraries (WebKitGTK, librsvg, OpenSSL)", missing.length === 0, missing.length ? `missing: ${missing.join(", ")}` : "all found", linuxPackages());
+  const tray = run("sh", ["-c", "ldconfig -p 2>/dev/null | grep -E 'libayatana-appindicator3|libappindicator3'"]);
+  add("System tray library (optional)", true, tray ? "found" : "not found: Kaisu still works, just without a tray icon", linuxPackages());
   add("C compiler", !!(run("cc", ["--version"]) ?? run("gcc", ["--version"])), "needed to build native dependencies", linuxPackages());
 }
 
