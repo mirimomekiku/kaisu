@@ -1,12 +1,14 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { AlertTriangle, FolderOpen, Keyboard, RefreshCw, Route, Wrench } from "lucide-react";
-import { errorText, testProxy, type AudioFormat, type Browser, type CloseMode, type Component, type EngineInfo, type Layout, type NameStyle, type SponsorBlock } from "../lib/api";
+import { checkFolder, errorText, testProxy, type AudioFormat, type Browser, type CloseMode, type Component, type EngineInfo, type Layout, type NameStyle, type SponsorBlock } from "../lib/api";
 import type { ScheduleState } from "../lib/schedule";
 import { SUBTITLE_MODE_LABEL } from "../lib/subtitles";
+import { checkAudioQuality, checkProxy, checkSpeedLimit } from "../lib/validate";
+import { formatBytes } from "../lib/format";
 import ScheduleEditor from "./ScheduleEditor";
 import { LAYOUT_LABEL, NAME_LABEL, checkCustomName, previewPath } from "../lib/output";
-import type { Mode, Settings, SubtitleMode } from "../lib/storage";
+import { ACCENTS, type Accent, type Mode, type Settings, type SubtitleMode, type Theme } from "../lib/storage";
 
 export type EngineState =
   | { kind: "idle" }
@@ -72,6 +74,22 @@ function componentLine(name: string, c: Component | undefined) {
 }
 
 export default function SettingsPage({ settings, effectiveOutDir, engine, engineState, onChange, onCheckUpdate, onOpenSetup, onRevealEngine, onShowShortcuts, onShowTour, scheduleState, trayAvailable }: Props) {
+  // Is the download folder usable? Checked whenever it changes, so a problem shows up here and not mid-download.
+  const [folder, setFolder] = useState<{ problem?: string; free?: number }>({});
+  useEffect(() => {
+    if (!effectiveOutDir) return;
+    let stale = false;
+    checkFolder(effectiveOutDir).then(
+      (c) => !stale && setFolder({ free: c.free }),
+      (e) => !stale && setFolder({ problem: errorText(e) }),
+    );
+    return () => {
+      stale = true;
+    };
+  }, [effectiveOutDir]);
+  const proxyProblem = checkProxy(settings.proxy);
+  const speedProblem = checkSpeedLimit(settings.rateLimit);
+  const qualityProblem = checkAudioQuality(settings.audioQuality);
   const [proxyTest, setProxyTest] = useState<{ busy: boolean; text?: string; error?: boolean }>({ busy: false });
   const runProxyTest = async () => {
     setProxyTest({ busy: true });
@@ -127,6 +145,11 @@ export default function SettingsPage({ settings, effectiveOutDir, engine, engine
             </button>
           </div>
         </Row>
+        {(folder.problem || folder.free !== undefined) && (
+          <div className="pref-row" role={folder.problem ? "alert" : "status"} aria-label="Download folder check" style={{ color: folder.problem ? "#b3261e" : "#2f7a2b" }}>
+            {folder.problem ?? `Ready. ${formatBytes(folder.free ?? 0)} free.`}
+          </div>
+        )}
         <Row label="Folders" hint="How downloads are sorted inside that folder.">
           <select value={settings.layout} onChange={(e) => onChange({ layout: e.target.value as Layout })} className="field" aria-label="Folder layout">
             {(Object.keys(LAYOUT_LABEL) as Layout[]).map((k) => (
@@ -219,9 +242,78 @@ export default function SettingsPage({ settings, effectiveOutDir, engine, engine
                 placeholder="unlimited"
                 spellCheck={false}
                 aria-label="Speed limit"
+                aria-invalid={!!speedProblem}
                 className="field mono"
                 style={{ width: 110 }}
               />
+            </Row>
+            {speedProblem && (
+              <div className="pref-row" role="alert" style={{ color: "#b3261e" }}>
+                {speedProblem}
+              </div>
+            )}
+            <Row label="Audio quality" hint="Best, or a bitrate such as 192K. Applies to Audio only downloads.">
+              <input
+                value={settings.audioQuality}
+                onChange={(e) => onChange({ audioQuality: e.target.value })}
+                placeholder="best"
+                spellCheck={false}
+                aria-label="Default audio quality"
+                aria-invalid={!!qualityProblem}
+                className="field mono"
+                style={{ width: 110 }}
+              />
+            </Row>
+            {qualityProblem && (
+              <div className="pref-row" role="alert" style={{ color: "#b3261e" }}>
+                {qualityProblem}
+              </div>
+            )}
+            <div className="pref-row">
+              <label className="flex items-center gap-2">
+                <input type="checkbox" checked={settings.audioNormalize} onChange={(e) => onChange({ audioNormalize: e.target.checked })} />
+                Even out the volume of audio downloads
+              </label>
+            </div>
+            <div className="pref-row">
+              <label className="flex items-center gap-2">
+                <input type="checkbox" checked={settings.audioTrimSilence} onChange={(e) => onChange({ audioTrimSilence: e.target.checked })} />
+                Trim silence at the start and end of audio downloads
+              </label>
+            </div>
+            <Row label="Cover art" hint="For audio downloads started in bulk. A single download can choose its own.">
+              <select value={settings.coverMode} onChange={(e) => onChange({ coverMode: e.target.value as Settings["coverMode"] })} className="field" aria-label="Default cover art">
+                <option value="default">The video's thumbnail</option>
+                <option value="square">The thumbnail, cropped square</option>
+                <option value="none">No cover art</option>
+              </select>
+            </Row>
+            <Row label="Lyrics" hint="Looked up on the free LRCLIB service by artist and title.">
+              <select value={settings.lyricsMode} onChange={(e) => onChange({ lyricsMode: e.target.value as Settings["lyricsMode"] })} className="field" aria-label="Default lyrics">
+                <option value="off">No lyrics</option>
+                <option value="file">Save as a .lrc file</option>
+                <option value="embed">Put inside the song</option>
+                <option value="both">Both</option>
+              </select>
+            </Row>
+            <Row label="Try again after network errors" hint="Waits 5, 15, then 45 seconds between tries and keeps what was downloaded.">
+              <select value={settings.autoRetries} onChange={(e) => onChange({ autoRetries: Number(e.target.value) })} className="field" aria-label="Automatic retries">
+                {[0, 1, 2, 3, 5].map((n) => (
+                  <option key={n} value={n}>
+                    {n === 0 ? "Never" : `Up to ${n} time${n > 1 ? "s" : ""}`}
+                  </option>
+                ))}
+              </select>
+            </Row>
+            <Row label="Downloads per website" hint="Some sites block you if too many run at once.">
+              <select value={settings.perSiteLimit} onChange={(e) => onChange({ perSiteLimit: Number(e.target.value) })} className="field" aria-label="Downloads per website">
+                <option value={0}>No limit</option>
+                {[1, 2, 3, 4].map((n) => (
+                  <option key={n} value={n}>
+                    {n} at a time
+                  </option>
+                ))}
+              </select>
             </Row>
           </>
         )}
@@ -351,14 +443,20 @@ export default function SettingsPage({ settings, effectiveOutDir, engine, engine
                 placeholder="none (e.g. socks5://127.0.0.1:1080)"
                 spellCheck={false}
                 aria-label="Proxy"
+                aria-invalid={!!proxyProblem}
                 className="field mono"
                 style={{ width: 280 }}
               />
             </label>
-            <button className="btn small" disabled={!settings.proxy.trim() || proxyTest.busy} onClick={runProxyTest}>
+            <button className="btn small" disabled={!settings.proxy.trim() || !!proxyProblem || proxyTest.busy} onClick={runProxyTest}>
               <Route className="w-3 h-3" /> {proxyTest.busy ? "Testing…" : "Test proxy"}
             </button>
           </div>
+          {proxyProblem && (
+            <p className="mt-1.5 mb-0" role="alert" style={{ color: "#b3261e" }}>
+              {proxyProblem}
+            </p>
+          )}
           {proxyTest.text && (
             <p className="mt-1.5 mb-0" role={proxyTest.error ? "alert" : "status"} style={{ color: proxyTest.error ? "#b3261e" : "#2f7a2b" }}>
               {proxyTest.text}
@@ -375,6 +473,49 @@ export default function SettingsPage({ settings, effectiveOutDir, engine, engine
           <ScheduleEditor rules={settings.schedule} onChange={(schedule) => onChange({ schedule })} state={scheduleState} />
         </Group>
       )}
+
+      <Group title="Appearance">
+        <Row label="Theme" hint="Aqua is the classic look. Graphite is colourless. Dark is easier on the eyes at night.">
+          <select value={settings.theme} onChange={(e) => onChange({ theme: e.target.value as Theme })} className="field" aria-label="Theme">
+            <option value="aqua">Aqua</option>
+            <option value="graphite">Graphite</option>
+            <option value="dark">Dark</option>
+            <option value="system">Match my system</option>
+          </select>
+        </Row>
+        <Row label="Accent colour" hint={settings.theme === "graphite" ? "Graphite has no colour, so this shows in the other themes." : "The colour of buttons, selections and progress bars."}>
+          <select value={settings.accent} onChange={(e) => onChange({ accent: e.target.value as Accent })} className="field" aria-label="Accent colour">
+            {ACCENTS.map((a) => (
+              <option key={a} value={a}>
+                {a[0].toUpperCase() + a.slice(1)}
+              </option>
+            ))}
+          </select>
+        </Row>
+      </Group>
+
+      <Group title="Saved presets" hint="Named download choices. Make one from a video's details, then pick it in one click.">
+        {settings.presets.length === 0 ? (
+          <div className="pref-row">
+            <span className="pref-hint">No presets yet. Open a video, choose what you want, and press "Save these choices…".</span>
+          </div>
+        ) : (
+          settings.presets.map((p) => (
+            <div key={p.id} className="pref-row" role="group" aria-label={`Preset ${p.name}`}>
+              <div className="min-w-0">
+                <div className="truncate">{p.name}</div>
+                <div className="pref-hint">
+                  {p.kind === "audio" ? `Audio${p.audioQuality ? ` ${p.audioQuality}` : ""}${p.normalize ? ", even volume" : ""}` : `Video ${p.quality === "best" ? "best quality" : p.quality === "p1080" ? "1080p" : "720p"}`}
+                  {p.subMode !== "off" ? `, subtitles (${p.subLangs})` : ""}
+                </div>
+              </div>
+              <button className="btn small" aria-label={`Delete preset ${p.name}`} onClick={() => onChange({ presets: settings.presets.filter((x) => x.id !== p.id) })}>
+                Delete
+              </button>
+            </div>
+          ))
+        )}
+      </Group>
 
       <Group title="Helpers">
         <div className="pref-row">

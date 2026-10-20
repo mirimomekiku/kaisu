@@ -1219,3 +1219,61 @@ input[type="radio"] {
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.7);
   cursor: pointer;
 }
+
+/* ---- themes -------------------------------------------------------------------
+   Aqua is the stylesheet above. The others re-colour it as a whole, which keeps every control in step. */
+html[data-theme="graphite"] {
+  filter: grayscale(1) contrast(1.02);
+}
+html[data-theme="dark"] {
+  --dark-img: invert(1) hue-rotate(180deg);
+  filter: invert(0.92) hue-rotate(180deg) contrast(0.95);
+  background: #151515;
+}
+:root {
+  --dark-img: hue-rotate(0deg);
+  --accent-rotate: 0deg;
+}
+/* Pictures keep their own colours in the dark theme. */
+img,
+.thumb svg,
+video {
+  filter: var(--dark-img);
+}
+
+/* ---- accent colours ------------------------------------------------------------
+   Aqua's highlights are blue. Turning just those parts around the colour wheel gives the other accents, while green
+   "done" bars, red errors and grey surfaces keep their colours. */
+html[data-accent="orange"] { --accent-rotate: 175deg; }
+html[data-accent="green"] { --accent-rotate: 265deg; }
+html[data-accent="purple"] { --accent-rotate: 65deg; }
+html[data-accent="pink"] { --accent-rotate: 115deg; }
+html[data-accent="red"] { --accent-rotate: 145deg; }
+html[data-accent="teal"] { --accent-rotate: 320deg; }
+
+html:not([data-accent="blue"]) :is(
+  .btn.primary,
+  .field:focus,
+  .searchfield input:focus,
+  .itable tbody tr.sel,
+  .row-card.sel,
+  .progress:not(.done):not(.finishing) > i,
+  .lcd-bar > i,
+  .seg.blue > button[aria-checked="true"],
+  .selbar,
+  .sidebar,
+  .tour-dots i.on,
+  .tour-spot,
+  a,
+  .link,
+  input[type="checkbox"],
+  input[type="radio"],
+  .drop-overlay
+) {
+  filter: hue-rotate(var(--accent-rotate));
+}
+/* Pictures inside a re-coloured area are turned back, so they look as they should. */
+html:not([data-accent="blue"]) :is(.itable tbody tr.sel, .row-card.sel, .sidebar, .selbar) img,
+html:not([data-accent="blue"]) :is(.itable tbody tr.sel, .row-card.sel, .sidebar, .selbar) .thumb svg {
+  filter: var(--dark-img) hue-rotate(calc(-1 * var(--accent-rotate)));
+}

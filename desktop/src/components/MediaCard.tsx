@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
+import { open as pickFile } from "@tauri-apps/plugin-dialog";
 import { Calendar, CheckCircle2, Clock, Download, Eye, Music, Radio, ThumbsUp, Video } from "lucide-react";
 import FileActions from "./FileActions";
-import type { Clip, FormatInfo, MediaInfo, Preset, SubtitleOptions } from "../lib/api";
+import type { AudioExtras, Clip, CoverMode, CoverOptions, FormatInfo, LyricsMode, MediaInfo, MetaOptions, Preset, SubtitleOptions } from "../lib/api";
+import type { FormatPreset } from "../lib/presets";
+import { changedTags, guessTags, headsUp, type TagGuess } from "../lib/tags";
+import { checkAudioQuality, checkTag } from "../lib/validate";
 import { SUBTITLE_MODE_LABEL, defaultSelection, parseLangs, toOptions } from "../lib/subtitles";
 import { PRESET_LABEL, clipLabel, formatBytes, formatClock, formatCount, formatDuration, formatUploadDate, parseTimeInput } from "../lib/format";
 import type { HistoryItem, Mode, SubtitleMode } from "../lib/storage";
@@ -15,10 +19,43 @@ export interface DownloadChoice {
   estimate: number | null;
   /** Subtitles chosen for this download. */
   subs: SubtitleOptions | null;
+  meta: MetaOptions | null;
+  cover: CoverOptions | null;
+  lyrics: LyricsMode | null;
+  audio: AudioExtras | null;
 }
+
+export interface ExtraDefaults {
+  cover: Exclude<CoverMode, "custom">;
+  lyrics: LyricsMode;
+  audioQuality: string;
+  normalize: boolean;
+  trimSilence: boolean;
+}
+
+const COVER_LABEL: Record<CoverMode, string> = { default: "The video's thumbnail", square: "The thumbnail, cropped square", none: "No cover art", custom: "My own picture…" };
+const QUALITY_CHOICES: Array<[string, string]> = [["", "Best"], ["256K", "256 kbps"], ["192K", "192 kbps"], ["128K", "128 kbps"], ["96K", "96 kbps"]];
+const LYRICS_LABEL: Record<LyricsMode, string> = { off: "No lyrics", file: "Save as a .lrc file", embed: "Put inside the song", both: "Both" };
+const TAG_FIELDS: Array<[keyof TagGuess, string, "text" | "year" | "track"]> = [
+  ["title", "Title", "text"],
+  ["artist", "Artist", "text"],
+  ["album", "Album", "text"],
+  ["year", "Year", "year"],
+  ["track", "Track number", "track"],
+  ["genre", "Genre", "text"],
+];
 
 interface Props {
   info: MediaInfo;
+  /** The starting choices for cover art, lyrics and audio processing. */
+  extras: ExtraDefaults;
+  presets: FormatPreset[];
+  /** Saves the current choices as a preset; resolves to a reason when it can't. */
+  onSavePreset: (preset: Omit<FormatPreset, "id">) => string | null;
+  /** Advanced: the command these choices would run. */
+  onPreview?: (choice: DownloadChoice) => Promise<string>;
+  /** Whether browser cookies are switched on (changes the advice for sign-in videos). */
+  hasCookies: boolean;
   mode: Mode;
   /** The subtitle settings to start from. */
   subtitleDefaults: { mode: SubtitleMode; langs: string; auto: boolean };
@@ -64,7 +101,7 @@ function estimateSize(videos: FormatInfo[], audios: FormatInfo[], kind: "video" 
   return pick.filesize + (pick.kind === "video" ? bestAudio : 0);
 }
 
-export default function MediaCard({ info, mode, subtitleDefaults, audioLabel, activeOptions, downloads, onDownload, onOpen, onReveal }: Props) {
+export default function MediaCard({ info, extras, presets, onSavePreset, onPreview, hasCookies, mode, subtitleDefaults, audioLabel, activeOptions, downloads, onDownload, onOpen, onReveal }: Props) {
   const advanced = mode === "advanced";
   const [kind, setKind] = useState<"video" | "audio">("video");
   const [quality, setQuality] = useState<Quality>("best");
@@ -79,6 +116,20 @@ export default function MediaCard({ info, mode, subtitleDefaults, audioLabel, ac
   const [subMode, setSubMode] = useState<SubtitleMode>(subtitleDefaults.mode);
   const [subLangs, setSubLangs] = useState<string[]>(() => (subtitleDefaults.mode === "off" ? [] : defaultSelection(info.subtitles, parseLangs(subtitleDefaults.langs))));
   const subAuto = subtitleDefaults.auto;
+  const startTags = useMemo(() => guessTags(info), [info]);
+  const [tags, setTags] = useState<TagGuess>(startTags);
+  const [extrasOpen, setExtrasOpen] = useState(false);
+  const [cover, setCover] = useState<CoverMode>(extras.cover);
+  const [coverPath, setCoverPath] = useState<string | null>(null);
+  const [lyrics, setLyrics] = useState<LyricsMode>(extras.lyrics);
+  const [audioQuality, setAudioQuality] = useState(extras.audioQuality);
+  const [normalize, setNormalize] = useState(extras.normalize);
+  const [trimSilence, setTrimSilence] = useState(extras.trimSilence);
+  const [presetId, setPresetId] = useState("");
+  const [savingPreset, setSavingPreset] = useState(false);
+  const [presetName, setPresetName] = useState("");
+  const [presetError, setPresetError] = useState<string | null>(null);
+  const [command, setCommand] = useState<string | null>(null);
   // The chooser starts open for new videos and tucked away for ones already downloaded.
   const newest = downloads[0]?.item.id;
   const [open, setOpen] = useState(downloads.length === 0);
@@ -130,9 +181,78 @@ export default function MediaCard({ info, mode, subtitleDefaults, audioLabel, ac
   const baseEstimate = kind === "audio" ? audioSize : videoSize;
   const estimate = baseEstimate && clip && info.duration_secs ? Math.round((baseEstimate * (clip.end - clip.start)) / info.duration_secs) : baseEstimate;
 
+  const tagErrors = Object.fromEntries(TAG_FIELDS.map(([key, , type]) => [key, checkTag(type, tags[key])])) as Record<keyof TagGuess, string | null>;
+  const tagProblem = Object.values(tagErrors).find(Boolean) ?? null;
+  const qualityProblem = kind === "audio" ? checkAudioQuality(audioQuality) : null;
+  const coverProblem = kind === "audio" && cover === "custom" && !coverPath ? "Choose a picture, or pick another cover option." : null;
+  const problem = tagProblem ?? qualityProblem ?? coverProblem;
+
+  const buildChoice = (): DownloadChoice => ({
+    preset: kind === "audio" ? "audio" : quality,
+    formatId: formatId(),
+    clip,
+    estimate,
+    subs: toOptions(subMode, subLangs, subAuto || subLangs.some((c) => info.subtitles.find((t) => t.code === c)?.auto)),
+    meta: changedTags(tags, startTags),
+    cover: kind === "audio" ? { mode: cover, path: cover === "custom" ? coverPath : null } : null,
+    lyrics: kind === "audio" ? lyrics : null,
+    audio: kind === "audio" ? { quality: audioQuality.trim() || null, normalize, trim_silence: trimSilence } : null,
+  });
+
+  const choosePicture = async () => {
+    const picked = await pickFile({ multiple: false, directory: false, filters: [{ name: "Pictures", extensions: ["jpg", "jpeg", "png", "webp"] }] }).catch(() => null);
+    if (typeof picked === "string") setCoverPath(picked);
+  };
+
+  const applyPreset = (id: string) => {
+    setPresetId(id);
+    const p = presets.find((x) => x.id === id);
+    if (!p) return;
+    setKind(p.kind);
+    setQuality(p.quality);
+    setSubMode(p.subMode);
+    setSubLangs(p.subMode === "off" ? [] : defaultSelection(info.subtitles, parseLangs(p.subLangs)));
+    setAudioQuality(p.audioQuality);
+    setNormalize(p.normalize);
+    setTrimSilence(p.trimSilence);
+    setCover(p.cover);
+    setLyrics(p.lyrics);
+  };
+
+  const savePreset = () => {
+    const failure = onSavePreset({
+      name: presetName,
+      kind,
+      quality,
+      subMode,
+      subLangs: subLangs.join(", ") || "en",
+      audioQuality: audioQuality.trim(),
+      normalize,
+      trimSilence,
+      cover: cover === "custom" ? "default" : cover,
+      lyrics,
+    });
+    setPresetError(failure);
+    if (!failure) {
+      setSavingPreset(false);
+      setPresetName("");
+    }
+  };
+
+  const showCommand = async () => {
+    if (command !== null) return setCommand(null);
+    try {
+      setCommand(await onPreview?.(buildChoice()) ?? "");
+    } catch (e) {
+      setCommand(`Couldn't build the command: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+
+  const notes = headsUp(info, hasCookies);
+
   const submit = async () => {
-    if (clipOpen && !clip) return;
-    const started = await onDownload({ preset: kind === "audio" ? "audio" : quality, formatId: formatId(), clip, estimate, subs: toOptions(subMode, subLangs, subAuto || subLangs.some((c) => info.subtitles.find((t) => t.code === c)?.auto)) });
+    if ((clipOpen && !clip) || problem) return;
+    const started = await onDownload(buildChoice());
     if (started === false) return;
     setOpen(false);
     setJustAdded(true);
@@ -194,11 +314,19 @@ export default function MediaCard({ info, mode, subtitleDefaults, audioLabel, ac
               </button>
             </div>
           )}
-          {info.is_live && <p className="m-0 text-[11.5px]" style={{ color: "#9a6a00" }}>This is a live stream. Downloading it may not work until it has ended.</p>}
         </div>
       </div>
 
       <div className="p-3 flex flex-col gap-2.5">
+        {notes.length > 0 && (
+          <ul className="m-0 p-0 list-none flex flex-col gap-1.5" aria-label="Before you download">
+            {notes.map((n) => (
+              <li key={n} className="alert !py-1.5" style={{ color: "#7a5200" }}>
+                {n}
+              </li>
+            ))}
+          </ul>
+        )}
         {downloads.length > 0 && (
           <ul className="m-0 p-0 list-none flex flex-col gap-1.5" aria-label="Already downloaded">
             {downloads.map(({ item, exists }) => (
@@ -227,6 +355,52 @@ export default function MediaCard({ info, mode, subtitleDefaults, audioLabel, ac
 
         {open && (
           <div id="download-choices" className="flex flex-col gap-3 pl-3.5">
+            <div className="flex items-center gap-2 flex-wrap">
+              <label className="flex items-center gap-2">
+                Preset
+                <select value={presetId} onChange={(e) => applyPreset(e.target.value)} className="field" aria-label="Preset">
+                  <option value="">{presets.length ? "Choose a preset" : "None saved yet"}</option>
+                  {presets.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {!savingPreset ? (
+                <button type="button" className="btn small" onClick={() => setSavingPreset(true)}>
+                  Save these choices…
+                </button>
+              ) : (
+                <span className="flex items-center gap-1.5">
+                  <input
+                    value={presetName}
+                    onChange={(e) => {
+                      setPresetName(e.target.value);
+                      setPresetError(null);
+                    }}
+                    onKeyDown={(e) => e.key === "Enter" && savePreset()}
+                    placeholder="Preset name"
+                    aria-label="Preset name"
+                    className="field"
+                    style={{ width: 150 }}
+                    autoFocus
+                  />
+                  <button type="button" className="btn small primary" onClick={savePreset}>
+                    Save
+                  </button>
+                  <button type="button" className="btn small" onClick={() => (setSavingPreset(false), setPresetError(null))}>
+                    Cancel
+                  </button>
+                </span>
+              )}
+              {presetError && (
+                <span role="alert" style={{ color: "#b3261e" }}>
+                  {presetError}
+                </span>
+              )}
+            </div>
+
             <div className="flex flex-col sm:flex-row gap-2" role="radiogroup" aria-label="Download type">
               <button type="button" role="radio" aria-checked={kind === "video"} onClick={() => setKind("video")} className={tile(kind === "video")}>
                 <Video className="w-5 h-5 shrink-0" style={{ color: kind === "video" ? "#2f66bf" : "#7d838c" }} />
@@ -268,7 +442,7 @@ export default function MediaCard({ info, mode, subtitleDefaults, audioLabel, ac
                   </label>
                 )}
               </div>
-              <button type="button" onClick={submit} disabled={clipOpen && !clip} className="btn primary">
+              <button type="button" onClick={submit} disabled={(clipOpen && !clip) || !!problem} className="btn primary" title={problem ?? undefined}>
                 <Download className="w-3.5 h-3.5" /> {clipOpen ? "Download clip" : kind === "video" ? "Download video" : "Download audio"}
               </button>
             </div>
@@ -344,6 +518,121 @@ export default function MediaCard({ info, mode, subtitleDefaults, audioLabel, ac
                       ))}
                     </ul>
                     {kind === "audio" && subMode !== "off" && <p className="m-0 dim">Audio files can't hold subtitles, so they are saved as separate .srt files.</p>}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="flex flex-col gap-2">
+              <button type="button" aria-expanded={extrasOpen} onClick={() => setExtrasOpen((v) => !v)} className="disclosure self-start" style={{ fontWeight: "normal" }}>
+                <span className={`tri ${extrasOpen ? "open" : ""}`} />
+                Tags, cover art and audio
+              </button>
+              {extrasOpen && (
+                <div className="pl-3.5 flex flex-col gap-3" role="group" aria-label="Tags and extras">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {TAG_FIELDS.map(([key, label]) => (
+                      <label key={key} className="flex flex-col gap-0.5 min-w-0">
+                        <span className="dim">{label}</span>
+                        <input
+                          value={tags[key]}
+                          onChange={(e) => setTags((t) => ({ ...t, [key]: e.target.value }))}
+                          className="field"
+                          aria-label={`${label} tag`}
+                          aria-invalid={!!tagErrors[key]}
+                          spellCheck={false}
+                        />
+                        {tagErrors[key] && (
+                          <span role="alert" style={{ color: "#b3261e" }}>
+                            {tagErrors[key]}
+                          </span>
+                        )}
+                      </label>
+                    ))}
+                  </div>
+                  {kind === "audio" ? (
+                    <div className="flex flex-col gap-2">
+                      <div className="flex items-center gap-3 flex-wrap">
+                        <label className="flex items-center gap-2">
+                          Cover art
+                          <select value={cover} onChange={(e) => setCover(e.target.value as CoverMode)} className="field" aria-label="Cover art">
+                            {(Object.keys(COVER_LABEL) as CoverMode[]).map((m) => (
+                              <option key={m} value={m}>
+                                {COVER_LABEL[m]}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        {cover === "custom" && (
+                          <span className="flex items-center gap-2">
+                            <button type="button" className="btn small" onClick={choosePicture}>
+                              Choose picture…
+                            </button>
+                            <span className="dim truncate" style={{ maxWidth: 220 }} title={coverPath ?? ""}>
+                              {coverPath ? coverPath.split(/[\\/]/).pop() : "none chosen"}
+                            </span>
+                          </span>
+                        )}
+                        <label className="flex items-center gap-2">
+                          Lyrics
+                          <select value={lyrics} onChange={(e) => setLyrics(e.target.value as LyricsMode)} className="field" aria-label="Lyrics">
+                            {(Object.keys(LYRICS_LABEL) as LyricsMode[]).map((m) => (
+                              <option key={m} value={m}>
+                                {LYRICS_LABEL[m]}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+                      <div className="flex items-center gap-3 flex-wrap">
+                        <label className="flex items-center gap-2">
+                          Audio quality
+                          <select value={QUALITY_CHOICES.some(([v]) => v === audioQuality) ? audioQuality : "custom"} onChange={(e) => setAudioQuality(e.target.value)} className="field" aria-label="Audio quality">
+                            {QUALITY_CHOICES.map(([v, text]) => (
+                              <option key={v} value={v}>
+                                {text}
+                              </option>
+                            ))}
+                            {!QUALITY_CHOICES.some(([v]) => v === audioQuality) && <option value="custom">{audioQuality}</option>}
+                          </select>
+                        </label>
+                        <label className="flex items-center gap-1.5">
+                          <input type="checkbox" checked={normalize} onChange={(e) => setNormalize(e.target.checked)} />
+                          Even out the volume
+                        </label>
+                        <label className="flex items-center gap-1.5">
+                          <input type="checkbox" checked={trimSilence} onChange={(e) => setTrimSilence(e.target.checked)} />
+                          Trim silence at the start and end
+                        </label>
+                      </div>
+                      {(qualityProblem || coverProblem) && (
+                        <p className="m-0" role="alert" style={{ color: "#b3261e" }}>
+                          {qualityProblem ?? coverProblem}
+                        </p>
+                      )}
+                      <p className="m-0 dim">Cover art and lyrics are for MP3, M4A and FLAC. Lyrics come from the free LRCLIB service; nothing else is sent.</p>
+                    </div>
+                  ) : (
+                    <p className="m-0 dim">Tags are saved inside the video file. Cover art, lyrics and audio options are available for audio downloads.</p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {advanced && onPreview && (
+              <div className="flex flex-col gap-1.5">
+                <button type="button" aria-expanded={command !== null} onClick={showCommand} className="disclosure self-start" style={{ fontWeight: "normal" }}>
+                  <span className={`tri ${command !== null ? "open" : ""}`} />
+                  Show the command
+                </button>
+                {command !== null && (
+                  <div className="pl-3.5 flex flex-col gap-1.5">
+                    <pre className="m-0 max-h-32 overflow-auto bg-white border border-[#b4b4b4] rounded-[3px] p-2 mono whitespace-pre-wrap break-all selectable" aria-label="Command">
+                      {command}
+                    </pre>
+                    <button type="button" className="btn small self-start" onClick={() => navigator.clipboard?.writeText(command)}>
+                      Copy
+                    </button>
                   </div>
                 )}
               </div>

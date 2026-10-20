@@ -30,6 +30,7 @@ import {
   checkSetup,
   classifyLink,
   defaultDownloadDir,
+  checkFolder,
   errorText,
   exportText,
   freeSpace,
@@ -38,6 +39,7 @@ import {
   getPlaylist,
   openFolder,
   openUrl,
+  previewCommand,
   revealEngine,
   searchMedia,
   setProxy,
@@ -54,15 +56,20 @@ import {
   type SearchSource,
   type SetupInfo,
   type SubtitleOptions,
+  type AudioExtras,
+  type CoverOptions,
+  type LyricsMode,
+  type MetaOptions,
 } from "./lib/api";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { friendlyError } from "./lib/errors";
 import { historyToCsv, historyToJson, type HistoryRow } from "./lib/history";
+import { checkPresetName, presetId, type FormatPreset } from "./lib/presets";
 import { validateRule } from "./lib/schedule";
 import { SEARCH_SOURCES, knownSource, sourceLabel } from "./lib/sources";
 import { parseLangs, toOptions } from "./lib/subtitles";
 import { clipKeyOf, clipLabel, formatBytes, formatEta, formatSpeed } from "./lib/format";
-import { extractUrls, playlistOf, shortLink } from "./lib/links";
+import { canonicalUrl, extractUrls, playlistOf, shortLink } from "./lib/links";
 import {
   DEFAULT_SETTINGS,
   loadHistory,
@@ -85,7 +92,7 @@ const LISTING_MAX = 500;
 const LOW_DISK_BYTES = 2 * 1024 * 1024 * 1024;
 
 /** What Simple mode always sends: sensible defaults, none of the advanced settings. */
-const SIMPLE_BASE: Omit<ExtraOptions, "output" | "playlist" | "clip" | "proxy" | "subs"> = {
+const SIMPLE_BASE: Omit<ExtraOptions, "output" | "playlist" | "clip" | "proxy" | "subs" | "meta" | "cover" | "lyrics" | "audio"> = {
   sponsorblock: "off",
   cookies_from_browser: null,
   audio_format: "mp3",
@@ -120,6 +127,10 @@ interface DownloadReq {
   channel?: string;
   /** Subtitles picked for this one download; otherwise the settings decide (Advanced mode only). */
   subs?: SubtitleOptions | null;
+  meta?: MetaOptions | null;
+  cover?: CoverOptions | null;
+  lyrics?: LyricsMode | null;
+  audio?: AudioExtras | null;
 }
 
 const isFinishedStatus = (status: string) => status === "completed" || status === "error" || status === "cancelled";
@@ -165,6 +176,22 @@ export default function App() {
   const session = useSessionStats();
   const confirm = useConfirm();
 
+  // The theme is a setting on the page itself; "system" follows the operating system's light or dark choice.
+  useEffect(() => {
+    const media = window.matchMedia?.("(prefers-color-scheme: dark)");
+    const apply = () => {
+      const t = settings.theme === "system" ? (media?.matches ? "dark" : "aqua") : settings.theme;
+      document.documentElement.dataset.theme = t;
+    };
+    apply();
+    if (settings.theme !== "system" || !media) return;
+    media.addEventListener("change", apply);
+    return () => media.removeEventListener("change", apply);
+  }, [settings.theme]);
+  useEffect(() => {
+    document.documentElement.dataset.accent = settings.accent;
+  }, [settings.accent]);
+
   const mode = settings.mode;
   const advanced = mode === "advanced";
   const engine: EngineInfo | null = setupInfo?.engine ?? null;
@@ -191,6 +218,7 @@ export default function App() {
         timestamp: Date.now(),
         clip: item.clipKey,
         channel: item.channel,
+        flag: item.warning,
       };
       const rest = historyRef.current.filter((h) => !sameDownload({ url: h.url, preset: h.preset, clipKey: h.clip }, { url: entry.url, preset: entry.preset, clipKey: entry.clip }));
       updateHistory([entry, ...rest]);
@@ -203,10 +231,13 @@ export default function App() {
   const schedule = useSchedule(usableRules, advanced);
   const policy = useMemo(() => ({ blocked: schedule.paused, limit: schedule.limit }), [schedule.paused, schedule.limit]);
 
-  const { items, enqueue, cancel, pause, resume, pauseAll, resumeAll, retry, remove, clearFinished, restore, hasActive } = useDownloads(
+  const limits = useMemo(() => (advanced ? { retries: settings.autoRetries, perSite: settings.perSiteLimit } : { retries: 0, perSite: 0 }), [advanced, settings.autoRetries, settings.perSiteLimit]);
+
+  const { items, enqueue, runNext, runLater, cancel, pause, resume, pauseAll, resumeAll, retry, remove, clearFinished, restore, hasActive } = useDownloads(
     advanced ? settings.concurrency : 2,
     handleCompleted,
     policy,
+    limits,
   );
   const itemsRef = useRef(items);
   itemsRef.current = items;
@@ -477,7 +508,17 @@ export default function App() {
   const defaultSubs = (): SubtitleOptions | null =>
     advanced ? toOptions(settings.subtitleMode, parseLangs(settings.subtitleLangs), settings.subtitleAuto) : null;
 
-  const buildExtra = (formatId: string | null, ctx?: { playlist?: PlaylistCtx | null; clip?: Clip | null; subs?: SubtitleOptions | null }): ExtraOptions => ({
+  const defaultAudio = (): AudioExtras | null =>
+    advanced ? { quality: settings.audioQuality.trim() || null, normalize: settings.audioNormalize, trim_silence: settings.audioTrimSilence } : null;
+
+  const buildExtra = (
+    formatId: string | null,
+    ctx?: { playlist?: PlaylistCtx | null; clip?: Clip | null; subs?: SubtitleOptions | null; meta?: MetaOptions | null; cover?: CoverOptions | null; lyrics?: LyricsMode | null; audio?: AudioExtras | null },
+  ): ExtraOptions => ({
+    meta: ctx?.meta ?? null,
+    cover: ctx?.cover !== undefined ? ctx.cover : advanced ? { mode: settings.coverMode } : null,
+    lyrics: ctx?.lyrics !== undefined ? ctx.lyrics : advanced ? settings.lyricsMode : null,
+    audio: ctx?.audio !== undefined ? ctx.audio : defaultAudio(),
     // The proxy applies in both modes: it is about reaching the internet, not about choices.
     proxy: settings.proxy.trim() || null,
     subs: ctx?.subs !== undefined ? ctx.subs : defaultSubs(),
@@ -555,6 +596,13 @@ export default function App() {
       }
     }
 
+    try {
+      await checkFolder(effectiveOutDir);
+    } catch (err) {
+      showFlash(errorText(err), true);
+      return 0;
+    }
+
     const free = await freeSpace(effectiveOutDir).catch(() => null);
     if (free !== null) {
       const needed = estimateBytes ? estimateBytes * 1.3 : 0;
@@ -584,7 +632,7 @@ export default function App() {
         thumbnail: r.thumbnail,
         preset: r.preset,
         outDir: effectiveOutDir,
-        extra: buildExtra(r.formatId, { playlist: r.playlist, clip: r.clip, subs: r.subs }),
+        extra: buildExtra(r.formatId, { playlist: r.playlist, clip: r.clip, subs: r.subs, meta: r.meta, cover: r.cover, lyrics: r.lyrics, audio: r.audio }),
         clipKey: clipKeyOf(r.clip ?? null),
         placeholderTitle: r.placeholderTitle,
         channel: r.channel,
@@ -621,12 +669,32 @@ export default function App() {
     }
   };
 
+  const savePreset = (preset: Omit<FormatPreset, "id">): string | null => {
+    const problem = checkPresetName(preset.name, settings.presets);
+    if (problem) return problem;
+    changeSettings({ presets: [...settings.presets, { ...preset, name: preset.name.trim(), id: presetId() }] });
+    setNote({ title: "Preset saved", subtitle: preset.name.trim() });
+    return null;
+  };
+
+  /** The command a choice would run, for Advanced mode's "Show the command". */
+  const previewChoice = async (choice: DownloadChoice): Promise<string> => {
+    if (!media) return "";
+    return previewCommand({
+      id: "preview",
+      url: media.url,
+      preset: choice.preset,
+      out_dir: effectiveOutDir || "~/Downloads",
+      extra: buildExtra(choice.formatId, { clip: choice.clip, subs: choice.subs, meta: choice.meta, cover: choice.cover, lyrics: choice.lyrics, audio: choice.audio }),
+    });
+  };
+
   const downloadCurrent = async (choice: DownloadChoice) => {
     if (!media) return false;
     const key = clipKeyOf(choice.clip);
     const title = choice.clip ? `${media.info.title} (clip ${clipLabel(key)})` : media.info.title;
     const added = await submitDownloads(
-      [{ url: media.url, title, thumbnail: media.info.thumbnail ?? "", preset: choice.preset, formatId: choice.formatId, clip: choice.clip, channel: media.info.uploader ?? undefined, subs: choice.subs }],
+      [{ url: media.url, title, thumbnail: media.info.thumbnail ?? "", preset: choice.preset, formatId: choice.formatId, clip: choice.clip, channel: media.info.uploader ?? undefined, subs: choice.subs, meta: choice.meta, cover: choice.cover, lyrics: choice.lyrics, audio: choice.audio }],
       choice.estimate,
     );
     return added > 0;
@@ -692,7 +760,7 @@ export default function App() {
   const previouslyDownloaded = history.find((h) => url.trim() && h.url === url.trim() && !h.clip);
   const downloadedUrls = new Set(history.map((h) => h.url));
   const downloadsOfCurrent = media
-    ? history.filter((h) => h.url === media.url).map((item) => ({ item, exists: item.path ? existing[item.path] : undefined }))
+    ? history.filter((h) => canonicalUrl(h.url) === canonicalUrl(media.url)).map((item) => ({ item, exists: item.path ? existing[item.path] : undefined }))
     : [];
   const audioLabel = advanced ? settings.audioFormat.toUpperCase() : "MP3";
   const queueView = effectiveView(settings.viewQueue, QUEUE_VIEWS);
@@ -744,7 +812,7 @@ export default function App() {
     },
     selectAll: () => toggleAll(true),
     clearSelection: () => setChecked(new Set()),
-    downloadOpenVideo: (asAudio) => void downloadCurrent({ preset: asAudio ? "audio" : "best", formatId: null, clip: null, estimate: null, subs: defaultSubs() }),
+    downloadOpenVideo: (asAudio) => void downloadCurrent({ preset: asAudio ? "audio" : "best", formatId: null, clip: null, estimate: null, subs: defaultSubs(), meta: null, cover: null, lyrics: null, audio: null }),
     togglePauseAll: () => (pausedCount > 0 ? resumeAll() : pauseAll()),
     openDownloadFolder: () => openFolder(effectiveOutDir).catch((err) => showFlash(errorText(err), true)),
   });
@@ -1094,6 +1162,17 @@ export default function App() {
                     key={media?.url}
                     info={visibleMedia}
                     mode={mode}
+                    extras={{
+                      cover: advanced ? settings.coverMode : "default",
+                      lyrics: advanced ? settings.lyricsMode : "off",
+                      audioQuality: advanced ? settings.audioQuality : "",
+                      normalize: advanced && settings.audioNormalize,
+                      trimSilence: advanced && settings.audioTrimSilence,
+                    }}
+                    presets={settings.presets}
+                    onSavePreset={savePreset}
+                    onPreview={advanced ? previewChoice : undefined}
+                    hasCookies={advanced && !!settings.cookiesBrowser}
                     subtitleDefaults={advanced ? { mode: settings.subtitleMode, langs: settings.subtitleLangs, auto: settings.subtitleAuto } : { mode: "off", langs: settings.subtitleLangs, auto: true }}
                     audioLabel={audioLabel}
                     activeOptions={activeOptions}
@@ -1120,7 +1199,7 @@ export default function App() {
             (items.length === 0 ? (
               emptyState(<Download className="w-14 h-14" strokeWidth={1.25} />, "No downloads", "Videos you download will appear here with their progress.")
             ) : effectiveView(settings.viewQueue, QUEUE_VIEWS) === "details" ? (
-              <DownloadTable items={items} mode={mode} onCancel={cancel} onPause={pause} onResume={resume} onRetry={retry} onRemove={remove} onOpen={openDownloaded} onReveal={revealDownloaded} />
+              <DownloadTable items={items} mode={mode} onCancel={cancel} onPause={pause} onResume={resume} onRetry={retry} onRunNext={runNext} onRunLater={runLater} onRemove={remove} onOpen={openDownloaded} onReveal={revealDownloaded} />
             ) : (
               <div
                 className={`p-3 ${
@@ -1137,6 +1216,8 @@ export default function App() {
                     onPause={pause}
                     onResume={resume}
                     onRetry={retry}
+                    onRunNext={runNext}
+                    onRunLater={runLater}
                     onRemove={remove}
                     onOpen={openDownloaded}
                     onReveal={revealDownloaded}

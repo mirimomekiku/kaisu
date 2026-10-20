@@ -48,6 +48,32 @@ export interface SubtitleTrack {
   auto: boolean;
 }
 
+export interface MetaOptions {
+  title?: string | null;
+  artist?: string | null;
+  album?: string | null;
+  /** Four digits. */
+  year?: string | null;
+  track?: string | null;
+  genre?: string | null;
+}
+
+export type CoverMode = "default" | "square" | "none" | "custom";
+export interface CoverOptions {
+  mode: CoverMode;
+  /** The picture, for "custom". */
+  path?: string | null;
+}
+
+export type LyricsMode = "off" | "file" | "embed" | "both";
+
+export interface AudioExtras {
+  /** "0" (best) to "9", or a bitrate like "192K". */
+  quality: string | null;
+  normalize: boolean;
+  trim_silence: boolean;
+}
+
 export type SearchSource = "youtube" | "soundcloud";
 
 export interface ExtraOptions {
@@ -64,6 +90,10 @@ export interface ExtraOptions {
   output: OutputOptions;
   playlist: PlaylistCtx | null;
   clip: Clip | null;
+  meta: MetaOptions | null;
+  cover: CoverOptions | null;
+  lyrics: LyricsMode | null;
+  audio: AudioExtras | null;
 }
 
 export interface DownloadRequest {
@@ -79,6 +109,7 @@ export type DownloadEvent =
   | { kind: "processing" }
   | { kind: "meta"; title: string }
   | { kind: "log"; line: string }
+  | { kind: "checked"; ok: boolean; note: string | null }
   | { kind: "done"; path: string | null }
   | { kind: "cancelled" }
   | { kind: "error"; message: string };
@@ -109,6 +140,16 @@ export interface MediaInfo {
   webpage_url: string | null;
   is_live: boolean;
   subtitles: SubtitleTrack[];
+  artist: string | null;
+  track: string | null;
+  album: string | null;
+  release_year: number | null;
+  genre: string | null;
+  /** "public", "needs_auth", "subscriber_only", "premium_only", "private"... */
+  availability: string | null;
+  age_limit: number | null;
+  /** "is_live", "is_upcoming", "was_live", "not_live"... */
+  live_status: string | null;
   formats: FormatInfo[];
 }
 
@@ -188,6 +229,14 @@ export interface FileInfo {
 export const fileInfo = (paths: string[]) => invoke<FileInfo[]>("file_info", { paths });
 /** Writes an exported history file the user chose in a save dialog (.csv or .json only). */
 export const exportText = (path: string, contents: string) => invoke<void>("export_text", { path, contents });
+export interface FolderCheck {
+  exists: boolean;
+  free: number;
+}
+/** Checks that downloads can go into a folder (rejects with the reason). Creates nothing. */
+export const checkFolder = (path: string) => invoke<FolderCheck>("check_folder", { path });
+/** The yt-dlp command a download would run, for copying. */
+export const previewCommand = (req: DownloadRequest) => invoke<string>("preview_command", { req });
 export const openFile = (path: string) => invoke<void>("open_file", { path });
 export const revealFile = (path: string) => invoke<void>("reveal_file", { path });
 export const openUrl = (url: string) => invoke<void>("open_url", { url });

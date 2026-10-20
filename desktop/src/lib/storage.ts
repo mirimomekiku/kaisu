@@ -1,10 +1,14 @@
 import { load, type Store } from "@tauri-apps/plugin-store";
-import type { AudioFormat, Browser, CloseMode, ExtraOptions, Layout, NameStyle, Preset, SearchSource, SponsorBlock } from "./api";
+import type { AudioFormat, Browser, CloseMode, CoverMode, ExtraOptions, Layout, LyricsMode, NameStyle, Preset, SearchSource, SponsorBlock } from "./api";
+import { sanitizePresets, type FormatPreset } from "./presets";
 import type { HistorySort } from "./history";
 import type { ScheduleRule } from "./schedule";
 
 export type Mode = "simple" | "advanced";
 export type SubtitleMode = "off" | "embed" | "file" | "both";
+export type Theme = "system" | "aqua" | "graphite" | "dark";
+export type Accent = "blue" | "orange" | "green" | "purple" | "pink" | "red" | "teal";
+export const ACCENTS: Accent[] = ["blue", "orange", "green", "purple", "pink", "red", "teal"];
 
 /** How a list of items is laid out. Not every list offers every view. */
 export type ViewMode = "list" | "grid" | "compact" | "details";
@@ -27,6 +31,13 @@ export interface Settings {
   /** Fall back to automatically generated captions. */
   subtitleAuto: boolean;
   audioFormat: AudioFormat;
+  /** "" = best, "0"-"9" or a bitrate like "192K". */
+  audioQuality: string;
+  audioNormalize: boolean;
+  audioTrimSilence: boolean;
+  /** Cover art for batch downloads (a single download can choose its own). */
+  coverMode: Exclude<CoverMode, "custom">;
+  lyricsMode: LyricsMode;
   rateLimit: string;
   customArgs: string;
   verbose: boolean;
@@ -41,6 +52,15 @@ export interface Settings {
   warnDuplicates: boolean;
   watchClipboard: boolean;
   closeMode: CloseMode;
+  theme: Theme;
+  /** The highlight colour (buttons, selections, progress). */
+  accent: Accent;
+  /** Saved download choices. */
+  presets: FormatPreset[];
+  /** Tries again this many times after a network failure (0 = never). */
+  autoRetries: number;
+  /** Most downloads from one website at a time (0 = no limit). */
+  perSiteLimit: number;
   // Network and searching.
   searchSource: SearchSource;
   proxy: string;
@@ -63,6 +83,8 @@ export interface HistoryItem {
   clip?: string;
   /** Who published it. */
   channel?: string;
+  /** Set when the finished file looked damaged or cut off. */
+  flag?: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -80,6 +102,11 @@ export const DEFAULT_SETTINGS: Settings = {
   subtitleLangs: "en",
   subtitleAuto: true,
   audioFormat: "mp3",
+  audioQuality: "",
+  audioNormalize: false,
+  audioTrimSilence: false,
+  coverMode: "default",
+  lyricsMode: "off",
   rateLimit: "",
   customArgs: "",
   verbose: true,
@@ -92,6 +119,11 @@ export const DEFAULT_SETTINGS: Settings = {
   warnDuplicates: true,
   watchClipboard: true,
   closeMode: "downloads",
+  theme: "aqua",
+  accent: "blue",
+  presets: [],
+  autoRetries: 0,
+  perSiteLimit: 0,
   searchSource: "youtube",
   proxy: "",
   schedule: [],
@@ -125,6 +157,11 @@ export async function loadSettings(): Promise<Settings> {
   try {
     const saved = await (await getStore()).get<Partial<Settings> & { subtitles?: boolean }>("settings");
     const merged: Settings = { ...DEFAULT_SETTINGS, ...saved };
+    merged.presets = sanitizePresets(saved?.presets);
+    merged.autoRetries = Math.min(5, Math.max(0, Math.round(Number(merged.autoRetries) || 0)));
+    merged.perSiteLimit = Math.min(6, Math.max(0, Math.round(Number(merged.perSiteLimit) || 0)));
+    if (!["system", "aqua", "graphite", "dark"].includes(merged.theme)) merged.theme = "aqua";
+    if (!ACCENTS.includes(merged.accent)) merged.accent = "blue";
     // Before language choice existed there was one on/off switch for English subtitles.
     if (saved?.subtitles === true && saved.subtitleMode === undefined) merged.subtitleMode = "embed";
     return merged;

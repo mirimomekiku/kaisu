@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, ChevronDown, Download as DownloadIcon, Film, History as HistoryIcon, RefreshCw, RotateCcw, Search, Trash2 } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, ChevronDown, Download as DownloadIcon, Film, History as HistoryIcon, RefreshCw, RotateCcw, Search, Trash2 } from "lucide-react";
 import type { Preset } from "../lib/api";
 import { PRESET_LABEL, formatBytes } from "../lib/format";
 import { sortHistory, type HistoryRow, type HistorySort } from "../lib/history";
@@ -102,6 +102,13 @@ export default function HistoryView(p: Props) {
     <FileActions path={h.path} exists={h.path ? p.exists[h.path] : undefined} onOpen={p.onOpen} onReveal={p.onReveal} iconOnly={iconOnly} openLabelled={openLabelled} />
   );
 
+  const flagged = (h: HistoryItem) =>
+    h.flag ? (
+      <span className="shrink-0" title={h.flag} aria-label={`Check this file: ${h.flag}`} style={{ color: "#a56a00" }}>
+        <AlertTriangle className="w-3 h-3" />
+      </span>
+    ) : null;
+
   const check = (h: HistoryItem) => (
     <input type="checkbox" checked={picked.has(h.id)} onChange={() => toggle(h.id)} aria-label={`Select "${h.title}"`} className="shrink-0" />
   );
@@ -181,6 +188,7 @@ export default function HistoryView(p: Props) {
                   <span className="truncate" title={h.title}>
                     {h.title}
                   </span>
+                  {flagged(h)}
                 </div>
               </td>
               <td className="hidden lg:table-cell dim truncate">{h.channel ?? ""}</td>
@@ -267,8 +275,9 @@ export default function HistoryView(p: Props) {
           {check(h)}
           {thumb(h, "w-24 aspect-video")}
           <div className="min-w-0 flex-1">
-            <div className="font-bold truncate" title={h.title}>
-              {h.title}
+            <div className="font-bold truncate flex items-center gap-1.5" title={h.title}>
+              <span className="truncate">{h.title}</span>
+              {flagged(h)}
             </div>
             <div className="dim truncate">
               {details(h)} · {when(h)}
