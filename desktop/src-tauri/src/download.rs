@@ -18,8 +18,10 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 
 use crate::{
     engine::{self, Engine},
+    net,
     output::{self, Clip, OutputOptions, PlaylistCtx},
     proc,
+    subs::{self, SubtitleOptions, SubtitleTrack},
 };
 
 /// Below this much free space we refuse to start: yt-dlp would fail halfway and leave a big partial file.
@@ -100,7 +102,10 @@ impl Browser {
 pub struct ExtraOptions {
     pub sponsorblock: SponsorBlock,
     pub cookies_from_browser: Option<Browser>,
-    pub subtitles: bool,
+    /// Subtitle languages and where to put them.
+    pub subs: Option<SubtitleOptions>,
+    /// Route everything through this proxy.
+    pub proxy: Option<String>,
     pub audio_format: AudioFormat,
     /// A specific yt-dlp format id (or `video+audio`), instead of the preset's selector.
     pub format_id: Option<String>,
@@ -335,8 +340,15 @@ fn build_args(
         SponsorBlock::Mark => push(&["--sponsorblock-mark", "all"]),
         SponsorBlock::Remove => push(&["--sponsorblock-remove", "sponsor,selfpromo,interaction"]),
     }
-    if extra.subtitles && !matches!(req.preset, Preset::Audio) {
-        push(&["--write-subs", "--sub-langs", "en.*", "--embed-subs"]);
+    let subtitle_args = match &extra.subs {
+        Some(subs) => subs.args(matches!(req.preset, Preset::Audio))?,
+        None => Vec::new(),
+    };
+    for arg in &subtitle_args {
+        push(&[arg.as_str()]);
+    }
+    if let Some(proxy) = net::proxy_option(extra.proxy.as_deref())? {
+        push(&["--proxy", proxy.as_str()]);
     }
     if let Some(b) = extra.cookies_from_browser {
         push(&["--cookies-from-browser", b.as_arg()]);
@@ -552,6 +564,7 @@ pub struct MediaInfo {
     description: Option<String>,
     webpage_url: Option<String>,
     is_live: bool,
+    subtitles: Vec<SubtitleTrack>,
     formats: Vec<FormatInfo>,
 }
 
@@ -608,9 +621,11 @@ pub async fn get_media_info(
     app: AppHandle,
     engine: State<'_, Engine>,
     cookies_from_browser: Option<Browser>,
+    proxy: Option<String>,
     url: String,
 ) -> Result<MediaInfo, String> {
     let url = validate_url(&url)?;
+    let proxy = net::proxy_option(proxy.as_deref())?;
     let ytdlp = engine.ytdlp_path(&app).await?;
 
     let mut args: Vec<String> =
@@ -620,6 +635,9 @@ pub async fn get_media_info(
     }
     if let Some(rt) = engine::locate_js_runtime(&app) {
         args.extend(["--js-runtimes".into(), rt.arg()]);
+    }
+    if let Some(p) = proxy {
+        args.extend(["--proxy".into(), p]);
     }
     args.extend(["--".into(), url.to_string()]);
     let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
@@ -643,6 +661,7 @@ pub async fn get_media_info(
         description: text("description").and_then(|d| trim_description(&d)),
         webpage_url: text("webpage_url"),
         is_live: v.get("is_live").and_then(|l| l.as_bool()).unwrap_or(false),
+        subtitles: subs::tracks(&v),
         formats: parse_formats(&v),
     })
 }

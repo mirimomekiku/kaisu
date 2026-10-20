@@ -245,16 +245,16 @@ impl Engine {
 
     /// Checks GitHub for a newer yt-dlp and installs it into the managed folder.
     /// The caller must make sure no download is running (Windows can't replace a running exe).
-    pub async fn update(&self, app: &AppHandle) -> Result<UpdateResult, String> {
+    pub async fn update(&self, app: &AppHandle, proxy: Option<&str>) -> Result<UpdateResult, String> {
         let current = self.resolve(app).await;
-        let latest = setup::latest_tag().await?;
+        let latest = setup::latest_tag(proxy).await?;
         let previous = current.as_ref().map(|c| c.version.clone()).unwrap_or_default();
 
         if current.as_ref().is_some_and(|c| compare_versions(&latest, &c.version) != Ordering::Greater) {
             return Ok(UpdateResult { updated: false, version: previous.clone(), previous });
         }
 
-        let version = setup::install_ytdlp(&managed_dir(app)?, &latest, &|_| {}).await?;
+        let version = setup::install_ytdlp(&managed_dir(app)?, &latest, proxy, &|_| {}).await?;
         self.reset().await;
         Ok(UpdateResult { updated: true, version, previous })
     }
@@ -274,7 +274,7 @@ mod tests {
 
     #[tokio::test]
     async fn latest_tag_comes_from_github() {
-        let tag = setup::latest_tag().await.expect("latest tag");
+        let tag = setup::latest_tag(None).await.expect("latest tag");
         assert!(tag.starts_with("20"), "{tag}");
     }
 

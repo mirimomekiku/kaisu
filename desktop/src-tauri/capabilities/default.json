@@ -11,6 +11,7 @@
     "core:window:allow-close",
     "core:window:allow-is-maximized",
     "dialog:allow-open",
+    "dialog:allow-save",
     "notification:default",
     "clipboard-manager:allow-read-text",
     "store:default"

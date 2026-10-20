@@ -2,10 +2,12 @@ mod download;
 mod engine;
 mod files;
 mod links;
+mod net;
 mod output;
 mod proc;
 mod search;
 mod setup;
+mod subs;
 mod tray;
 
 use engine::{Engine, EngineInfo, UpdateResult};
@@ -23,11 +25,13 @@ async fn update_engine(
     app: AppHandle,
     engine: State<'_, Engine>,
     downloads: State<'_, download::Downloads>,
+    proxy: Option<String>,
 ) -> Result<UpdateResult, String> {
     if !downloads.is_idle() {
         return Err("Wait for running downloads to finish before updating".into());
     }
-    engine.update(&app).await
+    let proxy = net::proxy_option(proxy.as_deref())?;
+    engine.update(&app, proxy.as_deref()).await
 }
 
 #[tauri::command]
@@ -63,6 +67,8 @@ pub fn run() {
             setup::check_setup,
             setup::run_setup,
             files::file_exists,
+            files::file_info,
+            files::export_text,
             files::open_file,
             files::reveal_file,
             files::reveal_engine,
@@ -76,6 +82,7 @@ pub fn run() {
             download::cancel_download,
             download::free_space,
             search::search_media,
+            net::test_proxy,
             tray::set_tray_status,
             tray::tray_available,
             tray::show_main_window,

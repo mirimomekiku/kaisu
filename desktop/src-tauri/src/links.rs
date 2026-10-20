@@ -99,7 +99,7 @@ pub struct PlaylistInfo {
 }
 
 /// Videos from a flat listing. Unlike search results, ids can be anything (other sites don't use 11-character ids).
-fn parse_entries(json: &serde_json::Value) -> Vec<SearchResult> {
+pub(crate) fn parse_entries(json: &serde_json::Value) -> Vec<SearchResult> {
     let Some(entries) = json.get("entries").and_then(|e| e.as_array()) else { return Vec::new() };
     let text = |e: &serde_json::Value, k: &str| e.get(k).and_then(|x| x.as_str()).map(str::to_string);
 
@@ -136,7 +136,7 @@ fn parse_entries(json: &serde_json::Value) -> Vec<SearchResult> {
 }
 
 #[tauri::command]
-pub async fn get_playlist(app: AppHandle, engine: State<'_, Engine>, url: String, limit: Option<u32>) -> Result<PlaylistInfo, String> {
+pub async fn get_playlist(app: AppHandle, engine: State<'_, Engine>, url: String, limit: Option<u32>, proxy: Option<String>) -> Result<PlaylistInfo, String> {
     let link = url.trim();
     if !(link.starts_with("http://") || link.starts_with("https://")) || link.contains(char::is_whitespace) {
         return Err("Enter a full web link (starting with http:// or https://) without spaces.".into());
@@ -150,7 +150,12 @@ pub async fn get_playlist(app: AppHandle, engine: State<'_, Engine>, url: String
     let ytdlp = engine.ytdlp_path(&app).await?;
 
     let end = limit.to_string();
-    let args = ["--flat-playlist", "--dump-single-json", "--no-warnings", "--playlist-end", end.as_str(), "--", target.as_str()];
+    let proxy = crate::net::proxy_option(proxy.as_deref())?;
+    let mut args: Vec<&str> = vec!["--flat-playlist", "--dump-single-json", "--no-warnings", "--playlist-end", end.as_str()];
+    if let Some(p) = proxy.as_deref() {
+        args.extend(["--proxy", p]);
+    }
+    args.extend(["--", target.as_str()]);
     let json = proc::run_capture(&ytdlp, &args, Duration::from_secs(120)).await?;
     let v: serde_json::Value = serde_json::from_str(&json).map_err(|e| format!("Unreadable playlist response: {e}"))?;
 

@@ -135,13 +135,20 @@ pub fn net_err(e: reqwest::Error) -> String {
     }
 }
 
-fn client() -> Result<reqwest::Client, String> {
-    reqwest::Client::builder()
-        .user_agent("kaisu")
-        .connect_timeout(Duration::from_secs(20))
-        .read_timeout(Duration::from_secs(45))
-        .build()
-        .map_err(|e| format!("HTTP client error: {e}"))
+fn with_proxy(builder: reqwest::ClientBuilder, proxy: Option<&str>) -> Result<reqwest::ClientBuilder, String> {
+    match proxy {
+        Some(p) => Ok(builder.proxy(reqwest::Proxy::all(p).map_err(|e| format!("Proxy: {e}"))?)),
+        None => Ok(builder),
+    }
+}
+
+fn client(proxy: Option<&str>) -> Result<reqwest::Client, String> {
+    with_proxy(
+        reqwest::Client::builder().user_agent("kaisu").connect_timeout(Duration::from_secs(20)).read_timeout(Duration::from_secs(45)),
+        proxy,
+    )?
+    .build()
+    .map_err(|e| format!("HTTP client error: {e}"))
 }
 
 async fn get_text(client: &reqwest::Client, url: &str) -> Result<String, String> {
@@ -209,13 +216,13 @@ async fn download_to(client: &reqwest::Client, url: &str, dest: &Path, progress:
 }
 
 /// The latest yt-dlp release tag, read from the `/releases/latest` redirect (not rate limited).
-pub async fn latest_tag() -> Result<String, String> {
-    let client = reqwest::Client::builder()
-        .user_agent("kaisu")
-        .timeout(Duration::from_secs(20))
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .map_err(|e| format!("HTTP client error: {e}"))?;
+pub async fn latest_tag(proxy: Option<&str>) -> Result<String, String> {
+    let client = with_proxy(
+        reqwest::Client::builder().user_agent("kaisu").timeout(Duration::from_secs(20)).redirect(reqwest::redirect::Policy::none()),
+        proxy,
+    )?
+    .build()
+    .map_err(|e| format!("HTTP client error: {e}"))?;
     let res = client.get(format!("{YTDLP_BASE}/latest")).send().await.map_err(net_err)?;
     let location = res
         .headers()
@@ -245,10 +252,10 @@ pub fn make_executable(_path: &Path) -> Result<(), String> {
 
 /// Downloads yt-dlp `tag` into `dir`, verifies it, test-runs it, then moves it into place.
 /// Returns the version the new binary reports.
-pub async fn install_ytdlp(dir: &Path, tag: &str, progress: Progress<'_>) -> Result<String, String> {
+pub async fn install_ytdlp(dir: &Path, tag: &str, proxy: Option<&str>, progress: Progress<'_>) -> Result<String, String> {
     let a = assets().ok_or(UNSUPPORTED)?;
     tokio::fs::create_dir_all(dir).await.map_err(|e| format!("Cannot create {}: {e}", dir.display()))?;
-    let client = client()?;
+    let client = client(proxy)?;
     let base = format!("{YTDLP_BASE}/download/{tag}");
 
     let sums = get_text(&client, &format!("{base}/SHA2-256SUMS")).await?;
@@ -277,10 +284,10 @@ pub async fn install_ytdlp(dir: &Path, tag: &str, progress: Progress<'_>) -> Res
 }
 
 /// Downloads the static LGPL ffmpeg build and unpacks `ffmpeg` and `ffprobe` into `dir`.
-pub async fn install_ffmpeg(dir: &Path, progress: Progress<'_>, status: &(dyn Fn(&str) + Send + Sync)) -> Result<(), String> {
+pub async fn install_ffmpeg(dir: &Path, proxy: Option<&str>, progress: Progress<'_>, status: &(dyn Fn(&str) + Send + Sync)) -> Result<(), String> {
     let a = assets().ok_or(UNSUPPORTED)?;
     tokio::fs::create_dir_all(dir).await.map_err(|e| format!("Cannot create {}: {e}", dir.display()))?;
-    let client = client()?;
+    let client = client(proxy)?;
 
     let sums = get_text(&client, &format!("{FFMPEG_BASE}/checksums.sha256")).await?;
     let expected = checksum_for(&sums, a.ffmpeg).ok_or_else(|| format!("No checksum is published for {}", a.ffmpeg))?;
@@ -319,10 +326,10 @@ pub async fn install_ffmpeg(dir: &Path, progress: Progress<'_>, status: &(dyn Fn
 }
 
 /// Downloads the Deno runtime (a single executable inside a zip) into `dir`.
-pub async fn install_deno(dir: &Path, progress: Progress<'_>) -> Result<(), String> {
+pub async fn install_deno(dir: &Path, proxy: Option<&str>, progress: Progress<'_>) -> Result<(), String> {
     let a = assets().ok_or(UNSUPPORTED)?;
     tokio::fs::create_dir_all(dir).await.map_err(|e| format!("Cannot create {}: {e}", dir.display()))?;
-    let client = client()?;
+    let client = client(proxy)?;
 
     let sums = get_text(&client, &format!("{DENO_BASE}/{}.sha256sum", a.deno)).await?;
     let expected = single_checksum(&sums).ok_or("Could not read the published checksum for deno")?;
@@ -449,20 +456,23 @@ pub async fn run_setup(
     engine: State<'_, Engine>,
     downloads: State<'_, Downloads>,
     on_event: Channel<SetupEvent>,
+    proxy: Option<String>,
 ) -> Result<EngineInfo, String> {
     if !downloads.is_idle() {
         return Err("Wait for running downloads to finish first.".into());
     }
+    let proxy = crate::net::proxy_option(proxy.as_deref())?;
+    let proxy = proxy.as_deref();
     let dir = engine::managed_dir(&app)?;
     let info = engine.info(&app).await;
 
     if !info.ytdlp.ready {
         let _ = on_event.send(SetupEvent::Step { component: "ytdlp", label: "Downloading the video downloader…".into() });
-        let tag = latest_tag().await?;
+        let tag = latest_tag(proxy).await?;
         let progress = |pct| {
             let _ = on_event.send(SetupEvent::Progress { component: "ytdlp", pct });
         };
-        install_ytdlp(&dir, &tag, &progress).await?;
+        install_ytdlp(&dir, &tag, proxy, &progress).await?;
         engine.reset().await;
     }
 
@@ -474,7 +484,7 @@ pub async fn run_setup(
         let status = |label: &str| {
             let _ = on_event.send(SetupEvent::Step { component: "ffmpeg", label: label.to_string() });
         };
-        install_ffmpeg(&dir, &progress, &status).await?;
+        install_ffmpeg(&dir, proxy, &progress, &status).await?;
     }
 
     if !info.js.ready {
@@ -482,7 +492,7 @@ pub async fn run_setup(
         let progress = |pct| {
             let _ = on_event.send(SetupEvent::Progress { component: "js", pct });
         };
-        install_deno(&dir, &progress).await?;
+        install_deno(&dir, proxy, &progress).await?;
     }
 
     let _ = on_event.send(SetupEvent::Finished);
@@ -565,12 +575,12 @@ mod tests {
         let dir = env::temp_dir().join(format!("kaisu-setup-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
 
-        let tag = latest_tag().await.unwrap();
-        let version = install_ytdlp(&dir, &tag, &|_| {}).await.unwrap();
+        let tag = latest_tag(None).await.unwrap();
+        let version = install_ytdlp(&dir, &tag, None, &|_| {}).await.unwrap();
         assert_eq!(version, tag);
 
-        install_ffmpeg(&dir, &|_| {}, &|_| {}).await.unwrap();
-        install_deno(&dir, &|_| {}).await.unwrap();
+        install_ffmpeg(&dir, None, &|_| {}, &|_| {}).await.unwrap();
+        install_deno(&dir, None, &|_| {}).await.unwrap();
         for name in ["yt-dlp", "ffmpeg", "ffprobe", "deno"] {
             assert!(dir.join(format!("{name}{EXE}")).is_file(), "{name} missing");
         }

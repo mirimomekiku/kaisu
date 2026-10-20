@@ -114,6 +114,56 @@ pub async fn reveal_engine(app: AppHandle, engine: State<'_, Engine>) -> Result<
     app.opener().reveal_item_in_dir(path).map_err(|e| format!("Couldn't show the folder: {e}"))
 }
 
+#[derive(serde::Serialize, Debug, PartialEq, Eq)]
+pub struct FileInfo {
+    pub exists: bool,
+    pub size: u64,
+}
+
+/// Whether each downloaded file is still there and how big it is (for the history page).
+#[tauri::command]
+pub fn file_info(paths: Vec<String>) -> Vec<FileInfo> {
+    paths
+        .iter()
+        .take(5000)
+        .map(|p| {
+            let path = PathBuf::from(p);
+            match std::fs::metadata(&path) {
+                Ok(m) if path.is_absolute() && m.is_file() => FileInfo { exists: true, size: m.len() },
+                _ => FileInfo { exists: false, size: 0 },
+            }
+        })
+        .collect()
+}
+
+const MAX_EXPORT_BYTES: usize = 20 * 1024 * 1024;
+
+/// Saves exported history to a place the user picked. Only .csv and .json, only absolute paths, never over a folder.
+#[tauri::command]
+pub fn export_text(path: String, contents: String) -> Result<(), String> {
+    write_export(Path::new(&path), &contents)
+}
+
+fn write_export(p: &Path, contents: &str) -> Result<(), String> {
+    if !p.is_absolute() {
+        return Err("Not a valid file location.".into());
+    }
+    let ext = p.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).unwrap_or_default();
+    if ext != "csv" && ext != "json" {
+        return Err("Exports are saved as .csv or .json.".into());
+    }
+    if contents.len() > MAX_EXPORT_BYTES {
+        return Err("That export is too large.".into());
+    }
+    if p.is_dir() {
+        return Err("Pick a file name, not a folder.".into());
+    }
+    if !p.parent().is_some_and(|d| d.is_dir()) {
+        return Err("That folder doesn't exist.".into());
+    }
+    std::fs::write(p, contents).map_err(|e| format!("Couldn't save the file: {e}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -188,5 +238,31 @@ mod tests {
         let got = file_exists(vec![ok.display().to_string(), temp("nope.mp3").display().to_string()]);
         assert_eq!(got, [true, false]);
         let _ = fs::remove_file(ok);
+    }
+
+    #[test]
+    fn file_info_reports_existing_and_missing() {
+        let dir = std::env::temp_dir().join(format!("kaisu-fi-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("a.mp4");
+        std::fs::write(&f, b"12345").unwrap();
+        let info = file_info(vec![f.display().to_string(), dir.join("nope.mp4").display().to_string(), dir.display().to_string(), "relative.mp4".into()]);
+        assert_eq!(info[0], FileInfo { exists: true, size: 5 });
+        assert!(!info[1].exists && !info[2].exists && !info[3].exists);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn export_is_restricted() {
+        let dir = std::env::temp_dir().join(format!("kaisu-ex-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(write_export(&dir.join("h.csv"), "a,b").is_ok());
+        assert_eq!(std::fs::read_to_string(dir.join("h.csv")).unwrap(), "a,b");
+        assert!(write_export(&dir.join("h.json"), "[]").is_ok());
+        assert!(write_export(&dir.join("h.exe"), "x").is_err());
+        assert!(write_export(&dir, "x").is_err());
+        assert!(write_export(Path::new("h.csv"), "x").is_err());
+        assert!(write_export(&dir.join("missing").join("h.csv"), "x").is_err());
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

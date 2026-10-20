@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
 use crate::{engine::Engine, proc};
@@ -22,6 +22,40 @@ pub struct SearchResult {
     pub thumbnail: String,
     /// "live" / "upcoming" entries can't be downloaded like normal videos.
     pub live: bool,
+}
+
+/// Where to search. Each maps to a yt-dlp search prefix. Only sources that were checked against the real service are
+/// listed: Dailymotion, Bilibili, Niconico and Yahoo all returned nothing when tried, so they are not offered.
+#[derive(Deserialize, Clone, Copy, Default, PartialEq, Eq, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchSource {
+    #[default]
+    Youtube,
+    Soundcloud,
+}
+
+impl SearchSource {
+    pub fn prefix(self) -> &'static str {
+        match self {
+            SearchSource::Youtube => "ytsearch",
+            SearchSource::Soundcloud => "scsearch",
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            SearchSource::Youtube => "YouTube",
+            SearchSource::Soundcloud => "SoundCloud",
+        }
+    }
+
+    fn explain(self, error: String) -> String {
+        if error.contains("Timed out") {
+            format!("{} didn't answer in time. Check your connection and try again.", self.name())
+        } else {
+            error
+        }
+    }
 }
 
 fn clean_query(query: &str) -> Result<String, String> {
@@ -74,22 +108,44 @@ pub async fn search_media(
     engine: State<'_, Engine>,
     query: String,
     limit: Option<u32>,
+    source: Option<SearchSource>,
+    proxy: Option<String>,
 ) -> Result<Vec<SearchResult>, String> {
     let query = clean_query(&query)?;
     let limit = limit.unwrap_or(12).clamp(1, MAX_RESULTS);
     let ytdlp = engine.ytdlp_path(&app).await?;
 
     // The pseudo-URL comes after `--`, so a query can never be read as an option.
-    let target = format!("ytsearch{limit}:{query}");
-    let args = ["--flat-playlist", "--dump-single-json", "--no-warnings", "--", target.as_str()];
-    let json = proc::run_capture(&ytdlp, &args, Duration::from_secs(45)).await?;
+    let source = source.unwrap_or_default();
+    let target = format!("{}{limit}:{query}", source.prefix());
+    let proxy = crate::net::proxy_option(proxy.as_deref())?;
+    let mut args: Vec<&str> = vec!["--flat-playlist", "--dump-single-json", "--no-warnings"];
+    if let Some(p) = proxy.as_deref() {
+        args.extend(["--proxy", p]);
+    }
+    args.extend(["--", target.as_str()]);
+    let json = proc::run_capture(&ytdlp, &args, Duration::from_secs(45)).await.map_err(|e| source.explain(e))?;
     let v: serde_json::Value = serde_json::from_str(&json).map_err(|e| format!("Unreadable search response: {e}"))?;
-    Ok(parse_results(&v))
+    Ok(match source {
+        SearchSource::Youtube => parse_results(&v),
+        // Other sites don't use YouTube's 11-character ids, so take what they give.
+        SearchSource::Soundcloud => crate::links::parse_entries(&v),
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sources_map_to_their_prefixes() {
+        assert_eq!(SearchSource::Youtube.prefix(), "ytsearch");
+        assert_eq!(SearchSource::Soundcloud.prefix(), "scsearch");
+        assert_eq!(SearchSource::default(), SearchSource::Youtube);
+        let s: SearchSource = serde_json::from_str("\"soundcloud\"").unwrap();
+        assert_eq!(s, SearchSource::Soundcloud);
+        assert!(serde_json::from_str::<SearchSource>("\"dailymotion\"").is_err(), "unverified sources are refused");
+    }
 
     #[test]
     fn queries_are_normalised_and_bounded() {
