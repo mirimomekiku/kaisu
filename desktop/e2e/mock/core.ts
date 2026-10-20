@@ -1,0 +1,184 @@
+// Scripted stand-in for @tauri-apps/api/core, following the real command/event protocol.
+type Ev = Record<string, unknown>;
+let nextId = 1;
+export class Channel<T = Ev> {
+  id = nextId++;
+  onmessage: (m: T) => void = () => {};
+}
+const w = window as any;
+w.__mock ??= { ready: false, calls: [] };
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+const comp = (ready: boolean, version: string | null, source: string | null) => ({
+  ready, version, source, path: ready ? `/opt/kaisu/${version}` : null,
+});
+const engine = (ready: boolean) => {
+  const partial = !ready && w.__mock.partial;
+  return {
+    ytdlp: comp(ready || partial, ready || partial ? "2026.08.19" : null, ready || partial ? "managed" : null),
+    ffmpeg: comp(ready, ready ? "N-127697" : null, ready ? "managed" : null),
+    js: comp(ready, ready ? "deno 2.9.7" : null, ready ? "managed" : null),
+    ready,
+  };
+};
+
+const formats = [
+  { id: "140", ext: "m4a", resolution: null, fps: null, vcodec: null, acodec: "mp4a.40.2", filesize: 3_200_000, note: "medium", kind: "audio" },
+  { id: "251", ext: "webm", resolution: null, fps: null, vcodec: null, acodec: "opus", filesize: 3_000_000, note: "medium", kind: "audio" },
+  { id: "18", ext: "mp4", resolution: "640x360", fps: 30, vcodec: "avc1.42001E", acodec: "mp4a.40.2", filesize: 11_000_000, note: "360p", kind: "both" },
+  { id: "136", ext: "mp4", resolution: "1280x720", fps: 30, vcodec: "avc1.4d401f", acodec: null, filesize: 41_000_000, note: "720p", kind: "video" },
+  { id: "137", ext: "mp4", resolution: "1920x1080", fps: 60, vcodec: "avc1.640028", acodec: null, filesize: 95_000_000, note: "1080p60", kind: "video" },
+];
+
+const thumb = (hue: number) =>
+  "data:image/svg+xml;utf8," + encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' width='480' height='270'><rect width='480' height='270' fill='hsl(${hue},45%,35%)'/><circle cx='240' cy='135' r='34' fill='white' opacity='.8'/></svg>`);
+const idOf = (i: number) => `vid${String(i).padStart(8, "0")}`; // 11 chars
+
+export async function invoke(cmd: string, args: any = {}): Promise<any> {
+  w.__mock.calls.push({ cmd, args: JSON.parse(JSON.stringify(args, (k, v) => (k === "onEvent" ? "[channel]" : v))) });
+  switch (cmd) {
+    case "check_setup":
+      return {
+        engine: engine(w.__mock.ready),
+        platform: { os: w.__mock.os ?? "linux", arch: "x86_64", distro: "fedora", auto_install: true },
+        manual_steps: w.__mock.os === "windows"
+          ? ["winget install yt-dlp.yt-dlp", "winget install Gyan.FFmpeg", "winget install DenoLand.Deno"]
+          : ["sudo dnf install yt-dlp ffmpeg-free", "curl -fsSL https://deno.land/install.sh | sh    (JavaScript runtime for YouTube)"],
+        managed_dir: "/home/u/.local/share/com.kaisu.app/engine",
+      };
+    case "get_engine_info":
+      return engine(w.__mock.ready);
+    case "run_setup": {
+      const ch: Channel = args.onEvent;
+      const send = (e: Ev) => ch.onmessage(e);
+      const todo = engine(false);
+      for (const [c, label] of [["ytdlp", "Downloading the video downloader…"], ["ffmpeg", "Downloading the media converter…"], ["js", "Downloading the YouTube helper…"]] as const) {
+        if ((todo as any)[c].ready) continue;
+        send({ kind: "step", component: c, label });
+        for (let p = 0; p <= 100; p += 20) {
+          send({ kind: "progress", component: c, pct: p });
+          await sleep(w.__mock.setupDelay ?? 250);
+          if (w.__mock.failAt === c && p === 40 && !w.__mock.failedOnce) { w.__mock.failedOnce = true; throw "Couldn't reach the download server. Check your internet connection and try again."; }
+        }
+        if (c === "ffmpeg") { send({ kind: "step", component: c, label: "Unpacking…" }); await sleep(300); }
+      }
+      send({ kind: "finished" });
+      w.__mock.ready = true;
+      return engine(true);
+    }
+    case "update_engine":
+      return { updated: false, version: "2026.08.19", previous: "2026.08.19" };
+    case "default_download_dir":
+      return "/home/u/Downloads";
+    case "get_media_info": {
+      await sleep(400);
+      if (/private/.test(args.url)) throw "ERROR: [youtube] abc123: Sign in to confirm your age. This video may be inappropriate for some users.";
+      if (!/^https?:\/\//.test(args.url)) throw "Enter a full web link (starting with http:// or https://) without spaces.";
+      return {
+        title: "Big Buck Bunny 60fps 4K - Official Blender Foundation Short Film", thumbnail: thumb(200), uploader: "Blender",
+        duration_secs: 635, view_count: 1234567, like_count: 45210, upload_date: "20140530", is_live: !!w.__mock.live,
+        webpage_url: args.url,
+        description: "Big Buck Bunny is a short computer animated film by the Blender Institute.\nLicensed under Creative Commons Attribution 3.0. " + "More text. ".repeat(40),
+        subtitles: w.__mock.noSubs ? [] : [
+          { code: "en", name: "English", auto: false },
+          { code: "de", name: "German", auto: false },
+          { code: "pt-BR", name: "Portuguese (Brazil)", auto: true },
+        ],
+        formats,
+      };
+    }
+    case "file_info":
+      return args.paths.map((p: string) => {
+        const exists = !(w.__mock.missing ?? []).includes(p);
+        return { exists, size: exists ? (w.__mock.sizes?.[p] ?? 1_000_000 + (p.length % 7) * 100_000) : 0 };
+      });
+    case "export_text":
+      if (w.__mock.exportFail) throw "Couldn't save the file: permission denied";
+      (w.__mock.exports ??= []).push({ path: args.path, contents: args.contents });
+      return;
+    case "test_proxy":
+      await sleep(200);
+      if (/bad/.test(args.proxy)) throw "Couldn't connect through the proxy. Check the address and that it is running.";
+      return "The proxy works.";
+    case "file_exists":
+      return args.paths.map((p: string) => !(w.__mock.missing ?? []).includes(p));
+    case "open_file":
+    case "reveal_file":
+      if ((w.__mock.missing ?? []).includes(args.path)) throw "That file has been moved or deleted.";
+      return;
+    case "open_url":
+      return;
+    case "reveal_engine":
+      return;
+    case "classify_link": {
+      const u: string = args.url;
+      if (/youtube\.com\/playlist\?list=/.test(u)) return "playlist";
+      if (/youtube\.com\/(@|channel\/)/.test(u)) return "channel";
+      return "video";
+    }
+    case "get_playlist": {
+      await sleep(250);
+      const kind = /\/@|\/channel\//.test(args.url) ? "channel" : "playlist";
+      const total = w.__mock.playlistTotal ?? 7;
+      const n = Math.min(args.limit, total);
+      return {
+        title: kind === "channel" ? "Blender Channel" : "Road Trip: Mix / 2026",
+        uploader: "Blender", kind, total,
+        entries: Array.from({ length: n }, (_, i) => ({
+          id: `pl${String(i).padStart(9, "0")}`, title: `Playlist video ${i + 1}`, url: `https://www.youtube.com/watch?v=pl${String(i).padStart(9, "0")}`,
+          channel: "Blender", duration_secs: 100 + i, view_count: 1000 * (i + 1), thumbnail: thumb(30 * i), live: false,
+        })),
+      };
+    }
+    case "free_space":
+      return w.__mock.free ?? 500 * 1024 ** 3;
+    case "open_folder":
+    case "system_power":
+    case "set_tray_status":
+    case "quit_app":
+      return;
+    case "tray_available":
+      return w.__mock.tray ?? true;
+    case "search_media": {
+      await sleep(300);
+      if (/boom/.test(args.query)) throw "ERROR: unable to download webpage: <urlopen error [Errno -2] Name or service not known>";
+      if (/nothing/.test(args.query)) return [];
+      return Array.from({ length: args.limit }, (_, i) => ({
+        id: idOf(i), title: `${args.query} — result ${i + 1}${args.source === "soundcloud" ? " (SC)" : ""}`,
+        url: args.source === "soundcloud" ? `https://api.soundcloud.com/tracks/soundcloud%3Atracks%3A${1000 + i}` : `https://www.youtube.com/watch?v=${idOf(i)}`,
+        channel: `Channel ${i + 1}`, duration_secs: 60 * (i + 1) + 5, view_count: 1000 * (i + 1) ** 2, thumbnail: thumb(40 * i), live: i === 3,
+      }));
+    }
+    case "start_download": {
+      const ch: Channel = args.onEvent;
+      const req = args.req;
+      const send = (e: Ev) => ch.onmessage(e);
+      w.__mock.cancelled?.delete(req.id); // a resumed download starts fresh
+      const cancelled = () => w.__mock.cancelled?.has(req.id);
+      send({ kind: "log", line: `[youtube] Extracting URL: ${req.url}` });
+      send({ kind: "meta", title: w.__mock.metaTitle ?? "Real Title From yt-dlp" });
+      if (/fail/.test(req.url)) {
+        await sleep(300);
+        const message = "ERROR: Unable to download webpage: <urlopen error [Errno -2] Name or service not known>";
+        send({ kind: "log", line: message });
+        send({ kind: "error", message });
+        throw message;
+      }
+      for (let p = 5; p <= 95; p += 15) {
+        if (cancelled()) { send({ kind: "cancelled" }); return; }
+        send({ kind: "progress", pct: p, speed: 6_400_000, eta: Math.round((100 - p) / 8) });
+        send({ kind: "log", line: `[download] ${p}.0% of 95.00MiB at 6.1MiB/s` });
+        await sleep(w.__mock.dlDelay ?? 500);
+      }
+      send({ kind: "processing" });
+      await sleep(500);
+      send({ kind: "done", path: `${req.out_dir}/Big Buck Bunny [aqz-KE-bpKQ].mp4` });
+      return;
+    }
+    case "cancel_download":
+      (w.__mock.cancelled ??= new Set()).add(args.id);
+      return;
+    default:
+      throw `unmocked command ${cmd}`;
+  }
+}
