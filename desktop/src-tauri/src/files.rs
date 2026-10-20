@@ -9,7 +9,7 @@ use tauri_plugin_opener::OpenerExt;
 use crate::engine::Engine;
 
 /// Everything yt-dlp/ffmpeg can produce from Kaisu's presets, plus common neighbours.
-const MEDIA_EXTENSIONS: &[&str] = &[
+pub(crate) const MEDIA_EXTENSIONS: &[&str] = &[
     "mp4", "mkv", "webm", "mov", "avi", "flv", "m4v", "mp3", "m4a", "opus", "ogg", "oga", "flac", "wav", "aac", "wma",
 ];
 

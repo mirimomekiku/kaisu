@@ -9,6 +9,7 @@ mod proc;
 mod search;
 mod setup;
 mod subs;
+mod transfer;
 mod tray;
 
 use engine::{Engine, EngineInfo, UpdateResult};
@@ -83,6 +84,9 @@ pub fn run() {
             download::cancel_download,
             download::preview_command,
             files::check_folder,
+            transfer::check_destination,
+            transfer::transfer_files,
+            transfer::delete_files,
             download::free_space,
             search::search_media,
             net::test_proxy,
