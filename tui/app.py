@@ -5,18 +5,21 @@ from pathlib import Path
 import yt_dlp
 from rich.text import Text
 
+import kaisu_search
 import kaisu_setup
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical, VerticalScroll
 from textual.reactive import reactive
 from textual.screen import ModalScreen
+from textual.widgets.option_list import Option
 from textual.widgets import (
     Button,
     Footer,
     Header,
     Input,
     Label,
+    OptionList,
     ProgressBar,
     RadioButton,
     RadioSet,
@@ -29,7 +32,7 @@ PRESETS = {
     "fmt-best": {"format": "bv*+ba/b", "label": "Best quality (MP4)"},
     "fmt-1080p": {"format": "bv*[height<=1080]+ba/b[height<=1080]", "label": "1080p (MP4)"},
     "fmt-720p": {"format": "bv*[height<=720]+ba/b[height<=720]", "label": "720p (MP4)"},
-    "fmt-mp3": {"format": "ba/b", "label": "MP3 audio"},
+    "fmt-mp3": {"format": "ba/b", "label": "Audio only (MP3)"},
 }
 
 
@@ -143,6 +146,8 @@ class KaisuTUI(App):
     #progress-container { height: auto; padding: 1; background: #18181b; border: solid #27272a; margin-bottom: 1; }
     #status-label { color: #a1a1aa; margin-bottom: 1; }
     ProgressBar { padding: 0; }
+    #results { height: 12; border: solid #27272a; background: #09090b; margin-bottom: 1; display: none; }
+    #results:focus { border: solid #f43f5e; }
     #log-container { height: 1fr; border: solid #27272a; background: #09090b; }
     RichLog { background: #09090b; color: #a1a1aa; }
     """
@@ -163,6 +168,7 @@ class KaisuTUI(App):
         self.out_dir = out_dir or default_out_dir()
         self._refresh_tools()
         self._cancel = threading.Event()
+        self._search_query, self._search_limit = "", kaisu_search.PAGE_SIZE
 
     def _refresh_tools(self) -> None:
         ffmpeg = kaisu_setup.locate_ffmpeg_dir()
@@ -185,9 +191,10 @@ class KaisuTUI(App):
         with Vertical(id="main-container"):
             with Horizontal(id="input-row"):
                 yield Input(
-                    placeholder="Enter a video URL (YouTube, Vimeo, Twitch, ...)",
+                    placeholder="Paste a video link, or type words and press Enter to search YouTube",
                     id="url-input",
                 )
+                yield Button("Search", id="btn-search", classes="btn-action")
                 yield Button("Inspect", id="btn-inspect", classes="btn-action")
                 yield Button("Download", id="btn-download", classes="btn-action")
 
@@ -199,8 +206,10 @@ class KaisuTUI(App):
                         yield RadioButton(preset["label"], id=rid, value=first)
                         first = False
 
+            yield OptionList(id="results")
+
             with Container(id="progress-container"):
-                yield Label("Ready. Enter a URL above.", id="status-label")
+                yield Label("Ready. Paste a link or search above.", id="status-label")
                 yield ProgressBar(id="progress-bar", total=100, show_eta=True)
 
             with VerticalScroll(id="log-container"):
@@ -214,7 +223,7 @@ class KaisuTUI(App):
         self._log(("Kaisu TUI ready.", "bold cyan"))
         self._log((f"yt-dlp {yt_dlp.version.__version__} | {kaisu_setup.platform_label()}", "dim"))
         self._log((f"Saving to: {self.out_dir}", "dim"))
-        self._log(("Enter/F2 inspect, F5 download, Esc cancel, F6 clear log, F1 setup, Ctrl+Q quit.\n", "dim"))
+        self._log(("Enter search/inspect, F2 inspect, F5 download, Esc cancel, F6 clear log, F1 setup, Ctrl+Q quit.\n", "dim"))
         self.action_setup(only_if_missing=True)
 
     def action_setup(self, only_if_missing: bool = False) -> None:
@@ -264,9 +273,16 @@ class KaisuTUI(App):
             self.action_start_download()
         elif event.button.id == "btn-inspect":
             self.action_inspect()
+        elif event.button.id == "btn-search":
+            self.action_search()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        self.action_inspect()
+        """Enter: a link is inspected, anything else is searched."""
+        text = event.value.strip()
+        if valid_url(text):
+            self.action_inspect()
+        else:
+            self.action_search()
 
     def action_clear_logs(self) -> None:
         self.query_one(RichLog).clear()
@@ -291,6 +307,63 @@ class KaisuTUI(App):
         self._log(("Fetching metadata: ", "bold blue"), url)
         self.run_worker(lambda: self._inspect_worker(url), thread=True, exclusive=True)
 
+    # ---- search -------------------------------------------------------------------------------
+    _MORE = "__more__"
+
+    def action_search(self, limit: int = kaisu_search.PAGE_SIZE) -> None:
+        if self.busy:
+            return
+        query = self.query_one("#url-input", Input).value.strip()
+        try:
+            query = kaisu_search.clean_query(query)
+        except ValueError as e:
+            self._status(str(e), "bold red")
+            return
+        self.busy = True
+        self._search_query, self._search_limit = query, limit
+        self._status(f"Searching YouTube for: {query}", "yellow")
+        self.run_worker(lambda: self._search_worker(query, limit), thread=True, exclusive=True)
+
+    def _search_worker(self, query: str, limit: int) -> None:
+        try:
+            results = kaisu_search.search(query, limit)
+            self.call_from_thread(self._show_results, results)
+        except ValueError as e:
+            self.call_from_thread(self._fail, str(e))
+        except Exception as e:
+            self.call_from_thread(self._fail, str(e))
+
+    def _show_results(self, results: list[kaisu_search.Result]) -> None:
+        listing = self.query_one("#results", OptionList)
+        listing.clear_options()
+        if not results:
+            self._status("No videos found. Try different words.", "yellow")
+            listing.display = False
+            self.busy = False
+            return
+        for r in results:
+            line2 = " · ".join(
+                x for x in (r.channel, "LIVE" if r.live else kaisu_search.fmt_duration(r.duration),
+                            f"{kaisu_search.fmt_count(r.views)} views" if r.views is not None else "") if x
+            )
+            listing.add_option(Option(Text.assemble((r.title, "bold"), "\n  ", (line2, "dim")), id=r.url))
+        if len(results) >= self._search_limit and self._search_limit < kaisu_search.MAX_RESULTS:
+            listing.add_option(Option(Text("  Show more results...", style="cyan"), id=self._MORE))
+        listing.display = True
+        self._status(f"{len(results)} results for: {self._search_query}. Pick one with Up/Down and Enter.", "green")
+        self.busy = False
+        listing.focus()
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        if self.busy:
+            return
+        choice = event.option.id
+        if choice == self._MORE:
+            self.action_search(min(self._search_limit + kaisu_search.PAGE_SIZE, kaisu_search.MAX_RESULTS))
+            return
+        self.query_one("#url-input", Input).value = str(choice)
+        self.action_inspect()
+
     def _inspect_worker(self, url: str) -> None:
         opts = {"skip_download": True, "quiet": True, "no_warnings": True, "noplaylist": True, **self._tool_opts()}
         try:
@@ -302,13 +375,24 @@ class KaisuTUI(App):
 
     def _show_info(self, info: dict) -> None:
         title = info.get("title") or "Unknown"
-        self._status(f"Found: {title[:60]}", "green")
-        self._log(("Metadata retrieved", "green"))
+        self._status(f"Found: {title[:60]}. Choose Video or Audio below, then press F5.", "green")
+        self._log(("Video details", "green"))
         self._log("  Title:    ", title)
         self._log("  Channel:  ", info.get("uploader") or info.get("channel") or "Unknown")
-        self._log("  Duration: ", info.get("duration_string") or "Unknown")
+        self._log("  Duration: ", "LIVE" if info.get("is_live") else kaisu_search.fmt_duration(info.get("duration")))
         if views := info.get("view_count"):
             self._log("  Views:    ", f"{views:,}")
+        if likes := info.get("like_count"):
+            self._log("  Likes:    ", f"{likes:,}")
+        if date := kaisu_search.fmt_date(info.get("upload_date")):
+            self._log("  Uploaded: ", date)
+        if description := (info.get("description") or "").strip():
+            lines = description.splitlines()
+            snippet = " ".join(lines[:3])
+            self._log("  About:    ", snippet[:240] + ("..." if len(snippet) > 240 or len(lines) > 3 else ""))
+        if info.get("is_live"):
+            self._log(("  This is a live stream; downloading may not work until it ends.", "yellow"))
+        self._log(("  Pick 'Best quality (MP4)' for video or 'Audio only (MP3)' for audio, then F5.", "dim"))
         self._log("")
         self.busy = False
 
