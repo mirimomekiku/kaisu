@@ -7,8 +7,9 @@ import {
   type ExtraOptions,
   type Preset,
 } from "../lib/api";
+import type { SavedDownload } from "../lib/storage";
 
-export type DownloadStatus = "queued" | "downloading" | "processing" | "completed" | "error" | "cancelled";
+export type DownloadStatus = "queued" | "downloading" | "processing" | "paused" | "completed" | "error" | "cancelled";
 
 export interface DownloadItem {
   id: string;
@@ -26,6 +27,10 @@ export interface DownloadItem {
   errorMsg?: string;
   /** Recent yt-dlp output, newest last (capped). */
   log: string[];
+  /** Set for partial downloads (e.g. "80-165"): part of the item's identity, so a clip isn't a duplicate of the whole video. */
+  clipKey?: string;
+  /** The title is only the link for now; yt-dlp will tell us the real one. */
+  placeholderTitle?: boolean;
 }
 
 export interface EnqueueInput {
@@ -35,6 +40,8 @@ export interface EnqueueInput {
   preset: Preset;
   outDir: string;
   extra: ExtraOptions;
+  clipKey?: string;
+  placeholderTitle?: boolean;
 }
 
 const MAX_LOG_LINES = 400;
@@ -45,10 +52,15 @@ const isFinished = (s: DownloadStatus) => s === "completed" || s === "error" || 
 let nextId = 0;
 const newId = () => `${Date.now().toString(36)}-${(nextId++).toString(36)}`;
 
-/** Download queue. Items wait as "queued" until a slot (`concurrency`) frees up. */
+/** The same download means the same link, kind of file, and part of the video. */
+export const sameDownload = (a: { url: string; preset: Preset; clipKey?: string }, b: { url: string; preset: Preset; clipKey?: string }) =>
+  a.url === b.url && a.preset === b.preset && (a.clipKey ?? "") === (b.clipKey ?? "");
+
+/** Download queue. Items wait as "queued" until a slot (`concurrency`) frees up; they can be paused and resumed. */
 export function useDownloads(concurrency: number, onCompleted: (item: DownloadItem) => void) {
   const [items, setItems] = useState<DownloadItem[]>([]);
   const started = useRef(new Set<string>());
+  const pausing = useRef(new Set<string>());
   const itemsRef = useRef(items);
   itemsRef.current = items;
   const onCompletedRef = useRef(onCompleted);
@@ -62,18 +74,16 @@ export function useDownloads(concurrency: number, onCompleted: (item: DownloadIt
     (id: string, e: DownloadEvent) => {
       switch (e.kind) {
         case "progress":
-          patch(id, (it) => ({
-            status: "downloading",
-            progress: Math.max(it.progress, e.pct),
-            speed: e.speed,
-            eta: e.eta,
-          }));
+          patch(id, (it) => (it.status === "paused" ? {} : { status: "downloading", progress: Math.max(it.progress, e.pct), speed: e.speed, eta: e.eta }));
+          break;
+        case "processing":
+          patch(id, (it) => (it.status === "paused" ? {} : { status: "processing", progress: 99, speed: null, eta: null }));
+          break;
+        case "meta":
+          patch(id, (it) => (it.placeholderTitle ? { title: e.title, placeholderTitle: false } : {}));
           break;
         case "log":
           patch(id, (it) => ({ log: [...it.log, e.line].slice(-MAX_LOG_LINES) }));
-          break;
-        case "processing":
-          patch(id, () => ({ status: "processing", progress: 99, speed: null, eta: null }));
           break;
         case "done": {
           const done = itemsRef.current.find((it) => it.id === id);
@@ -82,9 +92,12 @@ export function useDownloads(concurrency: number, onCompleted: (item: DownloadIt
           break;
         }
         case "cancelled":
-          patch(id, () => ({ status: "cancelled", speed: null, eta: null }));
+          // Pausing stops the process the same way cancelling does; the difference is what we keep.
+          if (pausing.current.delete(id)) patch(id, () => ({ status: "paused", speed: null, eta: null }));
+          else patch(id, () => ({ status: "cancelled", speed: null, eta: null }));
           break;
         case "error":
+          pausing.current.delete(id);
           patch(id, () => ({ status: "error", speed: null, eta: null, errorMsg: e.message }));
           break;
       }
@@ -117,8 +130,9 @@ export function useDownloads(concurrency: number, onCompleted: (item: DownloadIt
     }
   }, [items, concurrency, handleEvent]);
 
-  const enqueue = useCallback((input: EnqueueInput) => {
-    const item: DownloadItem = {
+  const enqueue = useCallback((inputs: EnqueueInput | EnqueueInput[]) => {
+    const list = Array.isArray(inputs) ? inputs : [inputs];
+    const created: DownloadItem[] = list.map((input) => ({
       ...input,
       id: newId(),
       status: "queued",
@@ -127,23 +141,55 @@ export function useDownloads(concurrency: number, onCompleted: (item: DownloadIt
       eta: null,
       path: null,
       log: [],
-    };
-    setItems((prev) => [item, ...prev]);
+    }));
+    // Newest first, but a batch keeps its own order (the first one added runs first).
+    setItems((prev) => [...created.slice().reverse(), ...prev]);
   }, []);
 
   const cancel = useCallback(
     (id: string) => {
       const it = itemsRef.current.find((x) => x.id === id);
       if (!it) return;
-      if (it.status === "queued") {
+      if (it.status === "queued" || it.status === "paused") {
         started.current.add(id);
-        patch(id, () => ({ status: "cancelled" }));
+        setItems((prev) => prev.map((x) => (x.id === id ? { ...x, status: "cancelled" } : x)));
       } else {
         cancelDownload(id).catch((e) => console.warn("cancel failed", e));
       }
     },
-    [patch],
+    [],
   );
+
+  /** Stops a download but keeps what was downloaded so far; `resume` carries on from there. */
+  const pause = useCallback((id: string) => {
+    const it = itemsRef.current.find((x) => x.id === id);
+    if (!it) return;
+    if (it.status === "queued") {
+      started.current.add(id);
+      setItems((prev) => prev.map((x) => (x.id === id ? { ...x, status: "paused" } : x)));
+    } else if (isActive(it.status)) {
+      pausing.current.add(id);
+      cancelDownload(id).catch((e) => {
+        pausing.current.delete(id);
+        console.warn("pause failed", e);
+      });
+    }
+  }, []);
+
+  const resume = useCallback((id: string) => {
+    started.current.delete(id);
+    pausing.current.delete(id);
+    setItems((prev) => prev.map((x) => (x.id === id && x.status === "paused" ? { ...x, status: "queued", speed: null, eta: null } : x)));
+  }, []);
+
+  const pauseAll = useCallback(() => itemsRef.current.forEach((x) => (x.status === "queued" || isActive(x.status)) && pause(x.id)), [pause]);
+  const resumeAll = useCallback(() => {
+    // Resume oldest first so the queue order is what it was.
+    itemsRef.current
+      .filter((x) => x.status === "paused")
+      .reverse()
+      .forEach((x) => resume(x.id));
+  }, [resume]);
 
   const retry = useCallback((id: string) => {
     started.current.delete(id);
@@ -164,7 +210,34 @@ export function useDownloads(concurrency: number, onCompleted: (item: DownloadIt
     setItems((prev) => prev.filter((it) => !isFinished(it.status)));
   }, []);
 
-  const hasActive = items.some((it) => isActive(it.status) || it.status === "queued");
+  /** Puts back what was unfinished last time. Things that were running come back paused, so nothing starts by surprise. */
+  const restore = useCallback((saved: SavedDownload[]) => {
+    const restored: DownloadItem[] = saved.map((s) => ({
+      id: s.id,
+      title: s.title,
+      url: s.url,
+      thumbnail: s.thumbnail,
+      preset: s.preset,
+      outDir: s.outDir,
+      extra: s.extra,
+      status: s.status === "error" || s.status === "cancelled" ? (s.status as DownloadStatus) : "paused",
+      progress: s.progress,
+      speed: null,
+      eta: null,
+      path: null,
+      log: [],
+      clipKey: s.clipKey,
+      placeholderTitle: s.placeholderTitle,
+    }));
+    for (const r of restored) started.current.add(r.id);
+    // Idempotent: restoring the same saved queue twice must not duplicate anything.
+    setItems((prev) => {
+      const have = new Set(prev.map((i) => i.id));
+      return [...prev, ...restored.filter((r) => !have.has(r.id))];
+    });
+  }, []);
 
-  return { items, enqueue, cancel, retry, remove, clearFinished, hasActive };
+  const unfinished = items.filter((i) => i.status === "queued" || isActive(i.status)).length;
+
+  return { items, enqueue, cancel, pause, resume, pauseAll, resumeAll, retry, remove, clearFinished, restore, hasActive: unfinished > 0 };
 }
