@@ -18,6 +18,8 @@ interface Handlers {
   onRemove: (id: string) => void;
   onOpen: (path: string) => void;
   onReveal: (path: string) => void;
+  onCopyPath: (path: string) => void;
+  onDeleteFile: (path: string) => void;
 }
 
 interface Props extends Handlers {
@@ -91,7 +93,7 @@ function Actions({ item, advanced, iconOnly, showLog, onToggleLog, ...h }: { ite
           <ScrollText className="w-3 h-3" />
         </button>
       )}
-      {item.status === "completed" && <FileActions path={item.path} exists={undefined} onOpen={h.onOpen} onReveal={h.onReveal} iconOnly={iconOnly} />}
+      {item.status === "completed" && <FileActions path={item.path} exists={undefined} onOpen={h.onOpen} onReveal={h.onReveal} onCopyPath={h.onCopyPath} onDelete={h.onDeleteFile} iconOnly={iconOnly} />}
       {(item.status === "error" || item.status === "cancelled") && (
         <button className="row-btn" title="Try again" aria-label="Try again" onClick={() => h.onRetry(item.id)}>
           <RotateCcw className="w-3 h-3" />

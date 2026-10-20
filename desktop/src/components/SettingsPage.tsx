@@ -6,6 +6,8 @@ import type { ScheduleState } from "../lib/schedule";
 import { SUBTITLE_MODE_LABEL } from "../lib/subtitles";
 import { checkAudioQuality, checkProxy, checkSpeedLimit } from "../lib/validate";
 import { formatBytes } from "../lib/format";
+import { DELETE_AFTER_CHOICES } from "../lib/transfer";
+import type { Destination } from "../hooks/useAutoMove";
 import ScheduleEditor from "./ScheduleEditor";
 import { LAYOUT_LABEL, NAME_LABEL, checkCustomName, previewPath } from "../lib/output";
 import { ACCENTS, type Accent, type Mode, type Settings, type SubtitleMode, type Theme } from "../lib/storage";
@@ -27,6 +29,10 @@ interface Props {
   onShowShortcuts: () => void;
   onShowTour: () => void;
   scheduleState: ScheduleState;
+  /** Moving finished downloads to another folder. */
+  moveStatus: { pending: number; destination: Destination; moving: boolean; moveNow: () => void };
+  /** Deleting old downloads. */
+  cleanup: { count: number; bytes: number; running: boolean; cleanNow: () => void };
   /** null while still being checked. */
   trayAvailable: boolean | null;
 }
@@ -73,7 +79,7 @@ function componentLine(name: string, c: Component | undefined) {
   return `${name} ${c.version ?? "ready"}${c.source ? ` (${c.source})` : ""}`;
 }
 
-export default function SettingsPage({ settings, effectiveOutDir, engine, engineState, onChange, onCheckUpdate, onOpenSetup, onRevealEngine, onShowShortcuts, onShowTour, scheduleState, trayAvailable }: Props) {
+export default function SettingsPage({ settings, effectiveOutDir, engine, engineState, onChange, onCheckUpdate, onOpenSetup, onRevealEngine, onShowShortcuts, onShowTour, scheduleState, moveStatus, cleanup, trayAvailable }: Props) {
   // Is the download folder usable? Checked whenever it changes, so a problem shows up here and not mid-download.
   const [folder, setFolder] = useState<{ problem?: string; free?: number }>({});
   useEffect(() => {
@@ -103,6 +109,11 @@ export default function SettingsPage({ settings, effectiveOutDir, engine, engine
 
   const customError = advanced ? checkCustomName(settings.customName) : null;
   const prefs = { layout: settings.layout, nameStyle: settings.nameStyle, customName: advanced ? settings.customName : "", playlistFolder: settings.playlistFolder, playlistNumbering: settings.playlistNumbering };
+
+  const pickMoveFolder = async () => {
+    const dir = await open({ directory: true, multiple: false, defaultPath: settings.moveDir || undefined });
+    if (typeof dir === "string") onChange({ moveDir: dir });
+  };
 
   const pickFolder = async () => {
     const dir = await open({ directory: true, multiple: false, defaultPath: effectiveOutDir || undefined });
@@ -150,6 +161,12 @@ export default function SettingsPage({ settings, effectiveOutDir, engine, engine
             {folder.problem ?? `Ready. ${formatBytes(folder.free ?? 0)} free.`}
           </div>
         )}
+        <div className="pref-row">
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={settings.cleanTitles} onChange={(e) => onChange({ cleanTitles: e.target.checked })} />
+            Tidy titles: remove "(Official Video)", "[Lyrics]" and similar
+          </label>
+        </div>
         <Row label="Folders" hint="How downloads are sorted inside that folder.">
           <select value={settings.layout} onChange={(e) => onChange({ layout: e.target.value as Layout })} className="field" aria-label="Folder layout">
             {(Object.keys(LAYOUT_LABEL) as Layout[]).map((k) => (
@@ -473,6 +490,114 @@ export default function SettingsPage({ settings, effectiveOutDir, engine, engine
           <ScheduleEditor rules={settings.schedule} onChange={(schedule) => onChange({ schedule })} state={scheduleState} />
         </Group>
       )}
+
+      <Group title="Move downloads" hint="Send finished downloads to an external drive or another folder, by themselves.">
+        <div className="pref-row">
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={settings.moveEnabled} onChange={(e) => onChange({ moveEnabled: e.target.checked })} />
+            Move finished downloads to another folder
+          </label>
+        </div>
+        {settings.moveEnabled && (
+          <>
+            <Row label="Move them to" hint="An external drive, a memory stick or a network folder.">
+              <div className="flex items-center gap-2 max-w-full">
+                <span className="min-w-0 max-w-64 truncate mono selectable" title={settings.moveDir}>
+                  {settings.moveDir || "not chosen"}
+                </span>
+                <button onClick={pickMoveFolder} className="btn small">
+                  <FolderOpen className="w-3 h-3" /> Choose…
+                </button>
+              </div>
+            </Row>
+            <div className="pref-row" role={moveStatus.destination.state === "missing" ? "alert" : "status"} aria-label="Move destination check" style={{ color: moveStatus.destination.state === "missing" ? "#b3261e" : "#2f7a2b" }}>
+              {!settings.moveDir.trim()
+                ? "Choose a folder to start."
+                : moveStatus.destination.state === "ready"
+                  ? `Ready. ${formatBytes(moveStatus.destination.free)} free there.`
+                  : moveStatus.destination.state === "missing"
+                    ? `${moveStatus.destination.message}${settings.moveWhen === "done" ? " Plug it in and Kaisu will carry on by itself." : ""}`
+                    : "Checking…"}
+            </div>
+            <Row label="Move or copy" hint="Moving removes the original once the copy has been checked.">
+              <select value={settings.moveMode} onChange={(e) => onChange({ moveMode: e.target.value as Settings["moveMode"] })} className="field" aria-label="Move or copy">
+                <option value="move">Move (remove the original)</option>
+                <option value="copy">Copy (keep the original)</option>
+              </select>
+            </Row>
+            <Row label="When">
+              <select value={settings.moveWhen} onChange={(e) => onChange({ moveWhen: e.target.value as Settings["moveWhen"] })} className="field" aria-label="When to move">
+                <option value="done">Right after each download, or when the drive is plugged in</option>
+                <option value="manual">Only when I press "Move now"</option>
+              </select>
+            </Row>
+            <Row label="Which downloads">
+              <select value={settings.moveTypes} onChange={(e) => onChange({ moveTypes: e.target.value as Settings["moveTypes"] })} className="field" aria-label="Which downloads to move">
+                <option value="all">Everything</option>
+                <option value="audio">Audio only</option>
+                <option value="video">Video only</option>
+              </select>
+            </Row>
+            <div className="pref-row">
+              <label className="flex items-center gap-2">
+                <input type="checkbox" checked={settings.moveKeepLayout} onChange={(e) => onChange({ moveKeepLayout: e.target.checked })} />
+                Keep my folders (artist, album, channel...) on the other drive
+              </label>
+            </div>
+            <Row label="If a file is already there">
+              <select value={settings.moveConflict} onChange={(e) => onChange({ moveConflict: e.target.value as Settings["moveConflict"] })} className="field" aria-label="If a file is already there">
+                <option value="keep_both">Keep both (add a number)</option>
+                <option value="skip">Leave it, skip mine</option>
+                <option value="replace">Replace it</option>
+              </select>
+            </Row>
+            <div className="pref-row">
+              <span role="status" aria-label="Waiting to move">
+                {moveStatus.moving ? "Moving…" : moveStatus.pending === 0 ? "Nothing is waiting to move." : `${moveStatus.pending} download${moveStatus.pending === 1 ? " is" : "s are"} waiting.`}
+              </span>
+              <button className="btn small" disabled={moveStatus.moving || moveStatus.pending === 0 || moveStatus.destination.state !== "ready"} onClick={moveStatus.moveNow}>
+                Move now
+              </button>
+            </div>
+          </>
+        )}
+      </Group>
+
+      <Group title="Clean up" hint="Delete old downloads for good, so your disk doesn't fill up. Only files Kaisu downloaded are touched.">
+        <Row label="Delete downloads older than">
+          <select value={settings.autoDeleteDays} onChange={(e) => onChange({ autoDeleteDays: Number(e.target.value) })} className="field" aria-label="Delete downloads older than">
+            {DELETE_AFTER_CHOICES.map((d) => (
+              <option key={d} value={d}>
+                {d === 0 ? "Never" : `${d} days`}
+              </option>
+            ))}
+          </select>
+        </Row>
+        {settings.autoDeleteDays > 0 && (
+          <>
+            {settings.moveEnabled && settings.moveDir.trim() && (
+              <div className="pref-row">
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" checked={settings.autoDeleteMoved} onChange={(e) => onChange({ autoDeleteMoved: e.target.checked })} />
+                  Also clean the folder downloads are moved to
+                </label>
+              </div>
+            )}
+            <div className="pref-row">
+              <span role="status" aria-label="Old downloads">
+                {cleanup.running
+                  ? "Deleting…"
+                  : cleanup.count === 0
+                    ? "Nothing is old enough to delete."
+                    : `${cleanup.count} download${cleanup.count === 1 ? " is" : "s are"} older than ${settings.autoDeleteDays} days${cleanup.bytes > 0 ? ` (${formatBytes(cleanup.bytes)})` : ""}.`}
+              </span>
+              <button className="btn small" disabled={cleanup.running || cleanup.count === 0} onClick={cleanup.cleanNow}>
+                Clean up now
+              </button>
+            </div>
+          </>
+        )}
+      </Group>
 
       <Group title="Appearance">
         <Row label="Theme" hint="Aqua is the classic look. Graphite is colourless. Dark is easier on the eyes at night.">

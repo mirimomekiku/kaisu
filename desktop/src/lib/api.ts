@@ -5,8 +5,8 @@ export type AudioFormat = "mp3" | "m4a" | "opus" | "flac" | "wav";
 export type SponsorBlock = "off" | "mark" | "remove";
 export type Browser = "firefox" | "chrome" | "chromium" | "edge" | "brave" | "opera" | "vivaldi";
 
-export type Layout = "flat" | "channel" | "kind" | "year";
-export type NameStyle = "title_id" | "title" | "channel_title" | "date_title";
+export type Layout = "flat" | "channel" | "kind" | "year" | "music";
+export type NameStyle = "title_id" | "title" | "channel_title" | "date_title" | "track_title";
 
 export interface OutputOptions {
   layout: Layout;
@@ -94,6 +94,7 @@ export interface ExtraOptions {
   cover: CoverOptions | null;
   lyrics: LyricsMode | null;
   audio: AudioExtras | null;
+  clean_titles: boolean;
 }
 
 export interface DownloadRequest {
@@ -192,6 +193,7 @@ export interface SetupInfo {
   platform: Platform;
   manual_steps: string[];
   managed_dir: string;
+  free_bytes: number | null;
 }
 
 export type SetupEvent =
@@ -237,6 +239,27 @@ export interface FolderCheck {
 export const checkFolder = (path: string) => invoke<FolderCheck>("check_folder", { path });
 /** The yt-dlp command a download would run, for copying. */
 export const previewCommand = (req: DownloadRequest) => invoke<string>("preview_command", { req });
+export type MoveMode = "move" | "copy";
+export type MoveConflict = "keep_both" | "skip" | "replace";
+export interface MoveResult {
+  id: string;
+  ok: boolean;
+  skipped: boolean;
+  new_path: string | null;
+  error: string | null;
+}
+/** Is the place for moved downloads there (a plugged-in drive) and writable? Rejects with the reason. */
+export const checkDestination = (path: string) => invoke<{ free: number }>("check_destination", { path });
+/** Moves or copies finished downloads (inside `baseDir`) to `destDir`. */
+export const transferFiles = (items: Array<{ id: string; path: string }>, baseDir: string, destDir: string, mode: MoveMode, conflict: MoveConflict, keepLayout: boolean) =>
+  invoke<MoveResult[]>("transfer_files", { items, baseDir, destDir, mode, conflict, keepLayout });
+export interface DeleteResult {
+  path: string;
+  ok: boolean;
+  error: string | null;
+}
+/** Deletes downloaded files (and their subtitle/lyrics files) that lie inside the `allowed` folders. */
+export const deleteFiles = (paths: string[], allowed: string[]) => invoke<DeleteResult[]>("delete_files", { paths, allowed });
 export const openFile = (path: string) => invoke<void>("open_file", { path });
 export const revealFile = (path: string) => invoke<void>("reveal_file", { path });
 export const openUrl = (url: string) => invoke<void>("open_url", { url });

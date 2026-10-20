@@ -24,6 +24,8 @@ import { useDropLinks } from "./hooks/useDropLinks";
 import { sameDownload, useDownloads, type DownloadItem } from "./hooks/useDownloads";
 import { useQueuePersistence } from "./hooks/useQueuePersistence";
 import { useShortcuts } from "./hooks/useShortcuts";
+import { useAutoDelete } from "./hooks/useAutoDelete";
+import { useAutoMove } from "./hooks/useAutoMove";
 import { useSchedule } from "./hooks/useSchedule";
 import { useTrayBridge } from "./hooks/useTrayBridge";
 import {
@@ -31,6 +33,7 @@ import {
   classifyLink,
   defaultDownloadDir,
   checkFolder,
+  deleteFiles,
   errorText,
   exportText,
   freeSpace,
@@ -92,7 +95,7 @@ const LISTING_MAX = 500;
 const LOW_DISK_BYTES = 2 * 1024 * 1024 * 1024;
 
 /** What Simple mode always sends: sensible defaults, none of the advanced settings. */
-const SIMPLE_BASE: Omit<ExtraOptions, "output" | "playlist" | "clip" | "proxy" | "subs" | "meta" | "cover" | "lyrics" | "audio"> = {
+const SIMPLE_BASE: Omit<ExtraOptions, "output" | "playlist" | "clip" | "proxy" | "subs" | "meta" | "cover" | "lyrics" | "audio" | "clean_titles"> = {
   sponsorblock: "off",
   cookies_from_browser: null,
   audio_format: "mp3",
@@ -272,6 +275,84 @@ export default function App() {
         .catch(() => showFlash("Couldn't copy to the clipboard.", true));
     },
     [showFlash],
+  );
+
+  const copyPath = useCallback((path: string) => copyText(path, "File location"), [copyText]);
+
+  // ---- finished files: moving them elsewhere, cleaning up, and quick actions ----
+  const filesReady = settingsLoaded && queueLoaded;
+  const mover = useAutoMove({
+    settings,
+    outDir: effectiveOutDir,
+    getHistory: () => historyRef.current,
+    history,
+    existing,
+    updateHistory,
+    announce: setNote,
+    showFlash,
+    ready: filesReady,
+  });
+  const cleaner = useAutoDelete({ settings, outDir: effectiveOutDir, history, existing, sizes, announce: setNote, showFlash, onDeleted: recheck, ready: filesReady });
+
+  /** Deletes a downloaded file from the computer (after asking), and forgets it in History. */
+  const deleteDownloaded = useCallback(
+    async (path: string) => {
+      const title = historyRef.current.find((h) => h.path === path)?.title ?? path.split(/[\\/]/).pop() ?? "this file";
+      const answer = await confirm.ask({
+        title: "Delete this file?",
+        body: (
+          <p className="m-0">
+            <b>{title}</b> will be deleted from your computer. This can't be undone.
+          </p>
+        ),
+        buttons: [
+          { id: "cancel", label: "Cancel", primary: true },
+          { id: "delete", label: "Delete file" },
+        ],
+        cancelId: "cancel",
+      });
+      if (answer !== "delete") return;
+      try {
+        const folders = [effectiveOutDir, settingsRef.current.moveDir].filter((d) => d.trim() !== "");
+        const [result] = await deleteFiles([path], folders);
+        if (!result?.ok) {
+          showFlash(result?.error ?? "Couldn't delete the file.", true);
+          return;
+        }
+        updateHistory(historyRef.current.filter((h) => h.path !== path));
+        recheck();
+        setNote({ title: "File deleted", subtitle: title });
+      } catch (e) {
+        showFlash(errorText(e), true);
+      }
+    },
+    [confirm, effectiveOutDir, recheck, showFlash, updateHistory],
+  );
+
+  /** Enabling automatic deletion asks first: it removes files for good. */
+  const changeSettingsGuarded = useCallback(
+    async (patch: Partial<Settings>) => {
+      const days = patch.autoDeleteDays;
+      if (days !== undefined && days > 0 && settingsRef.current.autoDeleteDays === 0) {
+        const answer = await confirm.ask({
+          title: "Delete old downloads automatically?",
+          body: (
+            <p className="m-0">
+              Downloads older than <b>{days} days</b> will be deleted from your computer, with their subtitle and lyrics files. This can't be undone, and only files Kaisu
+              downloaded are touched.
+            </p>
+          ),
+          buttons: [
+            { id: "cancel", label: "Cancel", primary: true },
+            { id: "yes", label: "Turn on" },
+          ],
+          cancelId: "cancel",
+        });
+        if (answer !== "yes") return;
+      }
+      changeSettings(patch);
+    },
+    [changeSettings, confirm],
   );
 
   // The browser's own right-click menu (Reload, Inspect...) makes no sense in an app window. Keep it only where
@@ -521,6 +602,7 @@ export default function App() {
     audio: ctx?.audio !== undefined ? ctx.audio : defaultAudio(),
     // The proxy applies in both modes: it is about reaching the internet, not about choices.
     proxy: settings.proxy.trim() || null,
+    clean_titles: settings.cleanTitles,
     subs: ctx?.subs !== undefined ? ctx.subs : defaultSubs(),
     ...(advanced
       ? {
@@ -815,6 +897,11 @@ export default function App() {
     downloadOpenVideo: (asAudio) => void downloadCurrent({ preset: asAudio ? "audio" : "best", formatId: null, clip: null, estimate: null, subs: defaultSubs(), meta: null, cover: null, lyrics: null, audio: null }),
     togglePauseAll: () => (pausedCount > 0 ? resumeAll() : pauseAll()),
     openDownloadFolder: () => openFolder(effectiveOutDir).catch((err) => showFlash(errorText(err), true)),
+    openLatest: () => {
+      const latest = history.filter((h) => h.path && existing[h.path] !== false).sort((a, b) => b.timestamp - a.timestamp)[0];
+      if (latest?.path) openDownloaded(latest.path);
+      else showFlash("There's no finished download to play yet.", true);
+    },
   });
 
   const listingTitle =
@@ -890,6 +977,9 @@ export default function App() {
     return gate(
       <SetupScreen
         info={setupInfo}
+        proxy={settings.proxy}
+        onProxy={(proxy) => changeSettings({ proxy })}
+        onRecheck={() => checkSetup().then(setSetupInfo)}
         onDone={(next) => {
           setEngine(next);
           // Setup just fetched the latest yt-dlp; no need to check again right away.
@@ -1199,7 +1289,7 @@ export default function App() {
             (items.length === 0 ? (
               emptyState(<Download className="w-14 h-14" strokeWidth={1.25} />, "No downloads", "Videos you download will appear here with their progress.")
             ) : effectiveView(settings.viewQueue, QUEUE_VIEWS) === "details" ? (
-              <DownloadTable items={items} mode={mode} onCancel={cancel} onPause={pause} onResume={resume} onRetry={retry} onRunNext={runNext} onRunLater={runLater} onRemove={remove} onOpen={openDownloaded} onReveal={revealDownloaded} />
+              <DownloadTable items={items} mode={mode} onCancel={cancel} onPause={pause} onResume={resume} onRetry={retry} onRunNext={runNext} onRunLater={runLater} onRemove={remove} onOpen={openDownloaded} onReveal={revealDownloaded} onCopyPath={copyPath} onDeleteFile={deleteDownloaded} />
             ) : (
               <div
                 className={`p-3 ${
@@ -1221,6 +1311,8 @@ export default function App() {
                     onRemove={remove}
                     onOpen={openDownloaded}
                     onReveal={revealDownloaded}
+                    onCopyPath={copyPath}
+                    onDeleteFile={deleteDownloaded}
                   />
                 ))}
               </div>
@@ -1239,6 +1331,8 @@ export default function App() {
               audioLabel={audioLabel}
               onOpen={openDownloaded}
               onReveal={revealDownloaded}
+              onCopyPath={copyPath}
+              onDeleteFile={deleteDownloaded}
               onRemove={(id) => updateHistory(history.filter((h) => h.id !== id))}
               onRemoveMany={(ids) => {
                 const gone = new Set(ids);
@@ -1259,7 +1353,9 @@ export default function App() {
               effectiveOutDir={effectiveOutDir}
               engine={engine}
               engineState={engineState}
-              onChange={changeSettings}
+              onChange={changeSettingsGuarded}
+              moveStatus={{ pending: mover.pending.length, destination: mover.destination, moving: mover.moving, moveNow: mover.moveNow }}
+              cleanup={{ count: cleaner.candidates.length, bytes: cleaner.bytes, running: cleaner.running, cleanNow: cleaner.cleanNow }}
               onCheckUpdate={() =>
                 hasActive
                   ? setEngineState({ kind: "message", text: "Wait for downloads to finish before updating", error: true })

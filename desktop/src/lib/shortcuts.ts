@@ -18,6 +18,7 @@ export const SHORTCUT_GROUPS: Array<{ title: string; items: Array<{ keys: string
       { keys: ["Mod", "Shift", "D"], action: "Download the open video as audio" },
       { keys: ["Mod", "Shift", "P"], action: "Pause or resume all downloads" },
       { keys: ["Mod", "O"], action: "Open the download folder" },
+      { keys: ["Mod", "Shift", "L"], action: "Play the latest download" },
     ],
   },
   {

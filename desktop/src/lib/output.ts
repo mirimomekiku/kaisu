@@ -14,6 +14,7 @@ export const LAYOUT_LABEL: Record<Layout, string> = {
   channel: "A folder for each channel",
   kind: "Separate Video and Audio folders",
   year: "A folder for each upload year",
+  music: "Artist / Album folders (for music)",
 };
 
 export const NAME_LABEL: Record<NameStyle, string> = {
@@ -21,14 +22,18 @@ export const NAME_LABEL: Record<NameStyle, string> = {
   title: "Title",
   channel_title: "Channel - Title",
   date_title: "Date - Title",
+  track_title: "Track number - Title",
 };
 
-const SAMPLE = { title: "Big Buck Bunny", id: "aqz-KE-bpKQ", channel: "Blender", uploader: "Blender", year: "2014", date: "2014-05-30" };
+const SAMPLE = { artist: "Daft Punk", album: "Discovery", trackTitle: "7 - One More Time", title: "Big Buck Bunny", id: "aqz-KE-bpKQ", channel: "Blender", uploader: "Blender", year: "2014", date: "2014-05-30" };
 
 /** Fills in the yt-dlp fields we know about. Anything else is shown as typed, so odd fields are still visible. */
 function fill(template: string, isAudio: boolean): string {
   return template
     // yt-dlp field syntax: %(name)<flags><width/precision><type>, e.g. %(title).150B or %(id)s
+    .replace(/%\(meta_track,track_number&\{\} - \|\)s%\(meta_title,track,title\)[.\d+#-]*[A-Za-z]/g, SAMPLE.trackTitle)
+    .replace(/%\(meta_artist,artist,channel,uploader\|[^)]*\)s/g, SAMPLE.artist)
+    .replace(/%\(meta_album,album\|[^)]*\)s/g, SAMPLE.album)
     .replace(/%\(title\)[.\d+#-]*[A-Za-z]/g, SAMPLE.title)
     .replace(/%\(id\)[.\d+#-]*[A-Za-z]/g, SAMPLE.id)
     .replace(/%\(channel,uploader(?:\|[^)]*)?\)s/g, SAMPLE.channel)
@@ -45,6 +50,7 @@ const NAME_TEMPLATE: Record<NameStyle, string> = {
   title: "%(title).180B",
   channel_title: "%(channel,uploader|Unknown)s - %(title).150B",
   date_title: "%(upload_date>%Y-%m-%d|unknown date)s - %(title).150B",
+  track_title: "%(meta_track,track_number&{} - |)s%(meta_title,track,title).150B",
 };
 
 /** A quick local check of a custom template, so mistakes show up while typing. The backend re-checks everything. */
@@ -72,6 +78,7 @@ export function previewPath(prefs: OutputPrefs, opts: { audio?: boolean; playlis
     if (prefs.layout === "channel") dirs.push("%(channel,uploader|Unknown channel)s");
     if (prefs.layout === "kind") dirs.push(isAudio ? "Audio" : "Video");
     if (prefs.layout === "year") dirs.push("%(upload_date>%Y|Unknown year)s");
+    if (prefs.layout === "music") dirs.push("%(meta_artist,artist,channel,uploader|Unknown artist)s", "%(meta_album,album|Singles)s");
     file = NAME_TEMPLATE[prefs.nameStyle];
   }
   let prefix = "";

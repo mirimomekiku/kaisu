@@ -1,5 +1,5 @@
 import { load, type Store } from "@tauri-apps/plugin-store";
-import type { AudioFormat, Browser, CloseMode, CoverMode, ExtraOptions, Layout, LyricsMode, NameStyle, Preset, SearchSource, SponsorBlock } from "./api";
+import type { AudioFormat, Browser, CloseMode, CoverMode, ExtraOptions, Layout, LyricsMode, MoveConflict, MoveMode, NameStyle, Preset, SearchSource, SponsorBlock } from "./api";
 import { sanitizePresets, type FormatPreset } from "./presets";
 import type { HistorySort } from "./history";
 import type { ScheduleRule } from "./schedule";
@@ -7,6 +7,8 @@ import type { ScheduleRule } from "./schedule";
 export type Mode = "simple" | "advanced";
 export type SubtitleMode = "off" | "embed" | "file" | "both";
 export type Theme = "system" | "aqua" | "graphite" | "dark";
+export type MoveWhen = "done" | "manual";
+export type MoveTypes = "all" | "audio" | "video";
 export type Accent = "blue" | "orange" | "green" | "purple" | "pink" | "red" | "teal";
 export const ACCENTS: Accent[] = ["blue", "orange", "green", "purple", "pink", "red", "teal"];
 
@@ -45,6 +47,8 @@ export interface Settings {
   layout: Layout;
   nameStyle: NameStyle;
   customName: string;
+  /** Remove "(Official Video)" and similar from titles. */
+  cleanTitles: boolean;
   playlistFolder: boolean;
   playlistNumbering: boolean;
   // Convenience.
@@ -61,6 +65,19 @@ export interface Settings {
   autoRetries: number;
   /** Most downloads from one website at a time (0 = no limit). */
   perSiteLimit: number;
+  // Moving finished downloads somewhere else (an external drive).
+  moveEnabled: boolean;
+  moveDir: string;
+  moveMode: MoveMode;
+  moveWhen: MoveWhen;
+  moveTypes: MoveTypes;
+  moveKeepLayout: boolean;
+  moveConflict: MoveConflict;
+  // Deleting old downloads.
+  /** 0 = never. */
+  autoDeleteDays: number;
+  /** Also clean the folder downloads are moved to. */
+  autoDeleteMoved: boolean;
   // Network and searching.
   searchSource: SearchSource;
   proxy: string;
@@ -85,6 +102,8 @@ export interface HistoryItem {
   channel?: string;
   /** Set when the finished file looked damaged or cut off. */
   flag?: string;
+  /** Where a copy was made (or "skipped"), so a copied file isn't copied again. */
+  transferred?: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -113,6 +132,7 @@ export const DEFAULT_SETTINGS: Settings = {
   layout: "flat",
   nameStyle: "title_id",
   customName: "",
+  cleanTitles: false,
   playlistFolder: true,
   playlistNumbering: true,
   notifyWhenDone: true,
@@ -124,6 +144,15 @@ export const DEFAULT_SETTINGS: Settings = {
   presets: [],
   autoRetries: 0,
   perSiteLimit: 0,
+  moveEnabled: false,
+  moveDir: "",
+  moveMode: "move",
+  moveWhen: "done",
+  moveTypes: "all",
+  moveKeepLayout: true,
+  moveConflict: "keep_both",
+  autoDeleteDays: 0,
+  autoDeleteMoved: false,
   searchSource: "youtube",
   proxy: "",
   schedule: [],
@@ -162,6 +191,12 @@ export async function loadSettings(): Promise<Settings> {
     merged.perSiteLimit = Math.min(6, Math.max(0, Math.round(Number(merged.perSiteLimit) || 0)));
     if (!["system", "aqua", "graphite", "dark"].includes(merged.theme)) merged.theme = "aqua";
     if (!ACCENTS.includes(merged.accent)) merged.accent = "blue";
+    if (!["move", "copy"].includes(merged.moveMode)) merged.moveMode = "move";
+    if (!["done", "manual"].includes(merged.moveWhen)) merged.moveWhen = "done";
+    if (!["all", "audio", "video"].includes(merged.moveTypes)) merged.moveTypes = "all";
+    if (!["keep_both", "skip", "replace"].includes(merged.moveConflict)) merged.moveConflict = "keep_both";
+    if (typeof merged.moveDir !== "string") merged.moveDir = "";
+    merged.autoDeleteDays = Math.min(3650, Math.max(0, Math.round(Number(merged.autoDeleteDays) || 0)));
     // Before language choice existed there was one on/off switch for English subtitles.
     if (saved?.subtitles === true && saved.subtitleMode === undefined) merged.subtitleMode = "embed";
     return merged;

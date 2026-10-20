@@ -1,4 +1,4 @@
-import { FolderOpen, Play, TriangleAlert } from "lucide-react";
+import { Copy, FolderOpen, Play, Trash2, TriangleAlert } from "lucide-react";
 
 interface Props {
   path: string | null;
@@ -6,6 +6,9 @@ interface Props {
   exists: boolean | undefined;
   onOpen: (path: string) => void;
   onReveal: (path: string) => void;
+  /** Quick actions, when the page offers them. */
+  onCopyPath?: (path: string) => void;
+  onDelete?: (path: string) => void;
   /** Icon-only buttons, for tight rows. */
   iconOnly?: boolean;
   /** Keep "Open" labelled but show the secondary action as an icon (tables). */
@@ -13,7 +16,7 @@ interface Props {
 }
 
 /** Open / show-in-folder buttons for a downloaded file, or a notice if it has been moved or deleted. */
-export default function FileActions({ path, exists, onOpen, onReveal, iconOnly = false, openLabelled = false }: Props) {
+export default function FileActions({ path, exists, onOpen, onReveal, onCopyPath, onDelete, iconOnly = false, openLabelled = false }: Props) {
   if (!path) return null;
   if (exists === false) {
     return (
@@ -31,6 +34,16 @@ export default function FileActions({ path, exists, onOpen, onReveal, iconOnly =
       <button type="button" onClick={() => onReveal(path)} title="Show in folder" aria-label="Show in folder" className={openLabelled ? "row-btn" : cls}>
         <FolderOpen className="w-3 h-3" /> {!iconOnly && !openLabelled && "Show in folder"}
       </button>
+      {onCopyPath && (
+        <button type="button" onClick={() => onCopyPath(path)} title="Copy the file's location" aria-label="Copy file location" className="row-btn">
+          <Copy className="w-3 h-3" />
+        </button>
+      )}
+      {onDelete && (
+        <button type="button" onClick={() => onDelete(path)} title="Delete the file from your computer" aria-label="Delete file" className="row-btn">
+          <Trash2 className="w-3 h-3" />
+        </button>
+      )}
     </span>
   );
 }

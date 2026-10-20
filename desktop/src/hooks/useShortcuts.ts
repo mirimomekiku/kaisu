@@ -16,6 +16,7 @@ export interface ShortcutContext {
   downloadOpenVideo: (asAudio: boolean) => void;
   togglePauseAll: () => void;
   openDownloadFolder: () => void;
+  openLatest: () => void;
 }
 
 const PAGES: Page[] = ["search", "downloads", "history", "settings"];
@@ -38,7 +39,7 @@ export function useShortcuts(ctx: ShortcutContext) {
       if (e.key === "F1" || (mod && key === "/")) {
         e.preventDefault();
         c.showShortcuts();
-      } else if (mod && !e.altKey && ["f", "l", "k"].includes(key)) {
+      } else if (mod && !e.altKey && !e.shiftKey && ["f", "l", "k"].includes(key)) {
         e.preventDefault();
         c.focusSearch();
       } else if (mod && !e.altKey && ["1", "2", "3", "4"].includes(key)) {
@@ -56,6 +57,9 @@ export function useShortcuts(ctx: ShortcutContext) {
       } else if (mod && e.shiftKey && key === "p") {
         e.preventDefault();
         c.togglePauseAll();
+      } else if (mod && e.shiftKey && key === "l") {
+        e.preventDefault();
+        c.openLatest();
       } else if (mod && key === "o" && c.hasOutDir) {
         e.preventDefault();
         c.openDownloadFolder();

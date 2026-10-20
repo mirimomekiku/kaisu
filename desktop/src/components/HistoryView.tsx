@@ -25,6 +25,8 @@ interface Props {
   audioLabel: string;
   onOpen: (path: string) => void;
   onReveal: (path: string) => void;
+  onCopyPath: (path: string) => void;
+  onDeleteFile: (path: string) => void;
   onRemove: (id: string) => void;
   onRemoveMany: (ids: string[]) => void;
   onClear: () => void;
@@ -99,7 +101,7 @@ export default function HistoryView(p: Props) {
   const sizeOf = (h: HistoryItem) => (h.path && p.sizes[h.path] !== undefined ? formatBytes(p.sizes[h.path]) : "");
 
   const file = (h: HistoryItem, iconOnly: boolean, openLabelled = false) => (
-    <FileActions path={h.path} exists={h.path ? p.exists[h.path] : undefined} onOpen={p.onOpen} onReveal={p.onReveal} iconOnly={iconOnly} openLabelled={openLabelled} />
+    <FileActions path={h.path} exists={h.path ? p.exists[h.path] : undefined} onOpen={p.onOpen} onReveal={p.onReveal} onCopyPath={p.onCopyPath} onDelete={p.onDeleteFile} iconOnly={iconOnly} openLabelled={openLabelled} />
   );
 
   const flagged = (h: HistoryItem) =>
