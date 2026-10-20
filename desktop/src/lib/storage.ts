@@ -1,13 +1,19 @@
 import { load, type Store } from "@tauri-apps/plugin-store";
-import type { AudioFormat, Browser, Preset, SponsorBlock } from "./api";
+import type { AudioFormat, Browser, CloseMode, ExtraOptions, Layout, NameStyle, Preset, SponsorBlock } from "./api";
 
 export type Mode = "simple" | "advanced";
+
+/** How a list of items is laid out. Not every list offers every view. */
+export type ViewMode = "list" | "grid" | "compact" | "details";
 
 export interface Settings {
   mode: Mode;
   outDir: string | null;
   autoUpdate: boolean;
   lastEngineCheck: number;
+  viewSearch: ViewMode;
+  viewQueue: ViewMode;
+  viewHistory: ViewMode;
   // Advanced-only options (ignored in simple mode).
   concurrency: number;
   sponsorblock: SponsorBlock;
@@ -17,6 +23,17 @@ export interface Settings {
   rateLimit: string;
   customArgs: string;
   verbose: boolean;
+  // File organisation (both modes).
+  layout: Layout;
+  nameStyle: NameStyle;
+  customName: string;
+  playlistFolder: boolean;
+  playlistNumbering: boolean;
+  // Convenience.
+  notifyWhenDone: boolean;
+  warnDuplicates: boolean;
+  watchClipboard: boolean;
+  closeMode: CloseMode;
 }
 
 export interface HistoryItem {
@@ -27,6 +44,8 @@ export interface HistoryItem {
   preset: Preset;
   path: string | null;
   timestamp: number;
+  /** Set for partial downloads (e.g. "80-165"), so a clip isn't mistaken for the whole video. */
+  clip?: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -34,6 +53,9 @@ export const DEFAULT_SETTINGS: Settings = {
   outDir: null,
   autoUpdate: true,
   lastEngineCheck: 0,
+  viewSearch: "details",
+  viewQueue: "details",
+  viewHistory: "details",
   concurrency: 2,
   sponsorblock: "off",
   cookiesBrowser: null,
@@ -42,7 +64,31 @@ export const DEFAULT_SETTINGS: Settings = {
   rateLimit: "",
   customArgs: "",
   verbose: true,
+  layout: "flat",
+  nameStyle: "title_id",
+  customName: "",
+  playlistFolder: true,
+  playlistNumbering: true,
+  notifyWhenDone: true,
+  warnDuplicates: true,
+  watchClipboard: true,
+  closeMode: "downloads",
 };
+
+/** A download that was unfinished when the app closed. Stored so it can be resumed next time. */
+export interface SavedDownload {
+  id: string;
+  title: string;
+  url: string;
+  thumbnail: string;
+  preset: Preset;
+  outDir: string;
+  extra: ExtraOptions;
+  status: string;
+  progress: number;
+  clipKey?: string;
+  placeholderTitle?: boolean;
+}
 
 const MAX_HISTORY = 500;
 let storePromise: Promise<Store> | null = null;
@@ -83,5 +129,22 @@ export async function saveHistory(history: HistoryItem[]) {
     await (await getStore()).set("history", history.slice(0, MAX_HISTORY));
   } catch (e) {
     console.warn("Could not save history", e);
+  }
+}
+
+export async function loadQueue(): Promise<SavedDownload[]> {
+  try {
+    return (await (await getStore()).get<SavedDownload[]>("queue")) ?? [];
+  } catch (e) {
+    console.warn("Could not read the saved queue", e);
+    return [];
+  }
+}
+
+export async function saveQueue(queue: SavedDownload[]) {
+  try {
+    await (await getStore()).set("queue", queue);
+  } catch (e) {
+    console.warn("Could not save the queue", e);
   }
 }

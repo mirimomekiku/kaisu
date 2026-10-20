@@ -27,6 +27,7 @@ const RULES: Array<[RegExp, FriendlyError]> = [
   [/permission denied|access is denied|read-only file system/i, { summary: "Kaisu can't save to that folder.", hint: "Choose a different download folder in Settings." }],
   [/ffmpeg|ffprobe|postprocessing/i, { summary: "A helper tool needed to finish this download is missing or failed.", hint: "Open Setup to reinstall the helper tools." }],
   [/isn't installed yet|open setup/i, { summary: "Kaisu needs to finish setting up.", hint: "Open Setup to install the helper tools." }],
+  [/type something to search/i, { summary: "Type something to search for." }],
   [/enter a full web link/i, { summary: "That doesn't look like a web link.", hint: "Paste the full address, starting with https://" }],
 ];
 

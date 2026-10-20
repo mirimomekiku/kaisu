@@ -5,6 +5,31 @@ export type AudioFormat = "mp3" | "m4a" | "opus" | "flac" | "wav";
 export type SponsorBlock = "off" | "mark" | "remove";
 export type Browser = "firefox" | "chrome" | "chromium" | "edge" | "brave" | "opera" | "vivaldi";
 
+export type Layout = "flat" | "channel" | "kind" | "year";
+export type NameStyle = "title_id" | "title" | "channel_title" | "date_title";
+
+export interface OutputOptions {
+  layout: Layout;
+  name: NameStyle;
+  /** Replaces layout + name (Advanced). */
+  custom: string | null;
+  playlist_folder: boolean;
+  playlist_numbering: boolean;
+}
+
+export interface PlaylistCtx {
+  title: string;
+  /** 1-based position in the playlist. */
+  index: number;
+  total: number;
+}
+
+export interface Clip {
+  start: number;
+  end: number;
+  precise: boolean;
+}
+
 export interface ExtraOptions {
   sponsorblock: SponsorBlock;
   cookies_from_browser: Browser | null;
@@ -15,6 +40,9 @@ export interface ExtraOptions {
   rate_limit: string | null;
   custom_args: string | null;
   verbose: boolean;
+  output: OutputOptions;
+  playlist: PlaylistCtx | null;
+  clip: Clip | null;
 }
 
 export interface DownloadRequest {
@@ -28,6 +56,7 @@ export interface DownloadRequest {
 export type DownloadEvent =
   | { kind: "progress"; pct: number; speed: number | null; eta: number | null }
   | { kind: "processing" }
+  | { kind: "meta"; title: string }
   | { kind: "log"; line: string }
   | { kind: "done"; path: string | null }
   | { kind: "cancelled" }
@@ -52,7 +81,24 @@ export interface MediaInfo {
   uploader: string | null;
   duration_secs: number | null;
   view_count: number | null;
+  like_count: number | null;
+  /** `YYYYMMDD` */
+  upload_date: string | null;
+  description: string | null;
+  webpage_url: string | null;
+  is_live: boolean;
   formats: FormatInfo[];
+}
+
+export interface SearchResult {
+  id: string;
+  title: string;
+  url: string;
+  channel: string | null;
+  duration_secs: number | null;
+  view_count: number | null;
+  thumbnail: string;
+  live: boolean;
 }
 
 export type ComponentId = "ytdlp" | "ffmpeg" | "js";
@@ -101,6 +147,37 @@ export const errorText = (e: unknown): string =>
 
 export const getMediaInfo = (url: string, cookiesFromBrowser: Browser | null) =>
   invoke<MediaInfo>("get_media_info", { url, cookiesFromBrowser });
+
+export const searchMedia = (query: string, limit: number) => invoke<SearchResult[]>("search_media", { query, limit });
+
+export const fileExists = (paths: string[]) => invoke<boolean[]>("file_exists", { paths });
+export const openFile = (path: string) => invoke<void>("open_file", { path });
+export const revealFile = (path: string) => invoke<void>("reveal_file", { path });
+export const openUrl = (url: string) => invoke<void>("open_url", { url });
+export const revealEngine = () => invoke<void>("reveal_engine");
+
+export type LinkKind = "video" | "playlist" | "channel";
+
+export interface PlaylistInfo {
+  title: string;
+  uploader: string | null;
+  kind: LinkKind;
+  total: number | null;
+  entries: SearchResult[];
+}
+
+export type PowerAction = "sleep" | "shutdown";
+export type CloseMode = "downloads" | "always" | "never";
+
+export const classifyLink = (url: string) => invoke<LinkKind>("classify_link", { url });
+export const getPlaylist = (url: string, limit: number) => invoke<PlaylistInfo>("get_playlist", { url, limit });
+export const freeSpace = (path: string) => invoke<number>("free_space", { path });
+export const openFolder = (path: string) => invoke<void>("open_folder", { path });
+export const systemPower = (action: PowerAction) => invoke<void>("system_power", { action });
+export const setTrayStatus = (active: number, queued: number, paused: number, mode: CloseMode) =>
+  invoke<void>("set_tray_status", { active, queued, paused, mode });
+export const trayAvailable = () => invoke<boolean>("tray_available");
+export const quitApp = () => invoke<void>("quit_app");
 
 export const getEngineInfo = () => invoke<EngineInfo>("get_engine_info");
 export const updateEngine = () => invoke<UpdateResult>("update_engine");
