@@ -141,6 +141,7 @@ await menu(page).getByRole("menuitem", { name: "Deselect", exact: true }).click(
 check("action: Deselect unticks it", !(await results(page).getByLabel(/Select lofi beats — result 8$/).isChecked()));
 await act(9, "Copy link");
 check("action: Copy link puts the URL on the clipboard", (await page.evaluate(() => navigator.clipboard.readText())).endsWith("vid00000008"));
+await page.getByLabel("Status display").locator("text=Link copied").waitFor({ timeout: 5000 }).catch(() => {});
 check("action: ...and says so", await page.getByLabel("Status display").locator("text=Link copied").count() === 1);
 await act(9, "Copy title");
 check("action: Copy title", (await page.evaluate(() => navigator.clipboard.readText())) === "lofi beats — result 9");
@@ -201,7 +202,8 @@ await results(page).getByRole("button", { name: /result 2$/ }).focus();
 await page.keyboard.press("ContextMenu");
 check("keyboard: Menu key opens it", await menu(page).count() === 1);
 await page.waitForFunction(() => document.activeElement?.textContent?.trim() === "Show details", null, { timeout: 5000 }).catch(() => {});
-check("keyboard: first item focused", (await page.evaluate(() => document.activeElement?.textContent?.trim())) === "Show details");
+const activeText = await page.evaluate(() => `${document.activeElement?.tagName}:${document.activeElement?.textContent?.trim()?.slice(0, 40)} focus=${document.hasFocus()} menus=${document.querySelectorAll("[role=menu]").length}`);
+check("keyboard: first item focused", activeText.includes("BUTTON:Show details"), activeText);
 await page.keyboard.press("ArrowDown");
 await page.keyboard.press("ArrowDown");
 check("keyboard: arrows move (skipping headings/separators)", (await page.evaluate(() => document.activeElement?.textContent?.trim())) === "Download video (720p)");
