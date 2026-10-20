@@ -9,14 +9,17 @@ kaisu/
 ├── bin/                         # fetched binaries for the TUI (git-ignored) + VERSIONS.json
 ├── desktop/                     # Tauri app
 │   ├── src/                     # React UI (App.tsx, hooks/, components/, lib/)
-│   └── src-tauri/src/           # Rust: engine.rs (sidecars + updater), download.rs, proc.rs
+│   ├── e2e/                     # UI tests (Chrome + scripted Tauri), real-window tests, smoke test
+│   └── src-tauri/src/           # Rust: engine.rs (tool lookup + updater), download.rs, subs.rs, net.rs, proc.rs
 └── tui/                         # Textual app (app.py, main.py)
 ```
 
 ## Using it
 
-**Desktop app (installers):** just open it. On first launch Kaisu checks for its helper tools and, if
-anything is missing, shows a one-click **Set up automatically** screen (see below).
+**Desktop app:** it is a single small executable (about 10 MB), with no installer. Run it. On first launch Kaisu checks
+for its helper tools and, if anything is missing, shows a one-click **Set up automatically** screen that downloads them
+(roughly 100-200 MB, into the app's data folder; see below). A short **tour** then points out the main parts of the window
+(replay it from Settings).
 
 **Terminal app:** run `tui/run-tui.sh` (Linux) or `tui/run-tui.cmd` (Windows). If `uv` isn't installed the
 launcher offers to install it; uv then fetches Python 3.11+ and every dependency. On first start the app offers
@@ -24,8 +27,8 @@ to download any missing helper tools.
 
 ## Helper tools and automatic setup
 
-Kaisu needs three things besides itself. All are looked up in this order: bundled with the app, then the
-app's own folder, then your `PATH`.
+Kaisu needs three things besides itself. All are looked up in this order: the app's own tools folder (where Setup puts
+them), then your `PATH`.
 
 | Tool | What it's for | Installed by Setup |
 | --- | --- | --- |
@@ -45,11 +48,12 @@ On other platforms, or if a download fails, Setup shows copy-paste install comma
 Run the checker first; it tells you exactly what's missing on your machine and how to install it:
 
 ```bash
-node scripts/doctor.mjs          # add --fix to also download the yt-dlp / ffmpeg sidecars
-node scripts/fetch-binaries.mjs  # or fetch the sidecars on their own (--force to refresh)
+node scripts/doctor.mjs          # add --fix to also download yt-dlp / ffmpeg for the terminal app
+node scripts/fetch-binaries.mjs  # or fetch them on their own (--force to refresh)
 ```
 
-The fetch script writes the Tauri sidecars to `desktop/src-tauri/bin/` and a copy to `bin/` for the TUI.
+The fetch script writes yt-dlp and ffmpeg to `bin/` for the terminal app. The desktop app doesn't need them: it
+downloads its own on first run. (`--sidecars` also writes the old Tauri sidecar layout, if you want to bundle them.)
 
 ## Desktop app
 
@@ -61,13 +65,15 @@ Prerequisites (`node scripts/doctor.mjs` checks all of these): Node 20+, Rust st
 cd desktop
 npm install
 npm run tauri dev       # development
-npm run tauri build     # installers: .exe (NSIS) on Windows, .deb / .AppImage on Linux
+npm run build:exe       # one executable: src-tauri/target/release/desktop(.exe), no installer
 ```
 
 ### Search and video details
 
-Type anything that isn't a link into the box and press **Enter** to search YouTube (12 results at a time, with
-**Show more results**). Pick a result, or paste a link, and a details card shows the thumbnail, title, channel,
+Type anything that isn't a link into the box and press **Enter** to search (12 results at a time, with
+**Show more results**). The menu beside the box picks **where** to search: **YouTube** or **SoundCloud** (your choice is
+remembered; changing it repeats the current search). Only sites that were checked against the real service are listed:
+Dailymotion, Bilibili, Niconico and Yahoo search were tried and returned nothing, so they are left out for now. Pick a result, or paste a link, and a details card shows the thumbnail, title, channel,
 duration, views, likes, upload date and description, plus a clear **Video** / **Audio only** choice with approximate
 file sizes. Live streams are flagged. Search uses yt-dlp's flat `ytsearch` mode, so results arrive in a few seconds.
 
@@ -138,6 +144,28 @@ file-name characters.
   Kaisu offers to look it up the next time you switch to it. It only reads the clipboard while its window is focused,
   never sends it anywhere, and can be turned off in Settings.
 
+### Subtitles
+
+If a video has subtitles, its details card gets a **Subtitles** section: choose the languages (automatic captions are
+labelled) and whether to put them **inside the video**, save them as separate **.srt** files, or both. Audio downloads
+can only keep the .srt files. Settings (Advanced) holds the default format, the preferred languages (`en, de`), and
+whether automatic captions may be used when there are no human-made ones; playlists use those defaults.
+
+### Proxy
+
+**Settings, Network**: enter a proxy (`http://`, `https://`, `socks4://`, `socks5://`, or just `host:port`) and press
+**Test proxy** to try it with a real request. Searching, look-ups, downloads, engine updates and first-run setup all
+go through it, in both modes. A login goes in the address (`user:password@host`) and is stored unencrypted in Kaisu's
+settings file.
+
+### Bandwidth schedule (Advanced)
+
+**Settings, Bandwidth schedule**: add rules that, on chosen days between two times, either **limit the speed** or
+**don't download at all**. The first matching rule wins; overnight ranges (22:00 to 06:00) and all-day rules work.
+A pause rule holds new downloads back and pauses running ones, which carry on by themselves when it ends. A new speed
+limit restarts running downloads so it takes effect. The display shows "Paused by your schedule" while it holds
+things back. The schedule only applies in Advanced mode.
+
 ### Keyboard shortcuts
 
 Press **F1** (or Ctrl+/) for the full list. Highlights: Ctrl+F / L / K focus search, Ctrl+1 to 4 switch pages, Ctrl+A
@@ -159,8 +187,12 @@ Ctrl+O opens the download folder, and Esc clears the selection. Shortcuts pause 
   download all of them as video or audio at once. Clicking a result's title still opens its details.
 - **Layouts:** search results, the download queue and the history can each be shown as a **details table** (the
   default), **list** with artwork, **grid** or **compact** rows. Switch with the buttons at the top left; each page
-  remembers its choice. History also has a title filter and a
-  Video/Audio filter.
+  remembers its choice.
+- **History** shows name, channel, format, **size on disk** and date. Click a column heading (or use the Sort menu) to
+  sort; filter by words (title or channel), Video/Audio, and whether the file is still there. Tick items to **download
+  them again**, **remove** them, or **export** them; **Export CSV / JSON** saves the items shown (or the ticked ones)
+  through a save dialog. **Check files** re-checks the disk and **Remove N missing** tidies up. The status bar shows the
+  total size.
 - **Settings is its own page** (in the sidebar), with the Simple/Advanced switch, download folder, advanced options and the engine tools.
 
 ### Simple and Advanced modes
@@ -172,7 +204,7 @@ Choose the mode on the **Settings** page (your choice is remembered).
   you to be signed in") with the raw output behind a "Technical details" link. Settings shows only the download folder
   and updates.
 - **Advanced**: everything above plus an exact stream picker (video and audio formats from the real format list),
-  1080p / audio format (MP3, M4A, Opus, FLAC, WAV), speed limit, SponsorBlock, subtitles, cookies-from-browser,
+  1080p / audio format (MP3, M4A, Opus, FLAC, WAV), speed limit and a bandwidth schedule, SponsorBlock, subtitle defaults, cookies-from-browser,
   parallel download count, a per-download log, the engine versions and locations, and a field for your own yt-dlp
   arguments. Advanced settings never leak into Simple mode.
 
@@ -181,14 +213,14 @@ download folder.
 
 ### How the engine works
 
-- yt-dlp, ffmpeg and ffprobe are Tauri sidecars, installed next to the app executable.
+- yt-dlp, ffmpeg and a JavaScript runtime are downloaded on first run into the app data folder (not bundled), which
+  keeps the app itself tiny.
 - The frontend never builds command lines. It sends a typed request; `download.rs` builds the arguments from an
   allowlist, passes the URL after `--`, and rejects anything that isn't an `http(s)` link. The one free-form input
   is Advanced mode's custom-arguments field, which is validated: options that run programs (`--exec`,
   `--netrc-cmd`, `--plugin-dirs`, ...) are blocked, including abbreviated spellings.
 - **Auto-update:** at launch (at most every 6 hours, can be turned off in Settings) the app checks GitHub for a newer
-  yt-dlp, verifies its SHA-256, test-runs it, and installs it into the app data dir (`<app data>/engine/`). Whichever
-  of the bundled and updated copies is newer is used, so a fresh app release never regresses to an older engine.
+  yt-dlp, verifies its SHA-256, test-runs it, and installs it into the app data dir (`<app data>/engine/`).
   Updates are refused while downloads are running.
 - Cancel kills the whole process tree (`taskkill /T` on Windows, process-group kill on Unix), because yt-dlp's
   one-file builds spawn child processes.
@@ -211,10 +243,28 @@ The TUI uses the `yt-dlp` Python package, pinned in `tui/pyproject.toml` to the 
 behave the same. When you refresh binaries, bump that pin. It does not auto-update.
 It uses the same presets and format selectors as the desktop app and the ffmpeg from `bin/` (or `PATH`).
 
+## Tests
+
+```bash
+cd desktop
+npm test                 # unit tests (vitest): schedule, history export, links, formats, subtitles, ...
+cd src-tauri && cargo test   # Rust: argument building, validation, proxy, subtitles, file helpers
+cd .. && npm run test:ui     # ~400 checks driving the real React app in Chrome with the Tauri side scripted
+npm run build:exe && npm run test:real   # drives the built app's real window through tauri-driver (Linux)
+npm run test:smoke       # launches the built exe, checks it stays up and a second copy hands over (any OS)
+```
+
+`test:ui` needs Google Chrome (or `KAISU_E2E_BROWSER=/path/to/chrome`). `test:real` needs `cargo install tauri-driver
+--locked` plus `WebKitWebDriver` (Linux package `webkit2gtk-driver`) and a display (`xvfb-run -a` on a server); it uses
+an isolated data folder. The real-window suite does not run on Windows yet (that needs `msedgedriver`); Windows CI runs
+the smoke test instead.
+
 ## CI
 
-`.github/workflows/build.yml` builds Linux and Windows bundles, runs the Rust tests, and runs the TUI's offline tests on both OSes on every push. Windows
-installers are unsigned, so SmartScreen will warn until you add a code-signing certificate.
+`.github/workflows/build.yml` runs, on Linux and Windows for every push: the unit tests, `cargo test`, the frontend
+build, the UI tests, and builds the executable (uploaded as an artifact). Linux also runs the real-window tests under
+xvfb; Windows runs the smoke test. The TUI's offline tests run on both OSes. The Windows exe is unsigned, so SmartScreen
+will warn until you add a code-signing certificate.
 
 ## Licensing note
 

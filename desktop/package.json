@@ -1,13 +1,18 @@
 {
   "name": "desktop",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.0.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "test": "vitest run",
+    "test:ui": "node e2e/run.mjs",
+    "build:exe": "tauri build --no-bundle",
+    "test:smoke": "node e2e/smoke.mjs",
+    "test:real": "node e2e/real/run.mjs"
   },
   "dependencies": {
     "@fontsource-variable/work-sans": "^5.3.0",
@@ -26,8 +31,10 @@
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^6.0.2",
     "lucide-react": "^1.59.0",
+    "playwright-core": "^1.64.1",
     "tailwindcss": "^4.3.3",
     "typescript": "~6.0.3",
-    "vite": "^8.0.16"
+    "vite": "^8.0.16",
+    "vitest": "^4.1.12"
   }
 }

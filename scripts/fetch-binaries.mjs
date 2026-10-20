@@ -1,12 +1,14 @@
 #!/usr/bin/env node
-// Downloads yt-dlp + static LGPL ffmpeg/ffprobe for the Tauri sidecars and the TUI.
+// Downloads yt-dlp + static LGPL ffmpeg/ffprobe for the terminal app.
 //
-//   node scripts/fetch-binaries.mjs [--target <triple>] [--force]
+//   node scripts/fetch-binaries.mjs [--target <triple>] [--force] [--sidecars]
+//
+// The desktop app does not need this: it downloads its own tools on first run.
 //
 // Outputs:
-//   desktop/src-tauri/bin/<name>-<triple>[.exe]   (Tauri externalBin sidecars)
 //   bin/<name>[.exe]                              (host triple only, used by the TUI)
 //   bin/VERSIONS.json
+//   desktop/src-tauri/bin/<name>-<triple>[.exe]   (only with --sidecars: Tauri externalBin layout)
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import {
@@ -23,6 +25,7 @@ const SHARED_DIR = join(ROOT, "bin");
 
 const args = process.argv.slice(2);
 const force = args.includes("--force");
+const sidecars = args.includes("--sidecars");
 const targetIdx = args.indexOf("--target");
 const hostTriple = execFileSync("rustc", ["-vV"], { encoding: "utf8" }).match(/host: (\S+)/)[1];
 const triple = targetIdx >= 0 ? args[targetIdx + 1] : hostTriple;
@@ -63,17 +66,23 @@ function checksumFor(sums, file) {
     .find(([, f]) => f === file || f === `*${file}`)?.[0];
 }
 
+/** Cross-target downloads only make sense as sidecars; for the host they go to bin/ (and optionally the sidecar layout). */
+const writeSidecars = sidecars || triple !== hostTriple;
+
 function install(src, name) {
-  mkdirSync(SIDECAR_DIR, { recursive: true });
-  const dest = join(SIDECAR_DIR, `${name}-${triple}${cfg.exe}`);
-  copyFileSync(src, dest);
-  chmodSync(dest, 0o755);
-  console.log(`  installed ${dest}`);
+  if (writeSidecars) {
+    mkdirSync(SIDECAR_DIR, { recursive: true });
+    const dest = join(SIDECAR_DIR, `${name}-${triple}${cfg.exe}`);
+    copyFileSync(src, dest);
+    chmodSync(dest, 0o755);
+    console.log(`  installed ${dest}`);
+  }
   if (triple === hostTriple) {
     mkdirSync(SHARED_DIR, { recursive: true });
     const shared = join(SHARED_DIR, `${name}${cfg.exe}`);
     copyFileSync(src, shared);
     chmodSync(shared, 0o755);
+    console.log(`  installed ${shared}`);
   }
 }
 
@@ -145,7 +154,7 @@ async function fetchFfmpeg() {
   rmSync(tmp, { recursive: true, force: true });
 }
 
-const have = (name) => existsSync(join(SIDECAR_DIR, `${name}-${triple}${cfg.exe}`));
+const have = (name) => existsSync(writeSidecars ? join(SIDECAR_DIR, `${name}-${triple}${cfg.exe}`) : join(SHARED_DIR, `${name}${cfg.exe}`));
 console.log(`Target: ${triple}`);
 if (force || !have("yt-dlp")) await fetchYtDlp();
 else console.log("yt-dlp present (use --force to refresh)");

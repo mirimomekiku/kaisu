@@ -3,7 +3,7 @@
 // anything that's missing. Works on Linux and Windows.
 //
 //   node scripts/doctor.mjs          report only
-//   node scripts/doctor.mjs --fix    also download the yt-dlp / ffmpeg sidecars if they're missing
+//   node scripts/doctor.mjs --fix    also download yt-dlp / ffmpeg into bin/ (for the terminal app) if missing
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -48,7 +48,7 @@ function linuxPackages() {
 
 const triple = run("rustc", ["-vV"])?.match(/host: (\S+)/)?.[1];
 const ext = win ? ".exe" : "";
-const sidecar = (n) => existsSync(join(ROOT, "desktop", "src-tauri", "bin", `${n}-${triple}${ext}`));
+const sharedTool = (n) => existsSync(join(ROOT, "bin", `${n}${ext}`));
 
 const checks = [];
 const add = (name, ok, detail, fixHint) => checks.push({ name, ok, detail, fixHint });
@@ -83,8 +83,9 @@ if (win) {
 
 add("uv (only for the terminal app)", !!run("uv", ["--version"]), run("uv", ["--version"]) ?? "not found, tui/run-tui.* installs it for you", win ? "winget install --id=astral-sh.uv -e" : "curl -LsSf https://astral.sh/uv/install.sh | sh");
 
-const haveSidecars = triple && ["yt-dlp", "ffmpeg", "ffprobe"].every(sidecar);
-add("Sidecar binaries (yt-dlp, ffmpeg)", !!haveSidecars, haveSidecars ? "present" : "not downloaded yet", "node scripts/fetch-binaries.mjs");
+// The desktop app downloads its own tools on first run; bin/ is only for the terminal app.
+const haveTools = ["yt-dlp", "ffmpeg", "ffprobe"].every(sharedTool);
+add("Helper tools in bin/ (terminal app only)", true, haveTools ? "present" : "not downloaded; the desktop app fetches its own on first run", "node scripts/fetch-binaries.mjs");
 
 console.log(`Kaisu doctor: ${win ? "Windows" : process.platform} ${process.arch}${triple ? ` (${triple})` : ""}\n`);
 for (const c of checks) {
@@ -92,8 +93,8 @@ for (const c of checks) {
   if (!c.ok) console.log(`          fix: ${c.fixHint}`);
 }
 
-if (fix && !haveSidecars && triple) {
-  console.log("\nDownloading sidecar binaries...");
+if (fix && !haveTools) {
+  console.log("\nDownloading the helper tools into bin/...");
   const r = spawnSync(process.execPath, [join(ROOT, "scripts", "fetch-binaries.mjs")], { stdio: "inherit" });
   if (r.status !== 0) process.exitCode = 1;
 }
