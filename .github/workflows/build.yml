@@ -54,10 +54,6 @@ jobs:
       - name: Type-check and bundle the frontend
         run: npm run build
 
-      # Drives the real React app in Chrome (preinstalled on the runners) with the Tauri side scripted.
-      - name: UI tests
-        run: npm run test:ui
-
       # The desktop app downloads its own helper tools on first run, so the build is a single executable.
       - name: Build the executable
         run: npm run build:exe

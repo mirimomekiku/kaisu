@@ -12,7 +12,8 @@
     "test:ui": "node e2e/run.mjs",
     "build:exe": "tauri build --no-bundle",
     "test:smoke": "node e2e/smoke.mjs",
-    "test:real": "node e2e/real/run.mjs"
+    "test:real": "node e2e/real/run.mjs",
+    "test:real:media": "node e2e/real/media.mjs"
   },
   "dependencies": {
     "@fontsource-variable/work-sans": "^5.3.0",

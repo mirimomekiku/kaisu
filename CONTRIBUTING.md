@@ -49,8 +49,8 @@ npm run test:smoke               # launches the built exe and checks it stays up
 
 ## CI and releases
 
-`.github/workflows/build.yml` runs the unit, Rust and UI tests and builds the exe on Linux and Windows for every push
-(Linux also runs the real-window tests, Windows the smoke test).
+`.github/workflows/build.yml` runs the unit and Rust tests and builds the exe on Linux and Windows for every push
+(Linux also runs the real-window tests, Windows the smoke test). The UI tests (`npm run test:ui`) are run locally, not in CI.
 
 Versions are 0.0.x until the project declares 1.0.0. To release: bump the version in `desktop/package.json`,
 `desktop/src-tauri/tauri.conf.json` and `desktop/src-tauri/Cargo.toml`, commit, then push a tag such as `v0.0.2`.

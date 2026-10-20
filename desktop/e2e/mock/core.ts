@@ -79,6 +79,8 @@ export async function invoke(cmd: string, args: any = {}): Promise<any> {
         duration_secs: 635, view_count: 1234567, like_count: 45210, upload_date: "20140530", is_live: !!w.__mock.live,
         webpage_url: args.url,
         description: "Big Buck Bunny is a short computer animated film by the Blender Institute.\nLicensed under Creative Commons Attribution 3.0. " + "More text. ".repeat(40),
+        artist: null, track: null, album: null, release_year: null, genre: null,
+        availability: w.__mock.availability ?? "public", age_limit: w.__mock.ageLimit ?? 0, live_status: w.__mock.liveStatus ?? "not_live",
         subtitles: w.__mock.noSubs ? [] : [
           { code: "en", name: "English", auto: false },
           { code: "de", name: "German", auto: false },
@@ -100,6 +102,11 @@ export async function invoke(cmd: string, args: any = {}): Promise<any> {
       await sleep(200);
       if (/bad/.test(args.proxy)) throw "Couldn't connect through the proxy. Check the address and that it is running.";
       return "The proxy works.";
+    case "check_folder":
+      if (w.__mock.folderProblem) throw w.__mock.folderProblem;
+      return { exists: true, free: w.__mock.free ?? 500 * 1024 ** 3 };
+    case "preview_command":
+      return `yt-dlp --no-playlist -P '${args.req.out_dir}' -- ${args.req.url}${args.req.extra.audio?.normalize ? " --ppa 'ExtractAudio+ffmpeg_o:-af loudnorm'" : ""}`;
     case "file_exists":
       return args.paths.map((p: string) => !(w.__mock.missing ?? []).includes(p));
     case "open_file":
@@ -157,6 +164,14 @@ export async function invoke(cmd: string, args: any = {}): Promise<any> {
       const cancelled = () => w.__mock.cancelled?.has(req.id);
       send({ kind: "log", line: `[youtube] Extracting URL: ${req.url}` });
       send({ kind: "meta", title: w.__mock.metaTitle ?? "Real Title From yt-dlp" });
+      if (/flaky/.test(req.url)) {
+        const seen = ((w.__mock.attempts ??= {})[req.url] = ((w.__mock.attempts ??= {})[req.url] ?? 0) + 1);
+        if (seen <= (w.__mock.flakyFor ?? 1)) {
+          const message = "ERROR: Unable to download webpage: <urlopen error timed out>";
+          send({ kind: "error", message });
+          throw message;
+        }
+      }
       if (/fail/.test(req.url)) {
         await sleep(300);
         const message = "ERROR: Unable to download webpage: <urlopen error [Errno -2] Name or service not known>";
@@ -172,6 +187,7 @@ export async function invoke(cmd: string, args: any = {}): Promise<any> {
       }
       send({ kind: "processing" });
       await sleep(500);
+      if (w.__mock.checkFails) send({ kind: "checked", ok: false, note: "This file is shorter than expected (4 s instead of 19 s), so it may be cut off." });
       send({ kind: "done", path: `${req.out_dir}/Big Buck Bunny [aqz-KE-bpKQ].mp4` });
       return;
     }
