@@ -12,7 +12,8 @@ Download the latest **kaisu** file for your system from the
 [Releases page](https://github.com/mirimomekiku/kaisu/releases) and run it. There is nothing to install.
 
 The first time you open it, Kaisu offers to download the helper tools it needs (about 100-200 MB). It takes one click,
-keeps everything in its own folder, and changes nothing else on your computer. A short tour then shows you around.
+keeps everything in its own folder, and changes nothing else on your computer. It warns you if the disk is too full,
+works behind a proxy, and can check again if you installed the tools yourself. A short tour then shows you around.
 
 ## What you can do
 
@@ -24,6 +25,12 @@ keeps everything in its own folder, and changes nothing else on your computer. A
 - Pause and resume downloads. If you close the app, unfinished downloads come back, paused, next time.
 
 **Stay organised**
+- **Move to an external drive:** choose a drive or folder and Kaisu moves (or copies) finished downloads there by
+  itself, keeping your folders. If the drive isn't plugged in, files wait and go as soon as it appears. Nothing is
+  removed until the copy has been checked.
+- **Clean up:** optionally delete downloads older than a number of days so your disk doesn't fill up.
+- **Smart names:** save music as Artist / Album folders with track numbers, and tidy "(Official Video)" and similar out
+  of titles.
 - Files are sorted into folders and named the way you like (by channel, by year, video and audio apart, and so on).
 - Kaisu warns you before downloading something you already have, or when your disk is nearly full.
 - **History** shows everything you have downloaded with its size and channel. Sort and filter it, open files,
@@ -36,7 +43,8 @@ keeps everything in its own folder, and changes nothing else on your computer. A
 - Set a **bandwidth schedule** (Advanced mode) to slow downloads or hold them back at certain times, such as your
   working hours.
 - Copied links are offered to you when you switch back to Kaisu, and links can be dragged onto the window.
-- Keyboard shortcuts for most things. Press F1 to see them.
+- Quick actions on every finished download: play it, show it in its folder, copy its location, or delete it. Press
+  Ctrl+Shift+L to play the latest one. Keyboard shortcuts cover most other things; press F1 to see them.
 
 **Simple or Advanced**
 - **Simple** mode is for everyday use: paste, choose video or audio, download. Problems are explained in plain words.

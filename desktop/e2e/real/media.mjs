@@ -6,6 +6,7 @@
 //   npm run test:real:media
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,7 +21,13 @@ const ffprobe = join(tools, `ffprobe${exe}`);
 const ffmpeg = join(tools, `ffmpeg${exe}`);
 for (const p of [binary, ffprobe, ffmpeg]) if (!existsSync(p)) (console.error(`Missing ${p}`), process.exit(2));
 
-const PORT = 4445;
+/** A free port, so a leftover driver from an earlier run can't be mistaken for this one. */
+const PORT = await new Promise((done) => {
+  const probe = createServer().listen(0, "127.0.0.1", () => {
+    const { port } = probe.address();
+    probe.close(() => done(port));
+  });
+});
 const BASE = `http://127.0.0.1:${PORT}`;
 const data = mkdtempSync(join(tmpdir(), "kaisu-media-"));
 const out = join(data, "out");
@@ -31,7 +38,10 @@ let passed = 0, failed = 0;
 const check = (name, ok, extra = "") => { ok ? passed++ : failed++; console.log(`${ok ? "  ok  " : " FAIL "} ${name}${ok ? "" : `  ${extra}`}`); };
 
 const driver = spawn("tauri-driver", ["--port", String(PORT)], { env, stdio: ["ignore", "inherit", "inherit"] });
-for (let i = 0; i < 60; i++) { try { if ((await fetch(`${BASE}/status`)).ok) break; } catch {} await sleep(250); }
+let driverExited = false;
+driver.on("exit", () => (driverExited = true));
+for (let i = 0; i < 60 && !driverExited; i++) { try { if ((await fetch(`${BASE}/status`)).ok) break; } catch {} await sleep(250); }
+if (driverExited) (console.error("tauri-driver could not start (is the port busy, or is it missing?)"), process.exit(2));
 
 const probe = (file, entries) => JSON.parse(execFileSync(ffprobe, ["-v", "error", "-print_format", "json", "-show_format", "-show_streams", file], { encoding: "utf8" }));
 const files = (dir = out) => readdirSync(dir);

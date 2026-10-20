@@ -140,9 +140,10 @@ check("action: label flips to Deselect", await menu(page).getByRole("menuitem", 
 await menu(page).getByRole("menuitem", { name: "Deselect", exact: true }).click();
 check("action: Deselect unticks it", !(await results(page).getByLabel(/Select lofi beats — result 8$/).isChecked()));
 await act(9, "Copy link");
+const saidSo = await page.getByLabel("Status display").locator("text=Link copied").waitFor({ timeout: 5000 }).then(() => true, () => false);
+check("action: ...and says so", saidSo);
 check("action: Copy link puts the URL on the clipboard", (await page.evaluate(() => navigator.clipboard.readText())).endsWith("vid00000008"));
-await page.getByLabel("Status display").locator("text=Link copied").waitFor({ timeout: 5000 }).catch(() => {});
-check("action: ...and says so", await page.getByLabel("Status display").locator("text=Link copied").count() === 1);
+
 await act(9, "Copy title");
 check("action: Copy title", (await page.evaluate(() => navigator.clipboard.readText())) === "lofi beats — result 9");
 await act(9, "Open in browser");

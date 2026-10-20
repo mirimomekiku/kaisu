@@ -47,11 +47,19 @@ npm run test:smoke               # launches the built exe and checks it stays up
 - The proxy is passed explicitly to every yt-dlp call and to the setup downloads.
 - Search sources are a short list in `search.rs` and `lib/sources.ts`; add one only after checking it returns results.
 
-## CI and releases
+## Releases
 
-`.github/workflows/build.yml` runs the unit and Rust tests and builds the exe on Linux and Windows for every push
-(Linux also runs the real-window tests, Windows the smoke test). The UI tests (`npm run test:ui`) are run locally, not in CI.
+There is no CI: releases are built on a developer machine. Versions are 0.0.x until the project declares 1.0.0.
 
-Versions are 0.0.x until the project declares 1.0.0. To release: bump the version in `desktop/package.json`,
-`desktop/src-tauri/tauri.conf.json` and `desktop/src-tauri/Cargo.toml`, commit, then push a tag such as `v0.0.2`.
-The workflow builds both executables and publishes them as a GitHub release.
+1. Bump the version in `desktop/package.json`, `desktop/src-tauri/tauri.conf.json` and `desktop/src-tauri/Cargo.toml`, and commit.
+2. Build the Windows executable (works from Linux too, using `cargo-xwin`):
+
+   ```bash
+   rustup target add x86_64-pc-windows-msvc
+   cargo install --locked cargo-xwin     # needs clang, lld and llvm-rc on PATH
+   cd desktop && npm run build:exe:windows
+   ```
+
+   The result is `desktop/src-tauri/target/x86_64-pc-windows-msvc/release/desktop.exe`.
+3. Tag and publish: `git tag v0.0.2 && git push origin v0.0.2`, then
+   `gh release create v0.0.2 desktop/src-tauri/target/x86_64-pc-windows-msvc/release/desktop.exe#kaisu-windows-x64.exe --prerelease --generate-notes`.

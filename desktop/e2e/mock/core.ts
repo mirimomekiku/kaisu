@@ -45,6 +45,7 @@ export async function invoke(cmd: string, args: any = {}): Promise<any> {
           ? ["winget install yt-dlp.yt-dlp", "winget install Gyan.FFmpeg", "winget install DenoLand.Deno"]
           : ["sudo dnf install yt-dlp ffmpeg-free", "curl -fsSL https://deno.land/install.sh | sh    (JavaScript runtime for YouTube)"],
         managed_dir: "/home/u/.local/share/com.kaisu.app/engine",
+        free_bytes: w.__mock.freeBytes ?? 50 * 1024 ** 3,
       };
     case "get_engine_info":
       return engine(w.__mock.ready);
@@ -107,6 +108,28 @@ export async function invoke(cmd: string, args: any = {}): Promise<any> {
       return { exists: true, free: w.__mock.free ?? 500 * 1024 ** 3 };
     case "preview_command":
       return `yt-dlp --no-playlist -P '${args.req.out_dir}' -- ${args.req.url}${args.req.extra.audio?.normalize ? " --ppa 'ExtractAudio+ffmpeg_o:-af loudnorm'" : ""}`;
+    case "check_destination":
+      if (w.__mock.destMissing) throw "That drive or folder isn't connected right now.";
+      return { free: w.__mock.destFree ?? 200 * 1024 ** 3 };
+    case "transfer_files": {
+      if (w.__mock.destMissing) throw "That drive or folder isn't connected right now.";
+      (w.__mock.transfers ??= []).push(JSON.parse(JSON.stringify(args)));
+      const base = String(args.baseDir).replace(/\/+$/, "");
+      return args.items.map((i: any) => {
+        if ((w.__mock.transferFail ?? []).includes(i.path)) return { id: i.id, ok: false, skipped: false, new_path: null, error: "Couldn't copy the file: the drive is full" };
+        if (w.__mock.transferSkip) return { id: i.id, ok: true, skipped: true, new_path: null, error: null };
+        const rel = args.keepLayout ? i.path.slice(base.length + 1) : i.path.split("/").pop();
+        return { id: i.id, ok: true, skipped: false, new_path: `${String(args.destDir).replace(/\/+$/, "")}/${rel}`, error: null };
+      });
+    }
+    case "delete_files": {
+      (w.__mock.deleteCalls ??= []).push(JSON.parse(JSON.stringify(args)));
+      return args.paths.map((p: string) => {
+        if (w.__mock.deleteFail) return { path: p, ok: false, error: "Couldn't delete it: permission denied" };
+        (w.__mock.missing ??= []).push(p);
+        return { path: p, ok: true, error: null };
+      });
+    }
     case "file_exists":
       return args.paths.map((p: string) => !(w.__mock.missing ?? []).includes(p));
     case "open_file":
