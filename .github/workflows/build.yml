@@ -3,6 +3,7 @@ name: Build and test
 on:
   push:
     branches: [main, master]
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
@@ -71,13 +72,34 @@ jobs:
         if: runner.os == 'Windows'
         run: npm run test:smoke
 
+      - name: Name the executable
+        run: |
+          New-Item -ItemType Directory -Force -Path ../dist-exe | Out-Null
+          if ($IsWindows) { Copy-Item src-tauri/target/release/desktop.exe ../dist-exe/kaisu-windows-x64.exe }
+          else { Copy-Item src-tauri/target/release/desktop ../dist-exe/kaisu-linux-x64 }
+
       - uses: actions/upload-artifact@v4
         with:
           name: kaisu-${{ runner.os }}
-          path: |
-            desktop/src-tauri/target/release/desktop.exe
-            desktop/src-tauri/target/release/desktop
+          path: dist-exe/*
           if-no-files-found: error
+
+  # Pushing a tag like v0.0.1 publishes the executables as a GitHub release.
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [desktop, tui]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist-exe
+          merge-multiple: true
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "$GITHUB_REF_NAME" dist-exe/* --repo "$GITHUB_REPOSITORY" --title "Kaisu ${GITHUB_REF_NAME#v}" --generate-notes --prerelease
 
   tui:
     strategy:
