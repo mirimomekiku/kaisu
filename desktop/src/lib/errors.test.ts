@@ -24,3 +24,20 @@ describe("friendlyError", () => {
     expect(friendlyError("???").summary.length).toBeGreaterThan(0);
   });
 });
+
+import { isTransient, retryDelaySeconds } from "./errors";
+
+describe("retry rules", () => {
+  it("retries network trouble but not permanent failures", () => {
+    expect(isTransient("ERROR: Unable to download webpage: <urlopen error timed out>")).toBe(true);
+    expect(isTransient("HTTP Error 503: Service Unavailable")).toBe(true);
+    expect(isTransient("Connection reset by peer")).toBe(true);
+    expect(isTransient("ERROR: Private video. Sign in if you've been granted access")).toBe(false);
+    expect(isTransient("Unsupported URL: x")).toBe(false);
+    expect(isTransient("There isn't enough free disk space")).toBe(false);
+  });
+
+  it("backs off", () => {
+    expect([1, 2, 3, 4, 9].map(retryDelaySeconds)).toEqual([5, 15, 45, 60, 60]);
+  });
+});

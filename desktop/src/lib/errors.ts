@@ -38,3 +38,15 @@ export function friendlyError(raw: string): FriendlyError {
   }
   return { summary: "Something went wrong.", hint: "Try again. If it keeps happening, show the details below." };
 }
+
+const PERMANENT = /private|sign in|login|members-only|age.restricted|unavailable|not available|removed|copyright|unsupported url|does not exist|enter a full web link|no space|permission denied|invalid|isn't installed|not allowed|too long|can't be found|choose/i;
+const TRANSIENT = /timed out|timeout|connection (reset|refused|aborted)|network is unreachable|temporary failure|unable to download|getaddrinfo|name or service|http error (5\d\d|429)|too many requests|ssl|incomplete|broken pipe|eof|couldn't reach/i;
+
+/** Is this failure the kind that often goes away if tried again a little later? */
+export function isTransient(message: string): boolean {
+  if (/http error (5\d\d|429)|too many requests/i.test(message)) return true;
+  return TRANSIENT.test(message) && !PERMANENT.test(message);
+}
+
+/** Seconds to wait before retry number `attempt` (1, 2, 3...): 5, 15, 45, then a minute. */
+export const retryDelaySeconds = (attempt: number) => [5, 15, 45][attempt - 1] ?? 60;

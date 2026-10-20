@@ -43,3 +43,31 @@ describe("shortLink", () => {
     expect(shortLink(`https://example.com/${"x".repeat(100)}`, 20)).toHaveLength(20);
   });
 });
+
+import { canonicalUrl, hostOf } from "./links";
+
+describe("canonical links", () => {
+  it("treats the usual YouTube forms as one video", () => {
+    const want = "https://youtube.com/watch?v=abcdefghijk";
+    for (const link of [
+      "https://www.youtube.com/watch?v=abcdefghijk",
+      "https://youtu.be/abcdefghijk?si=xyz",
+      "https://m.youtube.com/watch?v=abcdefghijk&t=30s",
+      "https://www.youtube.com/watch?v=abcdefghijk&list=PL123&index=4",
+      "https://music.youtube.com/watch?v=abcdefghijk",
+      "https://www.youtube.com/shorts/abcdefghijk",
+    ])
+      expect(canonicalUrl(link), link).toBe(want);
+  });
+
+  it("keeps different videos apart and ignores tracking", () => {
+    expect(canonicalUrl("https://youtube.com/watch?v=aaaaaaaaaaa")).not.toBe(canonicalUrl("https://youtube.com/watch?v=bbbbbbbbbbb"));
+    expect(canonicalUrl("https://vimeo.com/123/?utm_source=x")).toBe("https://vimeo.com/123");
+    expect(canonicalUrl("not a link")).toBe("not a link");
+  });
+
+  it("names the site", () => {
+    expect(hostOf("https://www.youtube.com/x")).toBe("youtube.com");
+    expect(hostOf("junk")).toBe("");
+  });
+});

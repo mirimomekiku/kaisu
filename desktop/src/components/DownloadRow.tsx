@@ -1,5 +1,5 @@
 import { Fragment, useState, type ReactNode } from "react";
-import { AlertCircle, Check, Film, Loader2, Pause, Play, RotateCcw, ScrollText, X } from "lucide-react";
+import { AlertCircle, AlertTriangle, Check, ChevronsDown, ChevronsUp, Film, Loader2, Pause, Play, RotateCcw, ScrollText, X } from "lucide-react";
 import type { DownloadItem } from "../hooks/useDownloads";
 import { friendlyError } from "../lib/errors";
 import { PRESET_LABEL, formatEta, formatSpeed } from "../lib/format";
@@ -13,6 +13,8 @@ interface Handlers {
   onPause: (id: string) => void;
   onResume: (id: string) => void;
   onRetry: (id: string) => void;
+  onRunNext: (id: string) => void;
+  onRunLater: (id: string) => void;
   onRemove: (id: string) => void;
   onOpen: (path: string) => void;
   onReveal: (path: string) => void;
@@ -46,7 +48,11 @@ function Bar({ item }: { item: DownloadItem }) {
 function statusText(item: DownloadItem, advanced: boolean): ReactNode {
   switch (item.status) {
     case "queued":
-      return <span className="dim">Waiting…</span>;
+      return (item.retryAt ?? 0) > Date.now() ? (
+        <span style={{ color: "#a56a00" }}>Trying again soon (attempt {(item.attempt ?? 0) + 1})…</span>
+      ) : (
+        <span className="dim">Waiting…</span>
+      );
     case "paused":
       return <span className="dim">Paused{item.progress > 0 ? ` at ${Math.round(item.progress)}%` : ""}</span>;
     case "downloading":
@@ -61,8 +67,8 @@ function statusText(item: DownloadItem, advanced: boolean): ReactNode {
       return <span style={{ color: "#a56a00" }}>Finishing up…</span>;
     case "completed":
       return (
-        <span className="inline-flex items-center gap-1" style={{ color: "#2f8a2b" }}>
-          <Check className="w-3 h-3" /> Done
+        <span className="inline-flex items-center gap-1" style={item.warning ? { color: "#a56a00" } : { color: "#2f8a2b" }} title={item.warning}>
+          {item.warning ? <AlertTriangle className="w-3 h-3" /> : <Check className="w-3 h-3" />} {item.warning ? "Done, check it" : "Done"}
         </span>
       );
     case "cancelled":
@@ -91,6 +97,16 @@ function Actions({ item, advanced, iconOnly, showLog, onToggleLog, ...h }: { ite
           <RotateCcw className="w-3 h-3" />
         </button>
       )}
+      {item.status === "queued" && (
+        <>
+          <button className="row-btn" title="Download this next" aria-label="Download this next" onClick={() => h.onRunNext(item.id)}>
+            <ChevronsUp className="w-3 h-3" />
+          </button>
+          <button className="row-btn" title="Download this last" aria-label="Download this last" onClick={() => h.onRunLater(item.id)}>
+            <ChevronsDown className="w-3 h-3" />
+          </button>
+        </>
+      )}
       {(item.status === "queued" || item.status === "downloading" || item.status === "processing") && (
         <button className="row-btn" title="Pause" aria-label="Pause download" onClick={() => h.onPause(item.id)}>
           <Pause className="w-3 h-3" />
@@ -117,9 +133,14 @@ function Actions({ item, advanced, iconOnly, showLog, onToggleLog, ...h }: { ite
 function Detail({ item, advanced, showLog, compactErrors }: { item: DownloadItem; advanced: boolean; showLog: boolean; compactErrors?: boolean }) {
   const [showRaw, setShowRaw] = useState(false);
   const friendly = item.status === "error" && item.errorMsg ? friendlyError(item.errorMsg) : null;
-  if (!friendly && !(advanced && showLog) && !(advanced && item.status === "completed" && item.path && !compactErrors)) return null;
+  if (!item.warning && !friendly && !(advanced && showLog) && !(advanced && item.status === "completed" && item.path && !compactErrors)) return null;
   return (
     <div className="flex flex-col gap-1 text-[11px]">
+      {item.warning && (
+        <div role="alert" style={{ color: "#a56a00" }}>
+          {item.warning}
+        </div>
+      )}
       {advanced && item.status === "completed" && item.path && (
         <div className="mono dim truncate selectable" title={item.path}>
           {item.path}
@@ -246,7 +267,7 @@ export function DownloadTable({ items, mode, ...h }: { items: DownloadItem[]; mo
       <tbody>
         {items.map((item) => {
           const expanded = open === item.id;
-          const hasDetail = (item.status === "error" && !!item.errorMsg) || (advanced && (item.log.length > 0 || item.status === "completed"));
+          const hasDetail = (item.status === "error" && !!item.errorMsg) || !!item.warning || (advanced && (item.log.length > 0 || item.status === "completed"));
           return (
             <Fragment key={item.id}>
               <tr>
