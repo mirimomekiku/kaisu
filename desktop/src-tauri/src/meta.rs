@@ -14,6 +14,9 @@ const MAX_TEXT_CHARS: usize = 200;
 const MAX_COVER_BYTES: u64 = 20 * 1024 * 1024;
 const COVER_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp"];
 
+/// Brackets that only decorate a title: "(Official Video)", "[Lyrics]", "(4K)". Used with `--replace-in-metadata`.
+pub const TITLE_NOISE_REGEX: &str = r"(?i)\s*[(\[][^)\]]*(?:official|lyrics?|music video|visuali[sz]er|audio only|full audio|\b4k\b|\bhd\b)[^)\]]*[)\]]";
+
 // ---- tags --------------------------------------------------------------------------------
 
 #[derive(Deserialize, Default, Clone, Debug, PartialEq)]
@@ -43,7 +46,13 @@ pub fn clean_text(label: &str, raw: &str) -> Result<Option<String>, String> {
 }
 
 /// yt-dlp reads `FROM:TO`; a literal colon needs `\:` and a literal percent sign `%%`.
+///
+/// A FROM made only of word characters ("Jawed", "2005") is taken as the *name of a field* to read, which finds
+/// nothing and yields "NA". Writing it as a template with a default value makes it literal text again.
 fn escape_parse_metadata(text: &str) -> String {
+    if text.chars().all(|c| c.is_alphanumeric() || c == '_') {
+        return format!("%(kaisu_unset|{text})s");
+    }
     text.replace('%', "%%").replace(':', "\\:")
 }
 
@@ -420,6 +429,14 @@ mod tests {
     }
 
     #[test]
+    fn the_title_pattern_is_valid_and_only_matches_decorations() {
+        // Python's `re` is what runs it; the same constructs exist in Rust's regex syntax for a basic sanity check.
+        assert!(TITLE_NOISE_REGEX.starts_with("(?i)"));
+        assert!(!TITLE_NOISE_REGEX.contains('"'));
+        assert!(TITLE_NOISE_REGEX.matches("official").count() == 1);
+    }
+
+    #[test]
     fn text_is_cleaned() {
         assert_eq!(clean_text("t", "  Hello \n world\t").unwrap(), Some("Hello world".into()));
         assert_eq!(clean_text("t", "   ").unwrap(), None);
@@ -431,6 +448,9 @@ mod tests {
     fn metadata_arguments_escape_what_yt_dlp_reads() {
         let a = meta(|m| m.title = Some("AC: 100% Live".into())).args().unwrap();
         assert_eq!(a, vec!["--parse-metadata", "AC\\: 100%% Live:%(meta_title)s", "--embed-metadata"]);
+        // A single word would otherwise be read as a field name and come out as "NA".
+        let word = meta(|m| m.artist = Some("Jawed".into())).args().unwrap();
+        assert_eq!(word[1], "%(kaisu_unset|Jawed)s:%(meta_artist)s");
         assert!(MetaOptions::default().args().unwrap().is_empty());
         assert!(meta(|m| m.title = Some("  ".into())).is_empty());
     }

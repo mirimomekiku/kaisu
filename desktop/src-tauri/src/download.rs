@@ -127,6 +127,8 @@ pub struct ExtraOptions {
     pub cover: Option<CoverOptions>,
     pub lyrics: Option<LyricsMode>,
     pub audio: Option<AudioExtras>,
+    /// Remove "(Official Video)" and similar from titles.
+    pub clean_titles: bool,
 }
 
 #[derive(Deserialize)]
@@ -307,6 +309,9 @@ fn build_args(
     push(&["--print", "before_dl:KAISU_META|%(title)s"]);
     push(&["--print", "after_move:KAISU_TAGS|%(artist,uploader)s|%(track,title)s|%(duration)s"]);
     push(&["--trim-filenames", "150"]);
+    if extra.clean_titles {
+        push(&["--replace-in-metadata", "title", meta::TITLE_NOISE_REGEX, ""]);
+    }
     let template = output::build_template(&extra.output, matches!(req.preset, Preset::Audio), extra.playlist.as_ref(), extra.clip.as_ref())?;
     push(&["-o", template.as_str()]);
     if let Some(clip) = &extra.clip {
@@ -838,7 +843,7 @@ mod tests {
         assert!(a.iter().any(|x| x.starts_with("ExtractAudio+ffmpeg_o:-af loudnorm")));
         assert!(a.iter().any(|x| x.contains("crop=min(iw")));
         assert!(a.iter().any(|x| x == "A\\: B:%(meta_artist)s"));
-        assert!(a.iter().any(|x| x == "2001:%(meta_date)s"));
+        assert!(a.iter().any(|x| x == "%(kaisu_unset|2001)s:%(meta_date)s"));
         assert!(a.iter().any(|x| x.starts_with("KAISU_TAGS") || x.contains("KAISU_TAGS")));
         assert!(a.windows(2).any(|w| w[0] == "--trim-filenames"));
     }

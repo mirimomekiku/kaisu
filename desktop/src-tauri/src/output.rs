@@ -23,6 +23,8 @@ pub enum Layout {
     Kind,
     /// A folder per upload year.
     Year,
+    /// `Artist/Album/`, the way music players expect it.
+    Music,
 }
 
 #[derive(Deserialize, Clone, Copy, Default, PartialEq, Eq, Debug)]
@@ -34,6 +36,8 @@ pub enum NameStyle {
     Title,
     ChannelTitle,
     DateTitle,
+    /// `7 - Title`, using the track number when there is one.
+    TrackTitle,
 }
 
 fn yes() -> bool {
@@ -181,6 +185,7 @@ fn name_template(style: NameStyle) -> &'static str {
         NameStyle::Title => "%(title).180B",
         NameStyle::ChannelTitle => "%(channel,uploader|Unknown)s - %(title).150B",
         NameStyle::DateTitle => "%(upload_date>%Y-%m-%d|unknown date)s - %(title).150B",
+        NameStyle::TrackTitle => "%(meta_track,track_number&{} - |)s%(meta_title,track,title).150B",
     }
 }
 
@@ -204,13 +209,15 @@ pub fn build_template(opts: &OutputOptions, is_audio: bool, playlist: Option<&Pl
             (segs, file)
         }
         None => {
-            let dir = match opts.layout {
-                Layout::Flat => None,
-                Layout::Channel => Some("%(channel,uploader|Unknown channel)s".to_string()),
-                Layout::Kind => Some(if is_audio { "Audio" } else { "Video" }.to_string()),
-                Layout::Year => Some("%(upload_date>%Y|Unknown year)s".to_string()),
+            let dirs: Vec<String> = match opts.layout {
+                Layout::Flat => vec![],
+                Layout::Channel => vec!["%(channel,uploader|Unknown channel)s".to_string()],
+                Layout::Kind => vec![if is_audio { "Audio" } else { "Video" }.to_string()],
+                Layout::Year => vec!["%(upload_date>%Y|Unknown year)s".to_string()],
+                // Typed tags (meta_*) win over what the site says.
+                Layout::Music => vec!["%(meta_artist,artist,channel,uploader|Unknown artist)s".to_string(), "%(meta_album,album|Singles)s".to_string()],
             };
-            (dir.into_iter().collect(), name_template(opts.name).to_string())
+            (dirs, name_template(opts.name).to_string())
         }
     };
 
@@ -247,6 +254,17 @@ mod tests {
     #[test]
     fn defaults_match_the_original_template() {
         assert_eq!(build_template(&opts(), false, None, None).unwrap(), "%(title).150B [%(id)s].%(ext)s");
+    }
+
+    #[test]
+    fn music_layout_and_track_names() {
+        let mut o = opts();
+        o.layout = Layout::Music;
+        o.name = NameStyle::TrackTitle;
+        assert_eq!(
+            build_template(&o, true, None, None).unwrap(),
+            "%(meta_artist,artist,channel,uploader|Unknown artist)s/%(meta_album,album|Singles)s/%(meta_track,track_number&{} - |)s%(meta_title,track,title).150B.%(ext)s"
+        );
     }
 
     #[test]
