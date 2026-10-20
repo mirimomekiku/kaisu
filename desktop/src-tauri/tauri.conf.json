@@ -12,7 +12,9 @@
   "app": {
     "windows": [
       {
-        "title": "Kaisu — Video Downloader",
+        "title": "Kaisu",
+        "decorations": false,
+        "dragDropEnabled": false,
         "width": 980,
         "height": 700,
         "minWidth": 760,
@@ -20,7 +22,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' data: https: http:; style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost"
+      "csp": "default-src 'self'; img-src 'self' data: https: http:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost"
     }
   },
   "bundle": {

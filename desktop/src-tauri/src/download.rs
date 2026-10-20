@@ -18,8 +18,12 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 
 use crate::{
     engine::{self, Engine},
+    output::{self, Clip, OutputOptions, PlaylistCtx},
     proc,
 };
+
+/// Below this much free space we refuse to start: yt-dlp would fail halfway and leave a big partial file.
+const MIN_FREE_BYTES: u64 = 200 * 1024 * 1024;
 
 const NO_FFMPEG: &str = "The media converter (ffmpeg) isn't installed yet. Open Setup to install it.";
 
@@ -106,6 +110,12 @@ pub struct ExtraOptions {
     pub custom_args: Option<String>,
     /// Forward yt-dlp's normal console output to the log.
     pub verbose: bool,
+    /// Folder layout and file naming.
+    pub output: OutputOptions,
+    /// Set when this video is one of a playlist's items (adds the folder and number).
+    pub playlist: Option<PlaylistCtx>,
+    /// Download only part of the video.
+    pub clip: Option<Clip>,
 }
 
 #[derive(Deserialize)]
@@ -123,6 +133,8 @@ pub struct DownloadRequest {
 pub enum DownloadEvent {
     Progress { pct: f32, speed: Option<f64>, eta: Option<u64> },
     Processing,
+    /// The real title, learned from yt-dlp (items added from a pasted link only know their URL at first).
+    Meta { title: String },
     Log { line: String },
     Done { path: Option<String> },
     Cancelled,
@@ -143,6 +155,30 @@ impl Downloads {
     pub fn is_idle(&self) -> bool {
         self.active.lock().map(|m| m.is_empty()).unwrap_or(true)
     }
+
+    /// Stops every running download (used when the app exits, so no yt-dlp or ffmpeg is left behind).
+    pub fn kill_all(&self) {
+        if let Ok(map) = self.active.lock() {
+            for active in map.values() {
+                active.cancelled.store(true, Ordering::SeqCst);
+                proc::kill_tree(active.pid);
+            }
+        }
+    }
+}
+
+/// Free space on the drive that holds `dir`, even if `dir` doesn't exist yet.
+pub fn free_space_for(dir: &std::path::Path) -> Result<u64, String> {
+    let mut probe = dir;
+    while !probe.exists() {
+        probe = probe.parent().ok_or_else(|| format!("Cannot check free space for {}", dir.display()))?;
+    }
+    fs4::available_space(probe).map_err(|e| format!("Cannot check free space: {e}"))
+}
+
+#[tauri::command]
+pub fn free_space(path: PathBuf) -> Result<u64, String> {
+    free_space_for(&path)
 }
 
 // ---- validation ---------------------------------------------------------------------
@@ -255,7 +291,17 @@ fn build_args(
     ]);
     push(&["--progress-template", "postprocess:KAISU_PP|%(progress.status)s"]);
     push(&["--print", "after_move:KAISU_DONE|%(filepath)s"]);
-    push(&["-o", "%(title).150B [%(id)s].%(ext)s"]);
+    push(&["--print", "before_dl:KAISU_META|%(title)s"]);
+    let template = output::build_template(&extra.output, matches!(req.preset, Preset::Audio), extra.playlist.as_ref(), extra.clip.as_ref())?;
+    push(&["-o", template.as_str()]);
+    if let Some(clip) = &extra.clip {
+        clip.validate()?;
+        let section = clip.section();
+        push(&["--download-sections", section.as_str()]);
+        if clip.precise {
+            push(&["--force-keyframes-at-cuts"]);
+        }
+    }
 
     let custom_format = extra.format_id.as_deref().map(validate_format_id).transpose()?;
     match req.preset {
@@ -386,6 +432,14 @@ async fn run_download(
         .await
         .map_err(|e| format!("Cannot use folder {}: {e}", req.out_dir.display()))?;
 
+    let free = free_space_for(&req.out_dir)?;
+    if free < MIN_FREE_BYTES {
+        return Err(format!(
+            "There isn't enough free disk space to download here ({} MB free). Free up some space or choose another folder.",
+            free / (1024 * 1024)
+        ));
+    }
+
     let ytdlp = engine.ytdlp_path(app).await?;
     let (ffmpeg_dir, _) = engine::locate_ffmpeg(app).ok_or(NO_FFMPEG)?;
     let js = engine::locate_js_runtime(app).map(|rt| rt.arg());
@@ -429,6 +483,11 @@ async fn run_download(
         } else if let Some(rest) = line.strip_prefix("KAISU_PP|") {
             if rest.trim() == "started" {
                 let _ = on_event.send(DownloadEvent::Processing);
+            }
+        } else if let Some(title) = line.strip_prefix("KAISU_META|") {
+            let title = title.trim();
+            if !title.is_empty() && title != "NA" {
+                let _ = on_event.send(DownloadEvent::Meta { title: title.to_string() });
             }
         } else if let Some(path) = line.strip_prefix("KAISU_DONE|") {
             final_path = Some(path.trim().to_string());
@@ -486,7 +545,28 @@ pub struct MediaInfo {
     uploader: Option<String>,
     duration_secs: Option<f64>,
     view_count: Option<u64>,
+    like_count: Option<u64>,
+    /// `YYYYMMDD`, as yt-dlp reports it.
+    upload_date: Option<String>,
+    /// Trimmed to a readable length; the full text can be huge.
+    description: Option<String>,
+    webpage_url: Option<String>,
+    is_live: bool,
     formats: Vec<FormatInfo>,
+}
+
+const DESCRIPTION_CHARS: usize = 800;
+
+fn trim_description(d: &str) -> Option<String> {
+    let d = d.trim();
+    if d.is_empty() {
+        return None;
+    }
+    let mut out: String = d.chars().take(DESCRIPTION_CHARS).collect();
+    if d.chars().count() > DESCRIPTION_CHARS {
+        out.push('…');
+    }
+    Some(out)
 }
 
 fn parse_formats(v: &serde_json::Value) -> Vec<FormatInfo> {
@@ -558,6 +638,11 @@ pub async fn get_media_info(
         uploader: text("uploader").or_else(|| text("channel")),
         duration_secs: v.get("duration").and_then(|d| d.as_f64()),
         view_count: v.get("view_count").and_then(|c| c.as_u64()),
+        like_count: v.get("like_count").and_then(|c| c.as_u64()),
+        upload_date: text("upload_date"),
+        description: text("description").and_then(|d| trim_description(&d)),
+        webpage_url: text("webpage_url"),
+        is_live: v.get("is_live").and_then(|l| l.as_bool()).unwrap_or(false),
         formats: parse_formats(&v),
     })
 }
@@ -612,6 +697,42 @@ mod tests {
     fn old_history_preset_name_still_deserializes() {
         let p: Preset = serde_json::from_str("\"audio_mp3\"").unwrap();
         assert!(matches!(p, Preset::Audio));
+    }
+
+    #[test]
+    fn clips_use_download_sections_and_name_the_file() {
+        let mut r = req(Preset::Best);
+        r.extra.clip = Some(Clip { start: 80.0, end: 165.0, precise: false });
+        let a = args(&r).unwrap();
+        assert!(a.windows(2).any(|w| w == ["--download-sections", "*80-165"]));
+        assert!(!a.contains(&"--force-keyframes-at-cuts".to_string()));
+        assert!(a.iter().any(|x| x.contains("[clip 1m20s-2m45s]")));
+        r.extra.clip = Some(Clip { start: 80.0, end: 165.0, precise: true });
+        assert!(args(&r).unwrap().contains(&"--force-keyframes-at-cuts".to_string()));
+        r.extra.clip = Some(Clip { start: 9.0, end: 3.0, precise: false });
+        assert!(args(&r).is_err());
+    }
+
+    #[test]
+    fn playlist_items_land_in_a_numbered_folder() {
+        let mut r = req(Preset::Audio);
+        r.extra.playlist = Some(PlaylistCtx { title: "Road trip".into(), index: 4, total: 30 });
+        let a = args(&r).unwrap();
+        let o = a.iter().position(|x| x == "-o").unwrap();
+        assert_eq!(a[o + 1], "Road trip/04 - %(title).150B [%(id)s].%(ext)s");
+    }
+
+    #[test]
+    fn a_bad_custom_template_fails_the_download_before_it_starts() {
+        let mut r = req(Preset::Best);
+        r.extra.output.custom = Some("../../escape/%(title)s".into());
+        assert!(args(&r).is_err());
+    }
+
+    #[test]
+    fn free_space_is_found_for_folders_that_do_not_exist_yet() {
+        let tmp = std::env::temp_dir().join("kaisu-nope").join("deeper");
+        assert!(free_space_for(&tmp).unwrap() > 0);
     }
 
     #[test]
@@ -706,6 +827,16 @@ mod tests {
             }
             _ => panic!(),
         }
+    }
+
+    #[test]
+    fn descriptions_are_trimmed() {
+        assert_eq!(trim_description("  \n "), None);
+        assert_eq!(trim_description(" hello ").as_deref(), Some("hello"));
+        let long = "é".repeat(DESCRIPTION_CHARS + 5);
+        let t = trim_description(&long).unwrap();
+        assert_eq!(t.chars().count(), DESCRIPTION_CHARS + 1);
+        assert!(t.ends_with('…'));
     }
 
     #[test]
