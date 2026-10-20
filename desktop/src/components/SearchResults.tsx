@@ -80,7 +80,7 @@ export default function SearchResults(p: Props) {
   const openMenu = (e: React.MouseEvent, result: SearchResult | null) => {
     e.preventDefault();
     e.stopPropagation();
-    if (Date.now() - keyOpenedAt.current < 600) return;
+    if (e.button === 0 && Date.now() - keyOpenedAt.current < 600) return;
     setMenu({ x: e.clientX, y: e.clientY, result });
   };
   /** The keyboard way in: the Menu key or Shift+F10 opens the same menu next to the focused row. */
