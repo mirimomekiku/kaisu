@@ -1,14 +1,16 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { AlertTriangle, FolderOpen, Keyboard, RefreshCw, Route, Wrench } from "lucide-react";
-import { checkFolder, errorText, testProxy, type AudioFormat, type Browser, type CloseMode, type Component, type EngineInfo, type Layout, type NameStyle, type SponsorBlock } from "../lib/api";
+import { allowedCustomOptions, checkCustomArgs, checkFolder, errorText, testProxy, type AudioFormat, type CustomOption, type Browser, type CloseMode, type Component, type EngineInfo, type Layout, type NameStyle, type SponsorBlock } from "../lib/api";
 import type { ScheduleState } from "../lib/schedule";
 import { SUBTITLE_MODE_LABEL } from "../lib/subtitles";
 import { checkAudioQuality, checkProxy, checkSpeedLimit } from "../lib/validate";
 import { formatBytes } from "../lib/format";
 import { DELETE_AFTER_CHOICES } from "../lib/transfer";
 import type { Destination } from "../hooks/useAutoMove";
+import ProxyField from "./ProxyField";
 import ScheduleEditor from "./ScheduleEditor";
+import SiteRulesEditor from "./SiteRulesEditor";
 import { LAYOUT_LABEL, NAME_LABEL, checkCustomName, previewPath } from "../lib/output";
 import { ACCENTS, type Accent, type Mode, type Settings, type SubtitleMode, type Theme } from "../lib/storage";
 
@@ -106,6 +108,35 @@ export default function SettingsPage({ settings, effectiveOutDir, engine, engine
     }
   };
   const advanced = settings.mode === "advanced";
+
+  // The custom-arguments box is checked by the same code that will use it, a moment after typing stops.
+  const [argsProblem, setArgsProblem] = useState<string | null>(null);
+  const [allowedOptions, setAllowedOptions] = useState<CustomOption[]>([]);
+  useEffect(() => {
+    if (!advanced) return;
+    let stale = false;
+    allowedCustomOptions().then((list) => !stale && setAllowedOptions(list), () => {});
+    return () => {
+      stale = true;
+    };
+  }, [advanced]);
+  useEffect(() => {
+    if (!advanced || !settings.customArgs.trim()) {
+      setArgsProblem(null);
+      return;
+    }
+    let stale = false;
+    const timer = setTimeout(() => {
+      checkCustomArgs(settings.customArgs).then(
+        (why) => !stale && setArgsProblem(why),
+        () => !stale && setArgsProblem(null),
+      );
+    }, 250);
+    return () => {
+      stale = true;
+      clearTimeout(timer);
+    };
+  }, [advanced, settings.customArgs]);
 
   const customError = advanced ? checkCustomName(settings.customName) : null;
   const prefs = { layout: settings.layout, nameStyle: settings.nameStyle, customName: advanced ? settings.customName : "", playlistFolder: settings.playlistFolder, playlistNumbering: settings.playlistNumbering };
@@ -408,11 +439,29 @@ export default function SettingsPage({ settings, effectiveOutDir, engine, engine
               placeholder="--embed-chapters --retries 10"
               spellCheck={false}
               aria-label="Custom yt-dlp arguments"
+              aria-invalid={!!argsProblem}
               className="field mono w-full mt-1.5"
             />
+            {argsProblem && (
+              <p className="mt-1.5 mb-0" role="alert" style={{ color: "#b3261e" }}>
+                {argsProblem}
+              </p>
+            )}
             <p className="pref-hint mt-1.5 mb-0">
-              Added to every download. Options that run programs (<span className="mono">--exec</span> and similar) are blocked.
+              Added to every download. Only the options in the list below are accepted, written exactly as yt-dlp spells them (<span className="mono">-R 3</span>, not{" "}
+              <span className="mono">-R3</span>). Anything that runs programs, reads or writes files at a path you give, or changes where tools are found is not allowed.
             </p>
+            <details className="mt-1.5">
+              <summary className="cursor-default select-none">Allowed options</summary>
+              <ul className="m-0 mt-1 p-0 list-none flex flex-wrap gap-x-3 gap-y-0.5 mono max-h-40 overflow-auto" aria-label="Allowed options">
+                {allowedOptions.map((o) => (
+                  <li key={o.names[0]} title={o.values === 0 ? "no value" : `${o.values} value${o.values === 1 ? "" : "s"}`}>
+                    {o.names.join(", ")}
+                    {o.values > 0 ? ` ${Array.from({ length: o.values }, () => "…").join(" ")}` : ""}
+                  </li>
+                ))}
+              </ul>
+            </details>
           </div>
         </Group>
       )}
@@ -451,17 +500,14 @@ export default function SettingsPage({ settings, effectiveOutDir, engine, engine
           <div className="flex items-center gap-2 flex-wrap">
             <label className="flex items-center gap-2">
               Proxy
-              <input
+              <ProxyField
                 value={settings.proxy}
-                onChange={(e) => {
-                  onChange({ proxy: e.target.value });
+                onChange={(proxy) => {
+                  onChange({ proxy });
                   setProxyTest({ busy: false });
                 }}
-                placeholder="none (e.g. socks5://127.0.0.1:1080)"
-                spellCheck={false}
-                aria-label="Proxy"
-                aria-invalid={!!proxyProblem}
-                className="field mono"
+                label="Proxy"
+                invalid={!!proxyProblem}
                 style={{ width: 280 }}
               />
             </label>
@@ -480,10 +526,16 @@ export default function SettingsPage({ settings, effectiveOutDir, engine, engine
             </p>
           )}
           <p className="pref-hint mt-1.5 mb-0">
-            http, https, socks4 and socks5 are supported. If it needs a login, it is part of the address (user:password@host) and is stored unencrypted in Kaisu's settings file.
+            http, https, socks4 and socks5 are supported. If it needs a login, it is part of the address (user:password@host). The password is kept in your system's password store, not in Kaisu's settings file, and is hidden here until you edit the box.
           </p>
         </div>
       </Group>
+
+      {advanced && (
+        <Group title="Site rules" hint="Downloads from a site or channel can always be a certain kind of file, in a certain audio format, saved in a certain folder. Applies in Advanced mode.">
+          <SiteRulesEditor rules={settings.siteRules} onChange={(siteRules) => onChange({ siteRules })} />
+        </Group>
+      )}
 
       {advanced && (
         <Group title="Bandwidth schedule" hint="Slow downloads down, or hold them back, at certain times (for example while you work). Applies in Advanced mode.">
