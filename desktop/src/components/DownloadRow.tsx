@@ -1,6 +1,7 @@
-import { Fragment, useState, type ReactNode } from "react";
-import { AlertCircle, AlertTriangle, Check, ChevronsDown, ChevronsUp, Film, Loader2, Pause, Play, RotateCcw, ScrollText, X } from "lucide-react";
+import { Fragment, useState, type DragEvent, type ReactNode } from "react";
+import { AlertCircle, AlertTriangle, Check, ChevronsDown, ChevronsUp, Film, Gauge, Loader2, Pause, Play, RotateCcw, ScrollText, X } from "lucide-react";
 import type { DownloadItem } from "../hooks/useDownloads";
+import Picture from "./Picture";
 import { friendlyError } from "../lib/errors";
 import { PRESET_LABEL, formatEta, formatSpeed } from "../lib/format";
 import type { Mode, ViewMode } from "../lib/storage";
@@ -8,13 +9,18 @@ import FileActions from "./FileActions";
 
 export const QUEUE_VIEWS: ViewMode[] = ["details", "list", "grid", "compact"];
 
-interface Handlers {
+/** What can be done to a download and to the file it produced. */
+export interface Handlers {
   onCancel: (id: string) => void;
   onPause: (id: string) => void;
   onResume: (id: string) => void;
   onRetry: (id: string) => void;
   onRunNext: (id: string) => void;
   onRunLater: (id: string) => void;
+  /** Drag and drop: put `id` where `targetId` is among the waiting downloads. */
+  onReorder: (id: string, targetId: string) => void;
+  /** Open the speed-limit dialog for a download. */
+  onSpeedLimit: (id: string) => void;
   onRemove: (id: string) => void;
   onOpen: (path: string) => void;
   onReveal: (path: string) => void;
@@ -26,6 +32,8 @@ interface Props extends Handlers {
   item: DownloadItem;
   mode: Mode;
   view: ViewMode;
+  /** Place in line while waiting (1 starts next). */
+  position?: number;
 }
 
 const isFinished = (i: DownloadItem) => i.status === "completed" || i.status === "error" || i.status === "cancelled";
@@ -46,14 +54,48 @@ function Bar({ item }: { item: DownloadItem }) {
   );
 }
 
+/** The download being dragged, so rows know whether a drop makes sense (the browser hides it until the drop). */
+let dragging: string | null = null;
+
+/** Waiting downloads can be dragged onto each other to change who starts first. */
+function dragProps(item: DownloadItem, h: Handlers) {
+  if (item.status !== "queued") return {};
+  return {
+    draggable: true,
+    "data-draggable": "true",
+    onDragStart: (e: DragEvent) => {
+      dragging = item.id;
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", item.id);
+    },
+    onDragEnd: () => {
+      dragging = null;
+    },
+    onDragOver: (e: DragEvent) => {
+      if (dragging && dragging !== item.id) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+      }
+    },
+    onDrop: (e: DragEvent) => {
+      e.preventDefault();
+      const id = dragging ?? e.dataTransfer.getData("text/plain");
+      dragging = null;
+      if (id && id !== item.id) h.onReorder(id, item.id);
+    },
+  };
+}
+
 /** Short status text for a download, e.g. "6.1 MB/s · 12s left". */
-function statusText(item: DownloadItem, advanced: boolean): ReactNode {
+function statusText(item: DownloadItem, advanced: boolean, position?: number): ReactNode {
   switch (item.status) {
     case "queued":
       return (item.retryAt ?? 0) > Date.now() ? (
         <span style={{ color: "#a56a00" }}>Trying again soon (attempt {(item.attempt ?? 0) + 1})…</span>
       ) : (
-        <span className="dim">Waiting…</span>
+        <span className="dim">
+          Waiting…{position ? <span title={position === 1 ? "Starts next" : `${position - 1} before this one`}> #{position}</span> : null}
+        </span>
       );
     case "paused":
       return <span className="dim">Paused{item.progress > 0 ? ` at ${Math.round(item.progress)}%` : ""}</span>;
@@ -108,6 +150,11 @@ function Actions({ item, advanced, iconOnly, showLog, onToggleLog, ...h }: { ite
             <ChevronsDown className="w-3 h-3" />
           </button>
         </>
+      )}
+      {(item.status === "queued" || item.status === "downloading" || item.status === "paused") && (
+        <button className="row-btn" title={item.extra.rate_limit ? `Speed limit: ${item.extra.rate_limit}/s` : "Speed limit"} aria-label="Speed limit" onClick={() => h.onSpeedLimit(item.id)}>
+          <Gauge className="w-3 h-3" />
+        </button>
       )}
       {(item.status === "queued" || item.status === "downloading" || item.status === "processing") && (
         <button className="row-btn" title="Pause" aria-label="Pause download" onClick={() => h.onPause(item.id)}>
@@ -174,18 +221,18 @@ function Detail({ item, advanced, showLog, compactErrors }: { item: DownloadItem
 }
 
 function Thumb({ item, cls }: { item: DownloadItem; cls: string }) {
-  return <div className={`thumb ${cls}`}>{item.thumbnail ? <img src={item.thumbnail} alt="" referrerPolicy="no-referrer" /> : <Film className="w-3.5 h-3.5" />}</div>;
+  return <div className={`thumb ${cls}`}><Picture url={item.thumbnail} fallback={<Film className="w-3.5 h-3.5" />} /></div>;
 }
 
 /** The list / grid / compact layouts for a single download. The table layout is `DownloadTable`. */
-export default function DownloadRow({ item, mode, view, ...h }: Props) {
+export default function DownloadRow({ item, mode, view, position, ...h }: Props) {
   const advanced = mode === "advanced";
   const [showLog, setShowLog] = useState(false);
   const actions = <Actions item={item} advanced={advanced} iconOnly={view !== "list"} showLog={showLog} onToggleLog={() => setShowLog((v) => !v)} {...h} />;
 
   if (view === "grid") {
     return (
-      <div className="row-card overflow-hidden flex flex-col">
+      <div className="row-card overflow-hidden flex flex-col" {...dragProps(item, h)}>
         <div className="relative">
           <Thumb item={item} cls="w-full aspect-video !border-0 !shadow-none" />
           <div className="absolute inset-x-1.5 bottom-1.5">
@@ -198,7 +245,7 @@ export default function DownloadRow({ item, mode, view, ...h }: Props) {
           </div>
           <div className="dim truncate">{presetLabel(item)}</div>
           <div className="flex items-center justify-between gap-2 min-h-[20px]">
-            <div>{statusText(item, advanced)}</div>
+            <div>{statusText(item, advanced, position)}</div>
             {actions}
           </div>
           <Detail item={item} advanced={advanced} showLog={showLog} compactErrors />
@@ -209,14 +256,14 @@ export default function DownloadRow({ item, mode, view, ...h }: Props) {
 
   if (view === "compact") {
     return (
-      <div className="row-card zebra px-2 py-1 flex flex-col gap-1">
+      <div className="row-card zebra px-2 py-1 flex flex-col gap-1" {...dragProps(item, h)}>
         <div className="flex items-center gap-2.5">
           <Thumb item={item} cls="w-10 aspect-video" />
           <span className="flex-1 min-w-0 truncate" title={item.title}>
             {item.title}
           </span>
           <span className="hidden sm:inline dim shrink-0">{presetLabel(item)}</span>
-          <span className="shrink-0 w-24 text-right">{statusText(item, advanced)}</span>
+          <span className="shrink-0 w-24 text-right">{statusText(item, advanced, position)}</span>
           {actions}
         </div>
         {!isFinished(item) && <Bar item={item} />}
@@ -226,7 +273,7 @@ export default function DownloadRow({ item, mode, view, ...h }: Props) {
   }
 
   return (
-    <div className="row-card zebra p-2 flex flex-col gap-1.5">
+    <div className="row-card zebra p-2 flex flex-col gap-1.5" {...dragProps(item, h)}>
       <div className="flex items-center gap-3">
         <Thumb item={item} cls="w-24 aspect-video" />
         <div className="min-w-0 flex-1 flex flex-col gap-1">
@@ -235,13 +282,14 @@ export default function DownloadRow({ item, mode, view, ...h }: Props) {
               {item.title}
             </span>
             <span className="shrink-0 flex items-center gap-2">
-              {statusText(item, advanced)}
+              {statusText(item, advanced, position)}
               {actions}
             </span>
           </div>
           <div className="dim">
             {presetLabel(item)}
             {advanced && item.extra.format_id && <span className="mono"> · {item.extra.format_id}</span>}
+            {item.extra.rate_limit && !isFinished(item) && <span> · limit {item.extra.rate_limit}/s</span>}
           </div>
           <Bar item={item} />
         </div>
@@ -252,7 +300,7 @@ export default function DownloadRow({ item, mode, view, ...h }: Props) {
 }
 
 /** The iTunes-style list: one line per download with an Aqua progress bar column. */
-export function DownloadTable({ items, mode, ...h }: { items: DownloadItem[]; mode: Mode } & Handlers) {
+export function DownloadTable({ items, mode, positions, ...h }: { items: DownloadItem[]; mode: Mode; positions: Map<string, number> } & Handlers) {
   const advanced = mode === "advanced";
   const [open, setOpen] = useState<string | null>(null);
   return (
@@ -272,7 +320,7 @@ export function DownloadTable({ items, mode, ...h }: { items: DownloadItem[]; mo
           const hasDetail = (item.status === "error" && !!item.errorMsg) || !!item.warning || (advanced && (item.log.length > 0 || item.status === "completed"));
           return (
             <Fragment key={item.id}>
-              <tr>
+              <tr {...dragProps(item, h)}>
                 <td>
                   <div className="flex items-center gap-2 min-w-0">
                     <Thumb item={item} cls="w-[34px] aspect-video !shadow-none" />
@@ -287,11 +335,14 @@ export function DownloadTable({ items, mode, ...h }: { items: DownloadItem[]; mo
                     )}
                   </div>
                 </td>
-                <td className="hidden sm:table-cell fit dim">{presetLabel(item)}</td>
+                <td className="hidden sm:table-cell fit dim">
+                  {presetLabel(item)}
+                  {item.extra.rate_limit && !isFinished(item) ? <span> · {item.extra.rate_limit}/s</span> : null}
+                </td>
                 <td>
                   <Bar item={item} />
                 </td>
-                <td className="fit">{statusText(item, advanced)}</td>
+                <td className="fit">{statusText(item, advanced, positions.get(item.id))}</td>
                 <td className="fit">
                   <Actions item={item} advanced={false} iconOnly showLog={false} onToggleLog={() => {}} {...h} />
                 </td>

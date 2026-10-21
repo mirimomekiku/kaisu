@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { open as pickFile } from "@tauri-apps/plugin-dialog";
-import { Calendar, CheckCircle2, Clock, Download, Eye, Music, Radio, ThumbsUp, Video } from "lucide-react";
+import { Calendar, CheckCircle2, Clock, Download, Eye, MonitorPlay, Music, Radio, ThumbsUp, Video } from "lucide-react";
 import FileActions from "./FileActions";
+import Picture from "./Picture";
 import type { AudioExtras, Clip, CoverMode, CoverOptions, FormatInfo, LyricsMode, MediaInfo, MetaOptions, Preset, SubtitleOptions } from "../lib/api";
 import type { FormatPreset } from "../lib/presets";
 import { changedTags, guessTags, headsUp, type TagGuess } from "../lib/tags";
@@ -54,6 +55,10 @@ interface Props {
   onSavePreset: (preset: Omit<FormatPreset, "id">) => string | null;
   /** Advanced: the command these choices would run. */
   onPreview?: (choice: DownloadChoice) => Promise<string>;
+  /** Watch a short, low-quality preview before downloading. Left out where it isn't possible (live streams, no player). */
+  onWatchPreview?: () => void;
+  /** Called before lyrics are switched on: looking them up sends the artist and title to a lyrics service, so the user is asked first. Resolves to false if they said no. */
+  onLyricsChoice: (mode: LyricsMode) => Promise<boolean>;
   /** Whether browser cookies are switched on (changes the advice for sign-in videos). */
   hasCookies: boolean;
   mode: Mode;
@@ -101,7 +106,7 @@ function estimateSize(videos: FormatInfo[], audios: FormatInfo[], kind: "video" 
   return pick.filesize + (pick.kind === "video" ? bestAudio : 0);
 }
 
-export default function MediaCard({ info, extras, presets, onSavePreset, onPreview, hasCookies, mode, subtitleDefaults, audioLabel, activeOptions, downloads, onDownload, onOpen, onReveal }: Props) {
+export default function MediaCard({ info, extras, presets, onSavePreset, onPreview, onWatchPreview, onLyricsChoice, hasCookies, mode, subtitleDefaults, audioLabel, activeOptions, downloads, onDownload, onOpen, onReveal }: Props) {
   const advanced = mode === "advanced";
   const [kind, setKind] = useState<"video" | "audio">("video");
   const [quality, setQuality] = useState<Quality>("best");
@@ -216,7 +221,13 @@ export default function MediaCard({ info, extras, presets, onSavePreset, onPrevi
     setNormalize(p.normalize);
     setTrimSilence(p.trimSilence);
     setCover(p.cover);
-    setLyrics(p.lyrics);
+    setLyrics("off");
+    void chooseLyrics(p.lyrics);
+  };
+
+  /** Switches lyrics to `mode`, asking first if that means looking them up online. A "no" leaves lyrics off. */
+  const chooseLyrics = async (mode: LyricsMode) => {
+    setLyrics(mode === "off" || (await onLyricsChoice(mode)) ? mode : "off");
   };
 
   const savePreset = () => {
@@ -280,7 +291,7 @@ export default function MediaCard({ info, extras, presets, onSavePreset, onPrevi
     <section className="panel overflow-hidden" aria-label="Video details">
       <div className="inspector p-3 flex flex-col sm:flex-row gap-4">
         <div className="thumb w-full sm:w-56 aspect-video rounded-[3px] self-start">
-          {info.thumbnail ? <img src={info.thumbnail} alt="" referrerPolicy="no-referrer" /> : <Video className="w-7 h-7" />}
+          <Picture url={info.thumbnail} fallback={<Video className="w-7 h-7" />} />
           {info.is_live ? (
             <span className="tag live inline-flex items-center gap-1">
               <Radio className="w-3 h-3" /> LIVE
@@ -442,9 +453,16 @@ export default function MediaCard({ info, extras, presets, onSavePreset, onPrevi
                   </label>
                 )}
               </div>
-              <button type="button" onClick={submit} disabled={(clipOpen && !clip) || !!problem} className="btn primary" title={problem ?? undefined}>
-                <Download className="w-3.5 h-3.5" /> {clipOpen ? "Download clip" : kind === "video" ? "Download video" : "Download audio"}
-              </button>
+              <div className="flex items-center gap-2">
+                {onWatchPreview && !info.is_live && (
+                  <button type="button" onClick={onWatchPreview} className="btn" title="Watch the first 20 seconds in low quality, without downloading the whole video">
+                    <MonitorPlay className="w-3.5 h-3.5" /> Preview
+                  </button>
+                )}
+                <button type="button" onClick={submit} disabled={(clipOpen && !clip) || !!problem} className="btn primary" title={problem ?? undefined}>
+                  <Download className="w-3.5 h-3.5" /> {clipOpen ? "Download clip" : kind === "video" ? "Download video" : "Download audio"}
+                </button>
+              </div>
             </div>
 
             {!info.is_live && (
@@ -575,7 +593,7 @@ export default function MediaCard({ info, extras, presets, onSavePreset, onPrevi
                         )}
                         <label className="flex items-center gap-2">
                           Lyrics
-                          <select value={lyrics} onChange={(e) => setLyrics(e.target.value as LyricsMode)} className="field" aria-label="Lyrics">
+                          <select value={lyrics} onChange={(e) => void chooseLyrics(e.target.value as LyricsMode)} className="field" aria-label="Lyrics">
                             {(Object.keys(LYRICS_LABEL) as LyricsMode[]).map((m) => (
                               <option key={m} value={m}>
                                 {LYRICS_LABEL[m]}

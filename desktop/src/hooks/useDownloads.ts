@@ -8,6 +8,7 @@ import {
   type Preset,
 } from "../lib/api";
 import { isTransient, retryDelaySeconds } from "../lib/errors";
+import { reorderWaiting } from "../lib/queueOrder";
 import { canonicalUrl, hostOf } from "../lib/links";
 import type { SavedDownload } from "../lib/storage";
 
@@ -321,6 +322,20 @@ export function useDownloads(concurrency: number, onCompleted: (item: DownloadIt
     });
   }, []);
 
+  /** Drag and drop: puts `id` where `targetId` is among the waiting downloads (see `reorderWaiting`). */
+  const reorder = useCallback((id: string, targetId: string) => setItems((prev) => reorderWaiting(prev, id, targetId)), []);
+
+  /** A speed limit for one download (`null` = the usual one). A running download is restarted to pick it up, carrying on from where it was. */
+  const setRateLimit = useCallback((id: string, limit: string | null) => {
+    const running = itemsRef.current.find((x) => x.id === id && isActive(x.status));
+    setItems((prev) => prev.map((it) => (it.id === id && !isFinished(it.status) ? { ...it, extra: { ...it.extra, rate_limit: limit } } : it)));
+    if (running) {
+      autoPaused.current.add(id);
+      pausing.current.add(id);
+      cancelDownload(id).catch(() => pausing.current.delete(id));
+    }
+  }, []);
+
   const pauseAll = useCallback(() => itemsRef.current.forEach((x) => (x.status === "queued" || isActive(x.status)) && pause(x.id)), [pause]);
   const resumeAll = useCallback(() => {
     // Resume oldest first so the queue order is what it was.
@@ -379,5 +394,5 @@ export function useDownloads(concurrency: number, onCompleted: (item: DownloadIt
 
   const unfinished = items.filter((i) => i.status === "queued" || isActive(i.status)).length;
 
-  return { items, enqueue, runNext, runLater, cancel, pause, resume, pauseAll, resumeAll, retry, remove, clearFinished, restore, hasActive: unfinished > 0 };
+  return { items, enqueue, runNext, runLater, reorder, setRateLimit, cancel, pause, resume, pauseAll, resumeAll, retry, remove, clearFinished, restore, hasActive: unfinished > 0 };
 }

@@ -1,4 +1,5 @@
-import { Copy, FolderOpen, Play, Trash2, TriangleAlert } from "lucide-react";
+import { AudioLines, Copy, FolderOpen, MonitorPlay, Play, Trash2, TriangleAlert } from "lucide-react";
+import { useMediaActions } from "../hooks/useMediaDialogs";
 
 interface Props {
   path: string | null;
@@ -17,6 +18,7 @@ interface Props {
 
 /** Open / show-in-folder buttons for a downloaded file, or a notice if it has been moved or deleted. */
 export default function FileActions({ path, exists, onOpen, onReveal, onCopyPath, onDelete, iconOnly = false, openLabelled = false }: Props) {
+  const media = useMediaActions();
   if (!path) return null;
   if (exists === false) {
     return (
@@ -34,6 +36,16 @@ export default function FileActions({ path, exists, onOpen, onReveal, onCopyPath
       <button type="button" onClick={() => onReveal(path)} title="Show in folder" aria-label="Show in folder" className={openLabelled ? "row-btn" : cls}>
         <FolderOpen className="w-3 h-3" /> {!iconOnly && !openLabelled && "Show in folder"}
       </button>
+      {media && (
+        <>
+          <button type="button" onClick={() => media.play(path)} title="Play in Kaisu" aria-label="Play in Kaisu" className="row-btn">
+            <MonitorPlay className="w-3 h-3" />
+          </button>
+          <button type="button" onClick={() => media.convert(path)} title="Make an audio copy" aria-label="Convert to audio" className="row-btn">
+            <AudioLines className="w-3 h-3" />
+          </button>
+        </>
+      )}
       {onCopyPath && (
         <button type="button" onClick={() => onCopyPath(path)} title="Copy the file's location" aria-label="Copy file location" className="row-btn">
           <Copy className="w-3 h-3" />
