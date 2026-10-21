@@ -3,6 +3,7 @@ import { AlertCircle, Check, Circle, Copy, Download, Film, Loader2, Wrench } fro
 import { errorText, runSetup, type ComponentId, type EngineInfo, type SetupInfo } from "../lib/api";
 import { formatBytes } from "../lib/format";
 import { checkProxy } from "../lib/validate";
+import ProxyField from "./ProxyField";
 
 interface Props {
   info: SetupInfo;
@@ -205,16 +206,7 @@ export default function SetupScreen({ info, onDone, onSkip, proxy, onProxy, onRe
           <div className="mt-2 flex flex-col gap-1.5">
             <label className="flex items-center gap-2">
               Proxy
-              <input
-                value={proxyText}
-                onChange={(e) => setProxyText(e.target.value)}
-                placeholder="none (e.g. socks5://127.0.0.1:1080)"
-                spellCheck={false}
-                aria-label="Setup proxy"
-                aria-invalid={!!proxyProblem}
-                disabled={phase === "running"}
-                className="field mono flex-1"
-              />
+              <ProxyField value={proxyText} onChange={setProxyText} label="Setup proxy" invalid={!!proxyProblem} disabled={phase === "running"} className="field mono flex-1" />
             </label>
             {proxyProblem && (
               <p className="m-0" role="alert" style={{ color: "#b3261e" }}>

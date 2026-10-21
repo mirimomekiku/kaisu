@@ -43,13 +43,43 @@ pub fn proxy_option(proxy: Option<&str>) -> Result<Option<String>, String> {
     }
 }
 
+/// Hides the password in every `scheme://user:password@host` address inside `text`, so error messages, logs and the
+/// "show command" preview never carry one: `socks5://me:secret@host:1080` becomes `socks5://me:***@host:1080`.
+pub fn redact_urls(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(i) = rest.find("://") {
+        let (head, tail) = rest.split_at(i + 3);
+        out.push_str(head);
+        let end = tail.find(|c: char| c.is_whitespace() || matches!(c, '/' | '?' | '#' | '\'' | '"' | '<' | '>' | ')')).unwrap_or(tail.len());
+        let (authority, after) = tail.split_at(end);
+        match authority.rfind('@') {
+            Some(at) => {
+                let (userinfo, host) = authority.split_at(at);
+                match userinfo.split_once(':') {
+                    Some((user, _)) => {
+                        out.push_str(user);
+                        out.push_str(":***");
+                    }
+                    None => out.push_str(userinfo),
+                }
+                out.push_str(host);
+            }
+            None => out.push_str(authority),
+        }
+        rest = after;
+    }
+    out.push_str(rest);
+    out
+}
+
 /// Tries the proxy with a real, tiny yt-dlp request, so "works" means "works for downloading".
 #[tauri::command]
 pub async fn test_proxy(app: AppHandle, engine: State<'_, Engine>, proxy: String) -> Result<String, String> {
     let proxy = validate_proxy(&proxy)?;
     let ytdlp = engine.ytdlp_path(&app).await?;
-    let args = ["--proxy", proxy.as_str(), "--flat-playlist", "--dump-single-json", "--no-warnings", "--", "ytsearch1:kaisu"];
-    proc::run_capture(&ytdlp, &args, Duration::from_secs(45))
+    let args = ["--flat-playlist", "--dump-single-json", "--no-warnings", "--", "ytsearch1:kaisu"];
+    proc::run_capture_proxied(&ytdlp, &args, Duration::from_secs(45), Some(&proxy))
         .await
         .map(|_| "The proxy works: Kaisu reached YouTube through it.".to_string())
         .map_err(|e| {
@@ -78,6 +108,21 @@ mod tests {
             assert!(validate_proxy(bad).is_err(), "{bad:?} should be rejected");
         }
         assert!(validate_proxy(&format!("http://{}", "a".repeat(400))).is_err());
+    }
+
+    #[test]
+    fn passwords_in_addresses_are_hidden() {
+        assert_eq!(redact_urls("socks5://me:secret@host:1080"), "socks5://me:***@host:1080");
+        assert_eq!(redact_urls("http://me@host:3128"), "http://me@host:3128", "a user name alone is not a secret");
+        assert_eq!(redact_urls("http://host:8080"), "http://host:8080");
+        assert_eq!(redact_urls("socks5h://u:p%40ss@h:1 and https://a:b@c/d?x=1"), "socks5h://u:***@h:1 and https://a:***@c/d?x=1");
+        assert_eq!(
+            redact_urls("ERROR: Unable to connect to proxy 'http://me:secret@10.0.0.1:8080' (timed out)\nsecond: https://x.y/z"),
+            "ERROR: Unable to connect to proxy 'http://me:***@10.0.0.1:8080' (timed out)\nsecond: https://x.y/z"
+        );
+        assert_eq!(redact_urls("no addresses here, just a@b: c"), "no addresses here, just a@b: c");
+        assert_eq!(redact_urls("trailing ://"), "trailing ://");
+        assert!(!redact_urls("http://u:hunter2@h").contains("hunter2"));
     }
 
     #[test]
