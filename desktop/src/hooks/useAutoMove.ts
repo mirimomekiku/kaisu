@@ -59,15 +59,14 @@ export function useAutoMove(a: Args) {
   }, [enabled, settings.moveDir]);
 
   const run = useCallback(async (items: HistoryItem[]) => {
-    const { settings: s, outDir: out, getHistory, updateHistory, announce, showFlash } = argsRef.current;
+    const { settings: s, getHistory, updateHistory, announce, showFlash } = argsRef.current;
     if (busy.current || items.length === 0) return;
     busy.current = true;
     setMoving(true);
     try {
+      // The folders come from what Kaisu was told with `setManagedFolders`, not from here.
       const results = await transferFiles(
         items.map((h) => ({ id: h.id, path: h.path as string })),
-        out,
-        s.moveDir,
         s.moveMode,
         s.moveConflict,
         s.moveKeepLayout,
@@ -75,6 +74,7 @@ export function useAutoMove(a: Args) {
       const byId = new Map(results.map((r) => [r.id, r]));
       let done = 0;
       let firstError = "";
+      let firstWarning = "";
       const next = getHistory().map((h) => {
         const r = byId.get(h.id);
         if (!r) return h;
@@ -82,6 +82,7 @@ export function useAutoMove(a: Args) {
           firstError ||= r.error ?? "";
           return h;
         }
+        firstWarning ||= r.warning ?? "";
         done += r.skipped ? 0 : 1;
         if (r.skipped) return { ...h, transferred: "skipped" };
         if (s.moveMode === "copy") return { ...h, transferred: r.new_path ?? "copied" };
@@ -92,6 +93,9 @@ export function useAutoMove(a: Args) {
       if (firstError && firstError !== lastError.current) {
         lastError.current = firstError;
         showFlash(firstError, true);
+      } else if (firstWarning) {
+        // The song arrived but a subtitle or lyrics file didn't: say so, instead of leaving them behind unnoticed.
+        showFlash(firstWarning, true);
       }
     } catch (e) {
       const message = errorText(e);

@@ -41,38 +41,6 @@ pub fn open_folder(app: AppHandle, path: String) -> Result<(), String> {
     app.opener().open_path(p.display().to_string(), None::<&str>).map_err(|e| format!("Couldn't open the folder: {e}"))
 }
 
-#[derive(serde::Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
-#[serde(rename_all = "snake_case")]
-pub enum PowerAction {
-    Sleep,
-    Shutdown,
-}
-
-/// The OS command for a power action, or `None` where we don't support it.
-fn power_command(action: PowerAction, os: &str) -> Option<(&'static str, &'static [&'static str])> {
-    match (os, action) {
-        ("windows", PowerAction::Sleep) => Some(("rundll32.exe", &["powrprof.dll,SetSuspendState", "0,1,0"])),
-        ("windows", PowerAction::Shutdown) => Some(("shutdown", &["/s", "/t", "0"])),
-        ("linux", PowerAction::Sleep) => Some(("systemctl", &["suspend"])),
-        ("linux", PowerAction::Shutdown) => Some(("systemctl", &["poweroff"])),
-        _ => None,
-    }
-}
-
-/// Puts the computer to sleep or shuts it down. The UI shows a cancellable countdown first.
-#[tauri::command]
-pub fn system_power(action: PowerAction) -> Result<(), String> {
-    let (program, args) = power_command(action, std::env::consts::OS).ok_or("That isn't supported on this computer.")?;
-    let mut cmd = std::process::Command::new(program);
-    cmd.args(args).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x0800_0000);
-    }
-    cmd.spawn().map(|_| ()).map_err(|e| format!("Couldn't run {program}: {e}"))
-}
-
 /// A link we are willing to hand to the system browser: plain http(s), no whitespace, a sane length.
 fn web_url(url: &str) -> Result<&str, String> {
     let u = url.trim();
@@ -183,11 +151,12 @@ fn folder_text_problem(path: &str, windows: bool) -> Option<String> {
     if path.trim().is_empty() {
         return Some("Choose a download folder.".into());
     }
+    // Judged by the text alone (and by the `windows` flag, not the OS this runs on), so it behaves the same everywhere.
     let absolute = if windows {
         let b = path.as_bytes();
         (b.len() > 2 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b[2] == b'\\' || b[2] == b'/')) || path.starts_with("\\\\")
     } else {
-        Path::new(path).is_absolute()
+        path.starts_with('/')
     };
     if !absolute {
         return Some("The download folder must be a full path.".into());
@@ -273,15 +242,6 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         assert_eq!(media_file(dir.to_str().unwrap()).unwrap_err(), GONE);
         let _ = fs::remove_dir(dir);
-    }
-
-    #[test]
-    fn power_actions_map_to_real_commands_per_os() {
-        assert_eq!(power_command(PowerAction::Sleep, "linux"), Some(("systemctl", &["suspend"][..])));
-        assert_eq!(power_command(PowerAction::Shutdown, "linux"), Some(("systemctl", &["poweroff"][..])));
-        assert_eq!(power_command(PowerAction::Shutdown, "windows"), Some(("shutdown", &["/s", "/t", "0"][..])));
-        assert_eq!(power_command(PowerAction::Sleep, "windows").map(|c| c.0), Some("rundll32.exe"));
-        assert_eq!(power_command(PowerAction::Sleep, "plan9"), None);
     }
 
     #[test]

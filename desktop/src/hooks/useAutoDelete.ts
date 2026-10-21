@@ -28,8 +28,6 @@ export function useAutoDelete(a: Args) {
   const busy = useRef(false);
   const argsRef = useRef(a);
   argsRef.current = a;
-  const dirsRef = useRef(dirs);
-  dirsRef.current = dirs;
 
   const candidates = useMemo(() => (a.ready ? oldDownloads(a.history, settings.autoDeleteDays, now, dirs, a.existing) : []), [a.ready, a.history, settings.autoDeleteDays, now, dirs, a.existing]);
   const bytes = candidates.reduce((sum, h) => sum + (h.path ? (a.sizes[h.path] ?? 0) : 0), 0);
@@ -40,7 +38,8 @@ export function useAutoDelete(a: Args) {
     busy.current = true;
     setRunning(true);
     try {
-      const results = await deleteFiles(items.map((h) => h.path as string), dirsRef.current);
+      // Kaisu deletes only inside the folders it was told about (see `setManagedFolders`), never from a list given here.
+      const results = await deleteFiles(items.map((h) => h.path as string), argsRef.current.settings.autoDeleteMoved);
       const removed = results.filter((r) => r.ok).length;
       const failed = results.find((r) => !r.ok)?.error;
       if (removed > 0) {

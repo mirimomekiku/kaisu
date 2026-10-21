@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { errorText, openFolder, quitApp, systemPower } from "../lib/api";
+import { cancelPower, errorText, openFolder, quitApp, schedulePower } from "../lib/api";
 import { notify } from "../lib/notify";
 import type { DownloadItem } from "./useDownloads";
 
@@ -32,7 +32,9 @@ interface Options {
 
 /**
  * When a batch of downloads finishes: say so (display, and a notification if Kaisu isn't focused), then run the
- * one-shot "when done" action. Sleep and shut down get a 30-second cancellable countdown first.
+ * one-shot "when done" action. Sleep and shut down get a 30-second cancellable countdown first. The countdown itself is
+ * kept by Kaisu's backend, which does the sleeping or shutting down (and refuses if a download is running); what is
+ * shown here is only a display of it.
  */
 export function useBatchFinish({ items, busyCount, session, notifyWhenDone, outDir, showFlash, announce }: Options) {
   const [whenDone, setWhenDone] = useState<WhenDone>("nothing");
@@ -67,20 +69,28 @@ export function useBatchFinish({ items, busyCount, session, notifyWhenDone, outD
       const folder = lastDir || latest.current.outDir;
       if (action === "folder" && folder) openFolder(folder).catch((e) => showFlash(errorText(e), true));
       else if (action === "quit") quitApp().catch(() => {});
-      else if (action === "sleep" || action === "shutdown") setCountdown({ action, seconds: COUNTDOWN_SECONDS });
+      else if (action === "sleep" || action === "shutdown") {
+        schedulePower(action, COUNTDOWN_SECONDS)
+          .then(() => setCountdown({ action, seconds: COUNTDOWN_SECONDS }))
+          .catch((e) => showFlash(errorText(e), true));
+      }
     }
   }, [busyCount, items, session, announce, showFlash]);
 
   useEffect(() => {
     if (!countdown) return;
     if (countdown.seconds <= 0) {
-      systemPower(countdown.action).catch((e) => showFlash(errorText(e), true));
-      setCountdown(null);
+      setCountdown(null); // the backend takes it from here
       return;
     }
     const timer = setTimeout(() => setCountdown({ ...countdown, seconds: countdown.seconds - 1 }), 1000);
     return () => clearTimeout(timer);
-  }, [countdown, showFlash]);
+  }, [countdown]);
 
-  return { whenDone, setWhenDone, countdown, cancelCountdown: () => setCountdown(null) };
+  const cancelCountdown = () => {
+    cancelPower().catch((e) => showFlash(errorText(e), true));
+    setCountdown(null);
+  };
+
+  return { whenDone, setWhenDone, countdown, cancelCountdown };
 }

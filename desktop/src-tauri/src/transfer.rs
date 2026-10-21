@@ -8,8 +8,9 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use tauri::State;
 
-use crate::files::MEDIA_EXTENSIONS;
+use crate::{files::MEDIA_EXTENSIONS, scope::Scope};
 
 /// Files that belong next to a download and travel (or go) with it.
 const SIDECAR_EXTENSIONS: &[&str] = &["srt", "vtt", "lrc", "txt"];
@@ -47,6 +48,15 @@ pub struct MoveResult {
     pub skipped: bool,
     pub new_path: Option<String>,
     pub error: Option<String>,
+    /// The file itself arrived, but something that belongs with it (subtitles, lyrics) did not.
+    pub warning: Option<String>,
+}
+
+/// Where a file ended up, and a note when one of its companion files could not follow it.
+#[derive(Debug, PartialEq)]
+struct Moved {
+    path: PathBuf,
+    warning: Option<String>,
 }
 
 fn is_media(path: &Path) -> bool {
@@ -63,7 +73,7 @@ fn has_parent_part(path: &Path) -> bool {
 }
 
 /// A real file we may touch: absolute, free of `..`, inside `base`, a media file that exists.
-fn checked_source(path: &str, base: &Path) -> Result<PathBuf, String> {
+pub(crate) fn checked_source(path: &str, base: &Path) -> Result<PathBuf, String> {
     let p = PathBuf::from(path);
     if !p.is_absolute() || has_parent_part(&p) {
         return Err("That isn't a valid file location.".into());
@@ -126,7 +136,7 @@ fn copy_checked(from: &Path, to: &Path) -> Result<(), String> {
 }
 
 /// Moves or copies one file. Returns where it ended up (None when it was skipped).
-fn transfer_one(src: &Path, base: &Path, dest_root: &Path, mode: MoveMode, conflict: Conflict, keep_layout: bool) -> Result<Option<PathBuf>, String> {
+fn transfer_one(src: &Path, base: &Path, dest_root: &Path, mode: MoveMode, conflict: Conflict, keep_layout: bool) -> Result<Option<Moved>, String> {
     let target = destination_for(src, base, dest_root, keep_layout).ok_or("Couldn't work out where this file goes.")?;
     let target = if target.exists() {
         match conflict {
@@ -155,18 +165,26 @@ fn transfer_one(src: &Path, base: &Path, dest_root: &Path, mode: MoveMode, confl
         }
         MoveMode::Copy => copy_checked(src, &target)?,
     }
-    // Companions go along; losing one is not worth failing the song.
+    // Companions go along. Losing one doesn't fail the song, but it is reported.
+    let mut failed: Vec<String> = Vec::new();
     for side in sidecars_of(src) {
-        if let Some(t) = destination_for(&side, base, dest_root, keep_layout) {
-            let t = if t.exists() && conflict == Conflict::Skip { continue } else if t.exists() && conflict == Conflict::KeepBoth { unique_name(&t) } else { t };
-            let _ = match mode {
-                MoveMode::Move if fs::rename(&side, &t).is_ok() => Ok(()),
-                MoveMode::Move => copy_checked(&side, &t).and_then(|_| fs::remove_file(&side).map_err(|e| e.to_string())),
-                MoveMode::Copy => copy_checked(&side, &t),
-            };
+        let Some(t) = destination_for(&side, base, dest_root, keep_layout) else { continue };
+        let t = match (t.exists(), conflict) {
+            (true, Conflict::Skip) => continue,
+            (true, Conflict::KeepBoth) => unique_name(&t),
+            _ => t,
+        };
+        let done = match mode {
+            MoveMode::Move if fs::rename(&side, &t).is_ok() => Ok(()),
+            MoveMode::Move => copy_checked(&side, &t).and_then(|_| fs::remove_file(&side).map_err(|e| format!("Copied, but couldn't remove the original: {e}"))),
+            MoveMode::Copy => copy_checked(&side, &t),
+        };
+        if let Err(e) = done {
+            failed.push(format!("{} ({e})", side.file_name().and_then(|n| n.to_str()).unwrap_or("a companion file")));
         }
     }
-    Ok(Some(target))
+    let warning = (!failed.is_empty()).then(|| format!("The file was {} but not everything that goes with it: {}", if mode == MoveMode::Copy { "copied" } else { "moved" }, failed.join("; ")));
+    Ok(Some(Moved { path: target, warning }))
 }
 
 /// Checks a destination is there and can be written to. Nothing is created.
@@ -197,8 +215,15 @@ pub fn check_destination(path: String) -> Result<DestinationCheck, String> {
     check_destination_sync(&path).map(|free| DestinationCheck { free })
 }
 
+/// Moves or copies finished downloads from the download folder to the folder for moved downloads.
+/// Both folders come from `Scope`, never from the caller.
 #[tauri::command]
-pub async fn transfer_files(items: Vec<MoveItem>, base_dir: String, dest_dir: String, mode: Option<MoveMode>, conflict: Option<Conflict>, keep_layout: Option<bool>) -> Result<Vec<MoveResult>, String> {
+pub async fn transfer_files(scope: State<'_, Scope>, items: Vec<MoveItem>, mode: Option<MoveMode>, conflict: Option<Conflict>, keep_layout: Option<bool>) -> Result<Vec<MoveResult>, String> {
+    let (base, dest) = (scope.download()?, scope.moved()?);
+    run_transfer(items, base.display().to_string(), dest.display().to_string(), mode, conflict, keep_layout).await
+}
+
+async fn run_transfer(items: Vec<MoveItem>, base_dir: String, dest_dir: String, mode: Option<MoveMode>, conflict: Option<Conflict>, keep_layout: Option<bool>) -> Result<Vec<MoveResult>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let (mode, conflict, keep_layout) = (mode.unwrap_or_default(), conflict.unwrap_or_default(), keep_layout.unwrap_or(true));
         check_destination_sync(&dest_dir)?;
@@ -214,7 +239,7 @@ pub async fn transfer_files(items: Vec<MoveItem>, base_dir: String, dest_dir: St
             .map(|item| {
                 let done = checked_source(&item.path, &real_base).and_then(|src| transfer_one(&src, &real_base, &dest, mode, conflict, keep_layout));
                 match done {
-                    Ok(Some(p)) => MoveResult { id: item.id, ok: true, new_path: Some(p.display().to_string()), ..Default::default() },
+                    Ok(Some(m)) => MoveResult { id: item.id, ok: true, new_path: Some(m.path.display().to_string()), warning: m.warning, ..Default::default() },
                     Ok(None) => MoveResult { id: item.id, ok: true, skipped: true, ..Default::default() },
                     Err(e) => MoveResult { id: item.id, error: Some(e), ..Default::default() },
                 }
@@ -232,9 +257,20 @@ pub struct DeleteResult {
     pub error: Option<String>,
 }
 
-/// Deletes downloaded files (and their subtitle and lyrics files) that lie inside `allowed` folders.
+/// Deletes downloaded files (and their subtitle and lyrics files) from the download folder, and from the folder for
+/// moved downloads when `include_moved` is set. The folders come from `Scope`, never from the caller.
 #[tauri::command]
-pub async fn delete_files(paths: Vec<String>, allowed: Vec<String>) -> Result<Vec<DeleteResult>, String> {
+pub async fn delete_files(scope: State<'_, Scope>, paths: Vec<String>, include_moved: Option<bool>) -> Result<Vec<DeleteResult>, String> {
+    let download = scope.download();
+    let moved = if include_moved.unwrap_or(false) { scope.moved().ok() } else { None };
+    let allowed: Vec<String> = download.iter().chain(moved.iter()).map(|p| p.display().to_string()).collect();
+    if let (Err(why), true) = (&download, allowed.is_empty()) {
+        return Err(why.clone());
+    }
+    run_delete(paths, allowed).await
+}
+
+async fn run_delete(paths: Vec<String>, allowed: Vec<String>) -> Result<Vec<DeleteResult>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let bases: Vec<PathBuf> = allowed.iter().filter_map(|a| fs::canonicalize(a).ok()).collect();
         if bases.is_empty() {
@@ -331,12 +367,32 @@ mod tests {
         let src = checked_source(&base.join("Artist/song.mp3").display().to_string(), &base).unwrap();
         let real_base = fs::canonicalize(&base).unwrap();
         let real_dest = fs::canonicalize(&dest).unwrap();
-        let out = transfer_one(&src, &real_base, &real_dest, MoveMode::Move, Conflict::KeepBoth, true).unwrap().unwrap();
+        let moved = transfer_one(&src, &real_base, &real_dest, MoveMode::Move, Conflict::KeepBoth, true).unwrap().unwrap();
+        let out = moved.path.clone();
         assert_eq!(out, real_dest.join("Artist/song.mp3"));
+        assert_eq!(moved.warning, None, "nothing went wrong");
         assert_eq!(fs::read(&out).unwrap(), b"audio-bytes");
         assert!(dest.join("Artist/song.en.srt").is_file() && dest.join("Artist/song.lrc").is_file());
         assert!(!base.join("Artist/song.mp3").exists() && !base.join("Artist/song.lrc").exists(), "originals are gone after a move");
         assert!(base.join("Artist/other.mp3").exists(), "other files are untouched");
+        fs::remove_dir_all(&base).ok();
+        fs::remove_dir_all(&dest).ok();
+    }
+
+    #[test]
+    fn a_companion_that_cannot_follow_is_reported_not_swallowed() {
+        let base = scratch("warn-base");
+        let dest = scratch("warn-dest");
+        write(&base.join("song.mp3"), b"audio");
+        write(&base.join("song.lrc"), b"lyrics");
+        // A folder where the lyrics file would land makes that one file impossible to place.
+        fs::create_dir_all(dest.join("song.lrc")).unwrap();
+        let (real_base, real_dest) = (fs::canonicalize(&base).unwrap(), fs::canonicalize(&dest).unwrap());
+        let src = checked_source(&base.join("song.mp3").display().to_string(), &base).unwrap();
+        let moved = transfer_one(&src, &real_base, &real_dest, MoveMode::Copy, Conflict::Replace, true).unwrap().unwrap();
+        assert!(moved.path.is_file(), "the song itself arrived");
+        let warning = moved.warning.expect("the lyrics failure is reported");
+        assert!(warning.contains("song.lrc") && warning.contains("copied"), "{warning}");
         fs::remove_dir_all(&base).ok();
         fs::remove_dir_all(&dest).ok();
     }
@@ -352,7 +408,7 @@ mod tests {
         let src = checked_source(&base.join("song.mp3").display().to_string(), &base).unwrap();
         assert_eq!(transfer_one(&src, &real_base, &real_dest, MoveMode::Copy, Conflict::Skip, true).unwrap(), None);
         assert_eq!(fs::read(dest.join("song.mp3")).unwrap(), b"old");
-        let both = transfer_one(&src, &real_base, &real_dest, MoveMode::Copy, Conflict::KeepBoth, true).unwrap().unwrap();
+        let both = transfer_one(&src, &real_base, &real_dest, MoveMode::Copy, Conflict::KeepBoth, true).unwrap().unwrap().path;
         assert_eq!(both, real_dest.join("song (2).mp3"));
         assert_eq!(fs::read(&both).unwrap(), b"new");
         transfer_one(&src, &real_base, &real_dest, MoveMode::Copy, Conflict::Replace, true).unwrap();
@@ -384,7 +440,7 @@ mod tests {
         let inside = base.join("backup");
         fs::create_dir_all(&inside).unwrap();
         let items = vec![MoveItem { id: "1".into(), path: base.join("song.mp3").display().to_string() }];
-        let err = transfer_files(items, base.display().to_string(), inside.display().to_string(), None, None, None).await.unwrap_err();
+        let err = run_transfer(items, base.display().to_string(), inside.display().to_string(), None, None, None).await.unwrap_err();
         assert!(err.contains("can't be the download folder"));
         assert!(base.join("song.mp3").exists());
         fs::remove_dir_all(&base).ok();
@@ -399,11 +455,11 @@ mod tests {
         write(&base.join("a/keep.mp3"), b"x");
         write(&other.join("mine.mp3"), b"x");
         let paths = vec![base.join("a/old.mp3").display().to_string(), other.join("mine.mp3").display().to_string(), base.join("a/missing.mp3").display().to_string()];
-        let res = delete_files(paths, vec![base.display().to_string()]).await.unwrap();
+        let res = run_delete(paths, vec![base.display().to_string()]).await.unwrap();
         assert!(res[0].ok && !res[1].ok && !res[2].ok, "{res:?}");
         assert!(!base.join("a/old.mp3").exists() && !base.join("a/old.srt").exists(), "the companion goes too");
         assert!(base.join("a/keep.mp3").exists() && other.join("mine.mp3").exists());
-        assert!(delete_files(vec![], vec![]).await.is_err());
+        assert!(run_delete(vec![], vec![]).await.is_err());
         fs::remove_dir_all(&base).ok();
         fs::remove_dir_all(&other).ok();
     }

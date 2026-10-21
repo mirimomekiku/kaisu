@@ -86,10 +86,12 @@ check("when done: sleep shows a cancellable countdown starting around 30", await
 await tick(page, 10);
 const s1 = await secondsLeft();
 check("when done: the countdown ticks down", s0 - s1 >= 9 && s0 - s1 <= 10, `${s0} -> ${s1}`);
-check("when done: nothing happens before it ends", (await calls(page, "system_power")).length === 0);
+const fired = (page) => page.evaluate(() => window.__mock.powerFired ?? []);
+check("when done: the countdown is handed to the backend, 30 seconds, for sleep", (await calls(page, "schedule_power")).length === 1 && (await calls(page, "schedule_power"))[0].args.action === "sleep" && (await calls(page, "schedule_power"))[0].args.seconds === 30);
+check("when done: nothing happens before it ends", (await fired(page)).length === 0);
 await page.getByRole("button", { name: "Cancel" }).click();
 await tick(page, 40);
-check("when done: Cancel stops it for good", (await calls(page, "system_power")).length === 0);
+check("when done: Cancel tells the backend, and stops it for good", (await calls(page, "cancel_power")).length === 1 && (await fired(page)).length === 0);
 
 page = await open({ clock: true });
 await nav(page, "Downloads").click();
@@ -101,8 +103,9 @@ await details(page).getByRole("button", { name: "Download video" }).click();
 await tick(page, 3);
 await page.getByRole("alert").filter({ hasText: "shut the computer down" }).waitFor();
 await tick(page, 31);
-await waitCalls(page, "system_power", 1, 5000);
-check("when done: shutdown fires after 30 seconds", (await calls(page, "system_power")).at(-1).args.action === "shutdown");
+await page.waitForFunction(() => (window.__mock.powerFired ?? []).length >= 1, null, { timeout: 5000 });
+check("when done: shutdown fires after 30 seconds", (await fired(page)).at(-1).action === "shutdown");
+check("when done: the page itself never asks for the power action", (await calls(page, "system_power")).length === 0);
 
 // ================= clipboard =================
 const YT = "https://www.youtube.com/watch?v=clip0000001";
