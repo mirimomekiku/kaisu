@@ -1,11 +1,13 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ArrowDown, ArrowUp, ChevronDown, Download as DownloadIcon, Film, History as HistoryIcon, RefreshCw, RotateCcw, Search, Trash2 } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, ChevronDown, Download as DownloadIcon, Film, History as HistoryIcon, ListEnd, Play, RefreshCw, RotateCcw, Search, Trash2 } from "lucide-react";
 import type { Preset } from "../lib/api";
 import { PRESET_LABEL, formatBytes } from "../lib/format";
 import { sortHistory, type HistoryRow, type HistorySort } from "../lib/history";
 import type { HistoryItem, ViewMode } from "../lib/storage";
 import ChoicePicker from "./ChoicePicker";
 import FileActions from "./FileActions";
+import { useMediaActions } from "../hooks/useMediaDialogs";
+import { isAudioFile } from "../lib/mediaKind";
 import Picture from "./Picture";
 
 export const HISTORY_VIEWS: ViewMode[] = ["details", "list", "grid", "compact"];
@@ -88,6 +90,9 @@ export default function HistoryView(p: Props) {
 
   const pickedRows = shown.filter((r) => picked.has(r.item.id));
   const allPicked = shown.length > 0 && pickedRows.length === shown.length;
+  const media = useMediaActions();
+  /** The ticked items that are sound files still on disk, which the music player can take. */
+  const pickedSongs = pickedRows.flatMap((r) => (r.item.path && isAudioFile(r.item.path) && p.exists[r.item.path] !== false ? [{ path: r.item.path, title: r.item.title }] : []));
   const toggle = (id: string) =>
     setPicked((prev) => {
       const next = new Set(prev);
@@ -370,6 +375,16 @@ export default function HistoryView(p: Props) {
       {pickedRows.length > 0 && (
         <div className="flex items-center gap-3 flex-wrap px-3 py-1" role="toolbar" aria-label="Selected items" style={{ ...bar, background: "#e8eef9" }}>
           <b>{pickedRows.length} selected</b>
+          {pickedSongs.length > 0 && (
+            <>
+              <button className="btn small" onClick={() => media?.queue(pickedSongs, "play")}>
+                <Play className="w-3 h-3" /> Play {pickedSongs.length} song{pickedSongs.length === 1 ? "" : "s"}
+              </button>
+              <button className="btn small" onClick={() => media?.queue(pickedSongs, "add")}>
+                <ListEnd className="w-3 h-3" /> Add to queue
+              </button>
+            </>
+          )}
           <button className="btn small" onClick={() => p.onDownloadAgainMany(pickedRows.map((r) => r.item))}>
             <DownloadIcon className="w-3 h-3" /> Download again
           </button>

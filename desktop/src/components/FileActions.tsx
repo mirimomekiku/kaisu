@@ -1,4 +1,5 @@
-import { AudioLines, Copy, FolderOpen, MonitorPlay, Play, Trash2, TriangleAlert } from "lucide-react";
+import { AudioLines, Copy, FolderOpen, ListEnd, ListStart, MonitorPlay, Play, Trash2, TriangleAlert } from "lucide-react";
+import { isAudioFile } from "../lib/mediaKind";
 import { useMediaActions } from "../hooks/useMediaDialogs";
 
 interface Props {
@@ -41,6 +42,16 @@ export default function FileActions({ path, exists, onOpen, onReveal, onCopyPath
           <button type="button" onClick={() => media.play(path)} title="Play in Kaisu" aria-label="Play in Kaisu" className="row-btn">
             <MonitorPlay className="w-3 h-3" />
           </button>
+          {isAudioFile(path) && (
+            <>
+              <button type="button" onClick={() => media.queue([{ path }], "next")} title="Play next" aria-label="Play next" className="row-btn">
+                <ListStart className="w-3 h-3" />
+              </button>
+              <button type="button" onClick={() => media.queue([{ path }], "add")} title="Add to the queue" aria-label="Add to queue" className="row-btn">
+                <ListEnd className="w-3 h-3" />
+              </button>
+            </>
+          )}
           <button type="button" onClick={() => media.convert(path)} title="Make an audio copy" aria-label="Convert to audio" className="row-btn">
             <AudioLines className="w-3 h-3" />
           </button>
