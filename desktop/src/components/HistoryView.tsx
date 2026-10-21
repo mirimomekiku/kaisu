@@ -6,6 +6,7 @@ import { sortHistory, type HistoryRow, type HistorySort } from "../lib/history";
 import type { HistoryItem, ViewMode } from "../lib/storage";
 import ChoicePicker from "./ChoicePicker";
 import FileActions from "./FileActions";
+import Picture from "./Picture";
 
 export const HISTORY_VIEWS: ViewMode[] = ["details", "list", "grid", "compact"];
 
@@ -151,7 +152,7 @@ export default function HistoryView(p: Props) {
     );
 
   const thumb = (h: HistoryItem, cls: string) => (
-    <div className={`thumb ${cls}`}>{h.thumbnail ? <img src={h.thumbnail} alt="" referrerPolicy="no-referrer" loading="lazy" /> : <Film className="w-3.5 h-3.5" />}</div>
+    <div className={`thumb ${cls}`}><Picture url={h.thumbnail} fallback={<Film className="w-3.5 h-3.5" />} /></div>
   );
 
   const sortBy = (by: HistorySort) => p.onSortChange(by, p.sort === by ? !p.sortDesc : by === "date" || by === "size");

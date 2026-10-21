@@ -1,4 +1,5 @@
 import { Download, Film, History as HistoryIcon, Search, Settings as SettingsIcon, type LucideIcon } from "lucide-react";
+import Picture from "./Picture";
 
 export type Page = "search" | "downloads" | "history" | "settings";
 
@@ -46,7 +47,7 @@ export default function Sidebar({ page, onNavigate, active, total, historyCount,
 
       <div className="artwell" aria-label="Artwork">
         <div className="art">
-          {art?.src ? <img src={art.src} alt="" referrerPolicy="no-referrer" /> : <Film className="w-9 h-9 opacity-60" />}
+          <Picture url={art?.src} fallback={<Film className="w-9 h-9 opacity-60" />} />
         </div>
         <div className="cap truncate" title={art?.caption}>
           {art?.caption ?? "No video selected"}

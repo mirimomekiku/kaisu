@@ -4,6 +4,7 @@ import type { Preset, SearchResult } from "../lib/api";
 import { formatCount, formatDuration } from "../lib/format";
 import type { ViewMode } from "../lib/storage";
 import ContextMenu, { type MenuEntry } from "./ContextMenu";
+import Picture from "./Picture";
 
 export const SEARCH_VIEWS: ViewMode[] = ["details", "list", "grid", "compact"];
 export type BatchQuality = "best" | "p1080" | "p720";
@@ -49,7 +50,7 @@ interface Props {
 function Art({ r, downloaded, cls }: { r: SearchResult; downloaded: boolean; cls: string }) {
   return (
     <div className={`thumb ${cls}`}>
-      {r.thumbnail ? <img src={r.thumbnail} alt="" referrerPolicy="no-referrer" loading="lazy" /> : <Film className="w-4 h-4" />}
+      <Picture url={r.thumbnail} fallback={<Film className="w-4 h-4" />} />
       {r.live ? (
         <span className="tag live inline-flex items-center gap-1">
           <Radio className="w-2.5 h-2.5" /> LIVE
