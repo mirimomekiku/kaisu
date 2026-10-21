@@ -44,6 +44,11 @@ npm run test:smoke               # launches the built exe and checks it stays up
   that run programs are blocked.
 - The desktop app downloads yt-dlp, ffmpeg and a JS runtime on first run into the app data folder
   (`~/.local/share/com.kaisu.app/engine` or `%APPDATA%\com.kaisu.app\engine`), verified by SHA-256.
+- Custom yt-dlp arguments (`custom_args.rs`) are checked against an allowlist, not a denylist. The table of options and
+  how many values each takes was generated from yt-dlp's own parser (`yt_dlp.options.create_parser()`), so check a new
+  option the same way before adding it. Never add options that run programs, take a file path, or change where tools are found.
+- The folders Kaisu may move files out of, move them into, and delete from are held by the backend (`scope.rs`), not sent
+  with each request. Playing a file in the app also goes through it (`media.rs`).
 - The proxy is passed explicitly to every yt-dlp call and to the setup downloads.
 - Search sources are a short list in `search.rs` and `lib/sources.ts`; add one only after checking it returns results.
 

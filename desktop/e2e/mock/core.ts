@@ -1,6 +1,11 @@
 // Scripted stand-in for @tauri-apps/api/core, following the real command/event protocol.
 type Ev = Record<string, unknown>;
 let nextId = 1;
+/** Where a file would be played from. Real Kaisu gives an asset address; here a tiny silent sound (or nothing playable). */
+export function convertFileSrc(path: string): string {
+  if ((window as any).__mock?.unplayable) return `data:application/octet-stream;base64,AAAA#${encodeURIComponent(path)}`;
+  return "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=";
+}
 export class Channel<T = Ev> {
   id = nextId++;
   onmessage: (m: T) => void = () => {};
@@ -105,25 +110,37 @@ export async function invoke(cmd: string, args: any = {}): Promise<any> {
       return "The proxy works.";
     case "check_folder":
       if (w.__mock.folderProblem) throw w.__mock.folderProblem;
+      if ((w.__mock.badFolders ?? []).includes(args.path)) throw "That drive or folder isn't connected right now.";
       return { exists: true, free: w.__mock.free ?? 500 * 1024 ** 3 };
     case "preview_command":
       return `yt-dlp --no-playlist -P '${args.req.out_dir}' -- ${args.req.url}${args.req.extra.audio?.normalize ? " --ppa 'ExtractAudio+ffmpeg_o:-af loudnorm'" : ""}`;
     case "check_destination":
       if (w.__mock.destMissing) throw "That drive or folder isn't connected right now.";
       return { free: w.__mock.destFree ?? 200 * 1024 ** 3 };
+    case "set_managed_folders":
+      w.__mock.folders = { download: String(args.download).trim(), moved: String(args.moved).trim() };
+      return { problem: w.__mock.folderProblem ?? null };
     case "transfer_files": {
+      // Like the real command, the folders come from what was registered, never from the call.
+      const f = w.__mock.folders;
+      if (!f?.download) throw "Choose a download folder first.";
+      if (!f.moved) throw "Choose a folder for moved downloads first.";
       if (w.__mock.destMissing) throw "That drive or folder isn't connected right now.";
-      (w.__mock.transfers ??= []).push(JSON.parse(JSON.stringify(args)));
-      const base = String(args.baseDir).replace(/\/+$/, "");
+      (w.__mock.transfers ??= []).push({ ...JSON.parse(JSON.stringify(args)), baseDir: f.download, destDir: f.moved });
+      const base = f.download.replace(/\/+$/, "");
       return args.items.map((i: any) => {
-        if ((w.__mock.transferFail ?? []).includes(i.path)) return { id: i.id, ok: false, skipped: false, new_path: null, error: "Couldn't copy the file: the drive is full" };
-        if (w.__mock.transferSkip) return { id: i.id, ok: true, skipped: true, new_path: null, error: null };
+        if ((w.__mock.transferFail ?? []).includes(i.path)) return { id: i.id, ok: false, skipped: false, new_path: null, error: "Couldn't copy the file: the drive is full", warning: null };
+        if (w.__mock.transferSkip) return { id: i.id, ok: true, skipped: true, new_path: null, error: null, warning: null };
         const rel = args.keepLayout ? i.path.slice(base.length + 1) : i.path.split("/").pop();
-        return { id: i.id, ok: true, skipped: false, new_path: `${String(args.destDir).replace(/\/+$/, "")}/${rel}`, error: null };
+        const warning = (w.__mock.transferWarn ?? []).includes(i.path) ? "The file was moved but not everything that goes with it: song.lrc (Couldn't copy the file: access is denied)" : null;
+        return { id: i.id, ok: true, skipped: false, new_path: `${f.moved.replace(/\/+$/, "")}/${rel}`, error: null, warning };
       });
     }
     case "delete_files": {
-      (w.__mock.deleteCalls ??= []).push(JSON.parse(JSON.stringify(args)));
+      const f = w.__mock.folders;
+      if (!f?.download) throw "Choose a download folder first.";
+      const allowed = [f.download, ...(args.includeMoved && f.moved ? [f.moved] : [])];
+      (w.__mock.deleteCalls ??= []).push({ ...JSON.parse(JSON.stringify(args)), allowed });
       return args.paths.map((p: string) => {
         if (w.__mock.deleteFail) return { path: p, ok: false, error: "Couldn't delete it: permission denied" };
         (w.__mock.missing ??= []).push(p);
@@ -136,6 +153,32 @@ export async function invoke(cmd: string, args: any = {}): Promise<any> {
     case "reveal_file":
       if ((w.__mock.missing ?? []).includes(args.path)) throw "That file has been moved or deleted.";
       return;
+    case "check_custom_args":
+      return /--exec|(^|\s)-o\s/.test(args.text) ? "`--exec` isn't allowed because it can run programs on your computer." : null;
+    case "allowed_custom_options":
+      return [{ names: ["-R", "--retries"], values: 1 }, { names: ["--embed-chapters"], values: 0 }, { names: ["-f", "--format"], values: 1 }];
+    case "find_leftovers":
+      return w.__mock.leftovers ?? [];
+    case "remove_leftovers":
+      (w.__mock.removedLeftovers ??= []).push(...args.paths);
+      w.__mock.leftovers = (w.__mock.leftovers ?? []).filter((l: any) => !args.paths.includes(l.path));
+      return args.paths.map((path: string) => ({ path, ok: true, error: null }));
+    case "play_in_app":
+      if (w.__mock.playRefused) throw "That file isn't in a download folder.";
+      return;
+    case "preview_clip":
+      await sleep(w.__mock.previewDelay ?? 60);
+      if (w.__mock.previewFail) throw "Previews wait until your downloads have finished.";
+      return "/cache/preview/abc.mp4";
+    case "discard_preview":
+      (w.__mock.discarded ??= []).push(args.path);
+      return;
+    case "convert_audio": {
+      await sleep(w.__mock.convertDelay ?? 60);
+      if (w.__mock.convertFail) throw "Couldn't convert it: not enough free space";
+      (w.__mock.converted ??= []).push({ path: args.path, format: args.format });
+      return { path: String(args.path).replace(/\.[^./\\]+$/, `.${args.format}`) };
+    }
     case "open_url":
       return;
     case "reveal_engine":
@@ -162,8 +205,35 @@ export async function invoke(cmd: string, args: any = {}): Promise<any> {
     }
     case "free_space":
       return w.__mock.free ?? 500 * 1024 ** 3;
+    case "schedule_power": {
+      // The countdown belongs to the backend: it can't be shorter than 10 seconds, and a new one replaces the old.
+      if (w.__mock.powerRefused) throw "Downloads are still running, so Kaisu won't turn the computer off.";
+      clearTimeout(w.__mock.powerTimer);
+      w.__mock.powerTimer = setTimeout(() => (w.__mock.powerFired ??= []).push({ action: args.action }), Math.min(300, Math.max(10, args.seconds)) * 1000);
+      return;
+    }
+    case "cancel_power":
+      clearTimeout(w.__mock.powerTimer);
+      w.__mock.powerTimer = null;
+      return;
+    case "fetch_thumbnail": {
+      if ((w.__mock.thumbFail ?? []).includes(args.url)) throw "The picture didn't load.";
+      await sleep(w.__mock.thumbDelay ?? 20);
+      // A 1x1 PNG.
+      return Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="), (c) => c.charCodeAt(0)).buffer;
+    }
+    case "secret_set":
+      if (w.__mock.noKeyring) throw "The system's password store isn't available: no store";
+      (w.__mock.secrets ??= {})[args.name] = args.value;
+      return;
+    case "secret_get":
+      if (w.__mock.noKeyring) throw "The system's password store isn't available: no store";
+      return (w.__mock.secrets ??= {})[args.name] ?? null;
+    case "secret_delete":
+      if (w.__mock.noKeyring) throw "The system's password store isn't available: no store";
+      delete (w.__mock.secrets ??= {})[args.name];
+      return;
     case "open_folder":
-    case "system_power":
     case "set_tray_status":
     case "quit_app":
       return;

@@ -1,14 +1,21 @@
+mod custom_args;
 mod download;
 mod engine;
 mod files;
+mod leftovers;
 mod links;
+mod media;
 mod meta;
 mod net;
 mod output;
+mod power;
 mod proc;
+mod scope;
+mod secrets;
 mod search;
 mod setup;
 mod subs;
+mod thumbs;
 mod transfer;
 mod tray;
 
@@ -57,7 +64,11 @@ pub fn run() {
         .manage(Engine::default())
         .manage(download::Downloads::default())
         .manage(tray::TrayState::default())
+        .manage(scope::Scope::default())
+        .manage(power::PowerTimer::default())
+        .manage(thumbs::Thumbs::default())
         .setup(|app| {
+            media::clean_previews(app.handle());
             tray::init(app.handle());
             Ok(())
         })
@@ -76,12 +87,26 @@ pub fn run() {
             files::reveal_engine,
             files::open_url,
             files::open_folder,
-            files::system_power,
+            power::schedule_power,
+            power::cancel_power,
+            scope::set_managed_folders,
+            thumbs::fetch_thumbnail,
+            secrets::secret_set,
+            secrets::secret_get,
+            secrets::secret_delete,
             links::classify_link,
             links::get_playlist,
             download::get_media_info,
             download::start_download,
             download::cancel_download,
+            custom_args::allowed_custom_options,
+            custom_args::check_custom_args,
+            leftovers::find_leftovers,
+            leftovers::remove_leftovers,
+            media::play_in_app,
+            media::preview_clip,
+            media::discard_preview,
+            media::convert_audio,
             download::preview_command,
             files::check_folder,
             transfer::check_destination,

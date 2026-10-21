@@ -18,11 +18,16 @@ works behind a proxy, and can check again if you installed the tools yourself. A
 ## What you can do
 
 **Find and download**
-- Search YouTube or SoundCloud from one box, or paste a link. Playlists and channels work too, and you can paste or
+- Search YouTube, YouTube Music (songs) or SoundCloud from one box, or paste a link. Playlists and channels work too, and you can paste or
   drop several links at once.
 - Choose video or audio, pick a quality, and download only the part of a video you want.
 - Save subtitles inside the video or as separate files, in the languages you choose.
-- Pause and resume downloads. If you close the app, unfinished downloads come back, paused, next time.
+- **Watch before you download:** a "Preview" button fetches the first 20 seconds in low quality and plays them in Kaisu.
+- Pause and resume downloads. If you close the app, unfinished downloads come back, paused, next time. If a
+  crash or a cancelled download left half-finished files in your download folder, Kaisu offers to ask for those videos
+  again (yt-dlp carries on from where it stopped when it can) or to clear them away.
+- **Queue:** waiting downloads show their place in line. Drag one onto another to change who starts first, or give a
+  single download its own speed limit.
 
 **Stay organised**
 - **Move to an external drive:** choose a drive or folder and Kaisu moves (or copies) finished downloads there by
@@ -43,12 +48,14 @@ works behind a proxy, and can check again if you installed the tools yourself. A
 - Set a **bandwidth schedule** (Advanced mode) to slow downloads or hold them back at certain times, such as your
   working hours.
 - Copied links are offered to you when you switch back to Kaisu, and links can be dragged onto the window.
+- **Play and convert:** finished downloads play inside Kaisu, and can be turned into an MP3, M4A, Opus, FLAC or WAV copy
+  (the original is kept).
 - Quick actions on every finished download: play it, show it in its folder, copy its location, or delete it. Press
   Ctrl+Shift+L to play the latest one. Keyboard shortcuts cover most other things; press F1 to see them.
 
 **Simple or Advanced**
 - **Simple** mode is for everyday use: paste, choose video or audio, download. Problems are explained in plain words.
-- **Advanced** mode adds exact format choice, audio format and quality options, SponsorBlock, browser cookies, speed
+- **Advanced** mode adds site rules ("anything from this site is audio, as FLAC, saved in this folder"), exact format choice, audio format and quality options, SponsorBlock, browser cookies, speed
   limits, download logs and your own yt-dlp options.
 
 Kaisu keeps the downloader up to date automatically, so it keeps working when sites change.
@@ -60,8 +67,13 @@ the first time. Type words to search, or paste a link, then choose video or audi
 
 ## Good to know
 
-- Search currently works with YouTube and SoundCloud. Other sites can still be downloaded by pasting a link.
-- Proxy logins are stored in Kaisu's settings file without encryption.
+- Search currently works with YouTube, YouTube Music (songs) and SoundCloud. Other sites can still be downloaded by pasting a link.
+- A proxy password is kept in your system's password store (Windows Credential Manager, macOS Keychain, or the Secret Service on Linux), not in
+  Kaisu's settings file. If your system has no password store, it stays in the settings file, unencrypted.
+- The "custom arguments" box in Advanced settings accepts only a list of safe yt-dlp options, written exactly as yt-dlp
+  spells them (Settings shows the list). Anything that runs programs or reads or writes files at a path you give is refused.
+- Looking up lyrics is off until you agree: it sends the song's artist and title to the free LRCLIB service (lrclib.net).
+- Thumbnails are fetched by Kaisu itself, through your proxy if you set one.
 - The Windows app is not code-signed yet, so Windows may warn you the first time you run it.
 - Kaisu is for downloading content you have the right to save. You are responsible for following the terms of the
   sites you use and the laws where you live.

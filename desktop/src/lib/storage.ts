@@ -1,8 +1,11 @@
 import { load, type Store } from "@tauri-apps/plugin-store";
+import { secretDelete, secretGet, secretSet } from "./api";
+import { joinProxyPassword, splitProxyPassword } from "./proxy";
 import type { AudioFormat, Browser, CloseMode, CoverMode, ExtraOptions, Layout, LyricsMode, MoveConflict, MoveMode, NameStyle, Preset, SearchSource, SponsorBlock } from "./api";
 import { sanitizePresets, type FormatPreset } from "./presets";
 import type { HistorySort } from "./history";
 import type { ScheduleRule } from "./schedule";
+import { sanitizeSiteRules, type SiteRule } from "./siteRules";
 
 export type Mode = "simple" | "advanced";
 export type SubtitleMode = "off" | "embed" | "file" | "both";
@@ -40,6 +43,8 @@ export interface Settings {
   /** Cover art for batch downloads (a single download can choose its own). */
   coverMode: Exclude<CoverMode, "custom">;
   lyricsMode: LyricsMode;
+  /** The user agreed to send the artist and title of a song to a lyrics service (LRCLIB) to look its lyrics up. */
+  lyricsConsent: boolean;
   rateLimit: string;
   customArgs: string;
   verbose: boolean;
@@ -82,6 +87,8 @@ export interface Settings {
   searchSource: SearchSource;
   proxy: string;
   schedule: ScheduleRule[];
+  /** Advanced mode: downloads from certain sites or channels get their own kind, audio format and folder. */
+  siteRules: SiteRule[];
   // History and onboarding.
   historySort: HistorySort;
   historySortDesc: boolean;
@@ -126,6 +133,7 @@ export const DEFAULT_SETTINGS: Settings = {
   audioTrimSilence: false,
   coverMode: "default",
   lyricsMode: "off",
+  lyricsConsent: false,
   rateLimit: "",
   customArgs: "",
   verbose: true,
@@ -156,6 +164,7 @@ export const DEFAULT_SETTINGS: Settings = {
   searchSource: "youtube",
   proxy: "",
   schedule: [],
+  siteRules: [],
   historySort: "date",
   historySortDesc: true,
   tourSeen: false,
@@ -199,6 +208,12 @@ export async function loadSettings(): Promise<Settings> {
     merged.autoDeleteDays = Math.min(3650, Math.max(0, Math.round(Number(merged.autoDeleteDays) || 0)));
     // Before language choice existed there was one on/off switch for English subtitles.
     if (saved?.subtitles === true && saved.subtitleMode === undefined) merged.subtitleMode = "embed";
+    merged.lyricsConsent = merged.lyricsConsent === true;
+    merged.siteRules = sanitizeSiteRules(saved?.siteRules);
+    merged.proxy = typeof merged.proxy === "string" ? merged.proxy : "";
+    const inFile = splitProxyPassword(merged.proxy).password !== null;
+    merged.proxy = await restoreProxyPassword(merged.proxy);
+    if (inFile) await saveSettings(merged); // an older file kept the password in plain text; move it into the store now
     return merged;
   } catch (e) {
     console.warn("Could not read settings", e);
@@ -206,12 +221,60 @@ export async function loadSettings(): Promise<Settings> {
   }
 }
 
-export async function saveSettings(settings: Settings) {
+// ---- the proxy password ----
+// The password in a proxy address (socks5://user:password@host) is kept in the system's credential store, and the settings
+// file holds the address without it. If there is no credential store, it stays in the file as it always did.
+
+/** The password the credential store currently holds, so it is only written when it changes. */
+let storedPassword: string | null = null;
+
+/** Puts the stored password back into the address (and moves one still sitting in the file into the store). */
+async function restoreProxyPassword(proxy: string): Promise<string> {
+  const { address, password } = splitProxyPassword(proxy);
+  if (password !== null) return proxy; // an older file: saveSettings moves it into the store
+  if (address === "") return address;
   try {
-    await (await getStore()).set("settings", settings);
-  } catch (e) {
-    console.warn("Could not save settings", e);
+    const kept = await secretGet("proxy-password");
+    storedPassword = kept;
+    return kept ? joinProxyPassword(address, kept) : address;
+  } catch {
+    return address; // no credential store
   }
+}
+
+/** What goes into the settings file: the proxy without its password, once the credential store has the password. */
+async function withoutSecrets(settings: Settings): Promise<Settings> {
+  const { address, password } = splitProxyPassword(settings.proxy);
+  try {
+    if (password !== null) {
+      if (password !== storedPassword) {
+        await secretSet("proxy-password", password);
+        storedPassword = password;
+      }
+      return { ...settings, proxy: address };
+    }
+    if (storedPassword !== null) {
+      await secretDelete("proxy-password");
+      storedPassword = null;
+    }
+  } catch (e) {
+    console.warn("The system's password store isn't available; the proxy password stays in the settings file", e);
+  }
+  return settings;
+}
+
+let saving: Promise<void> = Promise.resolve();
+
+/** Saves one after another, so a quick run of edits (typing a password) can't land out of order. */
+export function saveSettings(settings: Settings): Promise<void> {
+  saving = saving.then(async () => {
+    try {
+      await (await getStore()).set("settings", await withoutSecrets(settings));
+    } catch (e) {
+      console.warn("Could not save settings", e);
+    }
+  });
+  return saving;
 }
 
 export async function loadHistory(): Promise<HistoryItem[]> {

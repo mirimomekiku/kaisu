@@ -1,4 +1,4 @@
-import { Channel, invoke } from "@tauri-apps/api/core";
+import { Channel, convertFileSrc, invoke } from "@tauri-apps/api/core";
 
 export type Preset = "best" | "p1080" | "p720" | "audio";
 export type AudioFormat = "mp3" | "m4a" | "opus" | "flac" | "wav";
@@ -74,7 +74,7 @@ export interface AudioExtras {
   trim_silence: boolean;
 }
 
-export type SearchSource = "youtube" | "soundcloud";
+export type SearchSource = "youtube" | "soundcloud" | "youtube_music";
 
 export interface ExtraOptions {
   sponsorblock: SponsorBlock;
@@ -247,23 +247,38 @@ export interface MoveResult {
   skipped: boolean;
   new_path: string | null;
   error: string | null;
+  /** The file arrived, but something that belongs with it (subtitles, lyrics) did not. */
+  warning: string | null;
 }
 /** Is the place for moved downloads there (a plugged-in drive) and writable? Rejects with the reason. */
 export const checkDestination = (path: string) => invoke<{ free: number }>("check_destination", { path });
-/** Moves or copies finished downloads (inside `baseDir`) to `destDir`. */
-export const transferFiles = (items: Array<{ id: string; path: string }>, baseDir: string, destDir: string, mode: MoveMode, conflict: MoveConflict, keepLayout: boolean) =>
-  invoke<MoveResult[]>("transfer_files", { items, baseDir, destDir, mode, conflict, keepLayout });
+/** Tells Kaisu which folders it may move files out of, move them into, and delete from. Moving and deleting only ever work inside these. */
+export const setManagedFolders = (download: string, moved: string) => invoke<{ problem: string | null }>("set_managed_folders", { download, moved });
+/** Moves or copies finished downloads from the download folder to the folder for moved downloads (both set with `setManagedFolders`). */
+export const transferFiles = (items: Array<{ id: string; path: string }>, mode: MoveMode, conflict: MoveConflict, keepLayout: boolean) =>
+  invoke<MoveResult[]>("transfer_files", { items, mode, conflict, keepLayout });
 export interface DeleteResult {
   path: string;
   ok: boolean;
   error: string | null;
 }
-/** Deletes downloaded files (and their subtitle/lyrics files) that lie inside the `allowed` folders. */
-export const deleteFiles = (paths: string[], allowed: string[]) => invoke<DeleteResult[]>("delete_files", { paths, allowed });
+/** Deletes downloaded files (and their subtitle/lyrics files) from the download folder, and from the moved-to folder when `includeMoved` is set. */
+export const deleteFiles = (paths: string[], includeMoved: boolean) => invoke<DeleteResult[]>("delete_files", { paths, includeMoved });
 export const openFile = (path: string) => invoke<void>("open_file", { path });
 export const revealFile = (path: string) => invoke<void>("reveal_file", { path });
 export const openUrl = (url: string) => invoke<void>("open_url", { url });
 export const revealEngine = () => invoke<void>("reveal_engine");
+
+/** Why the text in the custom-arguments box can't be used, or null when it can. */
+export const checkCustomArgs = (text: string) => invoke<string | null>("check_custom_args", { text });
+export interface CustomOption {
+  /** Every way it can be written. */
+  names: string[];
+  /** How many values follow it. */
+  values: number;
+}
+/** The yt-dlp options the custom-arguments box accepts. */
+export const allowedCustomOptions = () => invoke<CustomOption[]>("allowed_custom_options");
 
 export type LinkKind = "video" | "playlist" | "channel";
 
@@ -282,7 +297,9 @@ export const classifyLink = (url: string) => invoke<LinkKind>("classify_link", {
 export const getPlaylist = (url: string, limit: number) => invoke<PlaylistInfo>("get_playlist", { url, limit, proxy: currentProxy });
 export const freeSpace = (path: string) => invoke<number>("free_space", { path });
 export const openFolder = (path: string) => invoke<void>("open_folder", { path });
-export const systemPower = (action: PowerAction) => invoke<void>("system_power", { action });
+/** Starts a countdown (kept by Kaisu, not the page), then sleeps or shuts down. Refused while downloads are running. */
+export const schedulePower = (action: PowerAction, seconds: number) => invoke<void>("schedule_power", { action, seconds });
+export const cancelPower = () => invoke<void>("cancel_power");
 export const setTrayStatus = (active: number, queued: number, paused: number, mode: CloseMode) =>
   invoke<void>("set_tray_status", { active, queued, paused, mode });
 export const trayAvailable = () => invoke<boolean>("tray_available");
@@ -295,14 +312,58 @@ export const testProxy = (proxy: string) => invoke<string>("test_proxy", { proxy
 export const defaultDownloadDir = () => invoke<string>("default_download_dir");
 export const cancelDownload = (id: string) => invoke<void>("cancel_download", { id });
 
+/** Looking up lyrics sends the artist and title to a third-party service, so it only happens once the user has agreed. */
+let lyricsConsent = false;
+export const setLyricsConsent = (agreed: boolean) => {
+  lyricsConsent = agreed;
+};
+
 /** Starts a download; resolves when yt-dlp exits. Progress arrives through `onEvent`. */
 export function startDownload(req: DownloadRequest, onEvent: (e: DownloadEvent) => void) {
   const channel = new Channel<DownloadEvent>();
   channel.onmessage = onEvent;
-  return invoke<void>("start_download", { req, onEvent: channel });
+  // A queued download, a saved preset or a restored session may still ask for lyrics; without consent they are dropped here.
+  const allowed: DownloadRequest = !lyricsConsent && req.extra.lyrics && req.extra.lyrics !== "off" ? { ...req, extra: { ...req.extra, lyrics: "off" } } : req;
+  return invoke<void>("start_download", { req: allowed, onEvent: channel });
 }
 
+/** A thumbnail's bytes, fetched by Kaisu (through the proxy) because the page may not load pictures from the internet itself. */
+export const fetchThumbnail = (url: string) => invoke<ArrayBuffer>("fetch_thumbnail", { url, proxy: currentProxy });
+
+/** Passwords live in the system's credential store, not in the settings file. Rejects when there is no store. */
+export const secretSet = (name: "proxy-password", value: string) => invoke<void>("secret_set", { name, value });
+export const secretGet = (name: "proxy-password") => invoke<string | null>("secret_get", { name });
+export const secretDelete = (name: "proxy-password") => invoke<void>("secret_delete", { name });
+
 export const checkSetup = () => invoke<SetupInfo>("check_setup");
+
+// ---- unfinished downloads, playing, previews and converting ----
+
+export interface Leftover {
+  path: string;
+  /** What the finished file would be called. */
+  name: string;
+  size: number;
+  /** Seconds since 1970 when it was last written to. */
+  modified: number;
+  /** The YouTube id in the file's name, when it has one. */
+  video_id: string | null;
+  audio_only: boolean;
+}
+/** Unfinished downloads (`.part` files) in the download folder. */
+export const findLeftovers = () => invoke<Leftover[]>("find_leftovers");
+export const removeLeftovers = (paths: string[]) => invoke<Array<{ path: string; ok: boolean; error: string | null }>>("remove_leftovers", { paths });
+
+/** Lets the page show one downloaded file; then `fileUrl` gives the address to play it from. */
+export const playInApp = (path: string) => invoke<void>("play_in_app", { path });
+export const fileUrl = (path: string) => convertFileSrc(path);
+/** Downloads the first seconds of a video in low quality, for watching before downloading it. Resolves to the file's path. */
+export const previewClip = (url: string) => invoke<string>("preview_clip", { url, proxy: currentProxy });
+export const discardPreview = (path: string) => invoke<void>("discard_preview", { path });
+
+export type AudioTarget = "mp3" | "m4a" | "opus" | "flac" | "wav";
+/** Makes an audio copy of a finished download, next to it. Resolves to the new file's path. */
+export const convertAudio = (path: string, format: AudioTarget) => invoke<{ path: string }>("convert_audio", { path, format });
 
 /** Installs whatever is missing; resolves with the refreshed engine state. */
 export function runSetup(onEvent: (e: SetupEvent) => void) {

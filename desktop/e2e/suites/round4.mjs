@@ -5,7 +5,7 @@ const anyBox = (page) => page.getByLabel(/^Search .* or paste a link$/);
 const lastReq = async (page) => (await calls(page, "start_download")).at(-1).args.req;
 const settingsOf = (page) => page.evaluate(() => JSON.parse(localStorage.getItem("__store")).settings);
 const card = async (page, url = VIDEO) => { await anyBox(page).fill(url); await anyBox(page).press("Enter"); await details(page).waitFor(); };
-const adv = { mode: "advanced" };
+const adv = { mode: "advanced", lyricsConsent: true };
 const extras = (page) => details(page).getByRole("group", { name: "Tags and extras" });
 const openExtras = async (page) => { await details(page).getByRole("button", { name: "Tags, cover art and audio" }).click(); };
 const audio = (page) => details(page).getByRole("radio", { name: /Audio only/ }).click();
@@ -40,7 +40,7 @@ check("extras: only the edited tags are sent", same(req.extra.meta, { album: "Op
 check("extras: audio defaults", same(req.extra.cover, { mode: "default", path: null }) && req.extra.lyrics === "off" && same(req.extra.audio, { quality: null, normalize: false, trim_silence: false }), JSON.stringify([req.extra.cover, req.extra.lyrics, req.extra.audio]));
 await page.context().close();
 
-page = await open({ store: { warnDuplicates: false } });
+page = await open({ store: { warnDuplicates: false, lyricsConsent: true } });
 await card(page);
 await openExtras(page);
 await audio(page);
@@ -93,7 +93,7 @@ await details(page).getByRole("button", { name: "Save", exact: true }).click();
 check("presets: duplicate names are refused", await details(page).getByRole("alert").locator("text=already exists").count() === 1);
 await page.context().close();
 
-page = await open({ store: { warnDuplicates: false, presets: [{ id: "p1", name: "Podcast", kind: "audio", quality: "best", subMode: "off", subLangs: "en", audioQuality: "128K", normalize: true, trimSilence: true, cover: "square", lyrics: "file" }] } });
+page = await open({ store: { warnDuplicates: false, lyricsConsent: true, presets: [{ id: "p1", name: "Podcast", kind: "audio", quality: "best", subMode: "off", subLangs: "en", audioQuality: "128K", normalize: true, trimSilence: true, cover: "square", lyrics: "file" }] } });
 await card(page);
 await details(page).getByLabel("Preset").selectOption("p1");
 check("presets: choosing one switches to audio", (await details(page).getByRole("radio", { name: /Audio only/ }).getAttribute("aria-checked")) === "true");

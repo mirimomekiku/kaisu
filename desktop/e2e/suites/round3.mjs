@@ -54,7 +54,7 @@ await page.context().close();
 // ================= search sources =================
 page = await open();
 const src = page.getByLabel("Search source");
-check("source: picker lists the working sites", JSON.stringify(await src.locator("option").allTextContents()) === JSON.stringify(["YouTube", "SoundCloud"]));
+check("source: picker lists the working sites", JSON.stringify(await src.locator("option").allTextContents()) === JSON.stringify(["YouTube", "SoundCloud", "YouTube Music"]));
 check("source: defaults to YouTube", (await src.inputValue()) === "youtube" && (await anyBox(page).getAttribute("placeholder")) === "Search YouTube or paste a link");
 await submit(page, "lofi");
 await results(page).waitFor();
