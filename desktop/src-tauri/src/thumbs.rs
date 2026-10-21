@@ -94,7 +94,7 @@ fn build_client(proxy: Option<&str>) -> Result<reqwest::Client, String> {
 }
 
 /// The picture formats browsers show that Kaisu accepts, recognised by their first bytes (never by what the server says).
-fn looks_like_image(b: &[u8]) -> bool {
+pub(crate) fn looks_like_image(b: &[u8]) -> bool {
     b.starts_with(&[0xFF, 0xD8, 0xFF])
         || b.starts_with(b"\x89PNG\r\n\x1a\n")
         || b.starts_with(b"GIF87a")

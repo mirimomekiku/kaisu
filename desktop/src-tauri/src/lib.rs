@@ -3,6 +3,7 @@ mod download;
 mod engine;
 mod files;
 mod leftovers;
+mod library;
 mod links;
 mod media;
 mod meta;
@@ -102,6 +103,9 @@ pub fn run() {
             custom_args::allowed_custom_options,
             custom_args::check_custom_args,
             leftovers::find_leftovers,
+            library::library_load,
+            library::library_scan,
+            library::library_cover,
             leftovers::remove_leftovers,
             media::play_in_app,
             media::preview_clip,
