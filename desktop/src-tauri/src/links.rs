@@ -151,12 +151,8 @@ pub async fn get_playlist(app: AppHandle, engine: State<'_, Engine>, url: String
 
     let end = limit.to_string();
     let proxy = crate::net::proxy_option(proxy.as_deref())?;
-    let mut args: Vec<&str> = vec!["--flat-playlist", "--dump-single-json", "--no-warnings", "--playlist-end", end.as_str()];
-    if let Some(p) = proxy.as_deref() {
-        args.extend(["--proxy", p]);
-    }
-    args.extend(["--", target.as_str()]);
-    let json = proc::run_capture(&ytdlp, &args, Duration::from_secs(120)).await?;
+    let args = ["--flat-playlist", "--dump-single-json", "--no-warnings", "--playlist-end", end.as_str(), "--", target.as_str()];
+    let json = proc::run_capture_proxied(&ytdlp, &args, Duration::from_secs(120), proxy.as_deref()).await?;
     let v: serde_json::Value = serde_json::from_str(&json).map_err(|e| format!("Unreadable playlist response: {e}"))?;
 
     let entries = parse_entries(&v);

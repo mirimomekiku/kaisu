@@ -10,6 +10,8 @@ use crate::{engine::Engine, proc};
 
 const MAX_RESULTS: u32 = 50;
 const MAX_QUERY_CHARS: usize = 200;
+/// The `sp` value of a YouTube Music search that shows only songs.
+const MUSIC_SONGS_FILTER: &str = "EgWKAQIIAWoKEAkQBRAKEAMQBA%3D%3D";
 
 #[derive(Serialize, Debug, PartialEq)]
 pub struct SearchResult {
@@ -24,28 +26,42 @@ pub struct SearchResult {
     pub live: bool,
 }
 
-/// Where to search. Each maps to a yt-dlp search prefix. Only sources that were checked against the real service are
-/// listed: Dailymotion, Bilibili, Niconico and Yahoo all returned nothing when tried, so they are not offered.
+/// Where to search. Only sources that were checked against the real service are listed. Tried and left out because
+/// they returned nothing or an error: Dailymotion, Bilibili, Niconico, Yahoo, Google Video, Rokfin and PRX.
 #[derive(Deserialize, Clone, Copy, Default, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum SearchSource {
     #[default]
     Youtube,
     Soundcloud,
+    /// Songs on YouTube Music (the "Songs" filter of its search page).
+    YoutubeMusic,
 }
 
 impl SearchSource {
-    pub fn prefix(self) -> &'static str {
+    /// What yt-dlp is asked to open: a search prefix, or for YouTube Music the address of its search page.
+    /// `query` has been cleaned, and the result goes after `--`, so it can never be read as an option.
+    pub fn target(self, limit: u32, query: &str) -> String {
         match self {
-            SearchSource::Youtube => "ytsearch",
-            SearchSource::Soundcloud => "scsearch",
+            SearchSource::Youtube => format!("ytsearch{limit}:{query}"),
+            SearchSource::Soundcloud => format!("scsearch{limit}:{query}"),
+            SearchSource::YoutubeMusic => {
+                let q: String = url::form_urlencoded::byte_serialize(query.as_bytes()).collect();
+                format!("https://music.youtube.com/search?q={q}&sp={MUSIC_SONGS_FILTER}")
+            }
         }
+    }
+
+    /// Search pages return everything they have, so the number of results has to be asked for.
+    fn limits_with_playlist_end(self) -> bool {
+        matches!(self, SearchSource::YoutubeMusic)
     }
 
     fn name(self) -> &'static str {
         match self {
             SearchSource::Youtube => "YouTube",
             SearchSource::Soundcloud => "SoundCloud",
+            SearchSource::YoutubeMusic => "YouTube Music",
         }
     }
 
@@ -117,19 +133,20 @@ pub async fn search_media(
 
     // The pseudo-URL comes after `--`, so a query can never be read as an option.
     let source = source.unwrap_or_default();
-    let target = format!("{}{limit}:{query}", source.prefix());
+    let target = source.target(limit, &query);
+    let end = limit.to_string();
     let proxy = crate::net::proxy_option(proxy.as_deref())?;
-    let mut args: Vec<&str> = vec!["--flat-playlist", "--dump-single-json", "--no-warnings"];
-    if let Some(p) = proxy.as_deref() {
-        args.extend(["--proxy", p]);
+    let mut args = vec!["--flat-playlist", "--dump-single-json", "--no-warnings"];
+    if source.limits_with_playlist_end() {
+        args.extend(["--playlist-end", end.as_str()]);
     }
     args.extend(["--", target.as_str()]);
-    let json = proc::run_capture(&ytdlp, &args, Duration::from_secs(45)).await.map_err(|e| source.explain(e))?;
+    let json = proc::run_capture_proxied(&ytdlp, &args, Duration::from_secs(45), proxy.as_deref()).await.map_err(|e| source.explain(e))?;
     let v: serde_json::Value = serde_json::from_str(&json).map_err(|e| format!("Unreadable search response: {e}"))?;
     Ok(match source {
         SearchSource::Youtube => parse_results(&v),
         // Other sites don't use YouTube's 11-character ids, so take what they give.
-        SearchSource::Soundcloud => crate::links::parse_entries(&v),
+        SearchSource::Soundcloud | SearchSource::YoutubeMusic => crate::links::parse_entries(&v),
     })
 }
 
@@ -139,8 +156,13 @@ mod tests {
 
     #[test]
     fn sources_map_to_their_prefixes() {
-        assert_eq!(SearchSource::Youtube.prefix(), "ytsearch");
-        assert_eq!(SearchSource::Soundcloud.prefix(), "scsearch");
+        assert_eq!(SearchSource::Youtube.target(12, "lofi"), "ytsearch12:lofi");
+        assert_eq!(SearchSource::Soundcloud.target(5, "a b"), "scsearch5:a b");
+        let music = SearchSource::YoutubeMusic.target(12, "daft punk & co");
+        assert_eq!(music, format!("https://music.youtube.com/search?q=daft+punk+%26+co&sp={MUSIC_SONGS_FILTER}"));
+        assert!(SearchSource::YoutubeMusic.limits_with_playlist_end() && !SearchSource::Youtube.limits_with_playlist_end());
+        let m: SearchSource = serde_json::from_str("\"youtube_music\"").unwrap();
+        assert_eq!(m, SearchSource::YoutubeMusic);
         assert_eq!(SearchSource::default(), SearchSource::Youtube);
         let s: SearchSource = serde_json::from_str("\"soundcloud\"").unwrap();
         assert_eq!(s, SearchSource::Soundcloud);

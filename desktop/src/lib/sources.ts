@@ -4,6 +4,7 @@ import type { SearchSource } from "./api";
 export const SEARCH_SOURCES: Array<{ id: SearchSource; label: string }> = [
   { id: "youtube", label: "YouTube" },
   { id: "soundcloud", label: "SoundCloud" },
+  { id: "youtube_music", label: "YouTube Music" },
 ];
 
 export const sourceLabel = (id: SearchSource) => SEARCH_SOURCES.find((s) => s.id === id)?.label ?? "YouTube";

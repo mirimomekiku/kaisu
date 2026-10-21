@@ -17,6 +17,7 @@ use tauri::{AppHandle, State, ipc::Channel};
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 use crate::{
+    custom_args::parse_custom_args,
     engine::{self, Engine},
     meta::{self, AudioExtras, CoverMode, CoverOptions, LyricsMode, MetaOptions},
     net,
@@ -166,6 +167,21 @@ pub struct Downloads {
     active: Mutex<HashMap<String, Active>>,
 }
 
+/// Takes a download off the running list when it goes out of scope, so no way out of `run_download` (an early error
+/// included) can leave it there and make Kaisu think a download is still running.
+struct ActiveGuard<'a> {
+    downloads: &'a Downloads,
+    id: &'a str,
+}
+
+impl Drop for ActiveGuard<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut map) = self.downloads.active.lock() {
+            map.remove(self.id);
+        }
+    }
+}
+
 impl Downloads {
     pub fn is_idle(&self) -> bool {
         self.active.lock().map(|m| m.is_empty()).unwrap_or(true)
@@ -198,7 +214,7 @@ pub fn free_space(path: PathBuf) -> Result<u64, String> {
 
 // ---- validation ---------------------------------------------------------------------
 
-fn validate_url(url: &str) -> Result<&str, String> {
+pub(crate) fn validate_url(url: &str) -> Result<&str, String> {
     let url = url.trim();
     let ok = (url.starts_with("http://") || url.starts_with("https://")) && !url.contains(char::is_whitespace);
     if ok { Ok(url) } else { Err("Enter a full web link (starting with http:// or https://) without spaces.".into()) }
@@ -216,69 +232,6 @@ fn validate_rate_limit(limit: &str) -> Result<&str, String> {
         && digits.chars().all(|c| c.is_ascii_digit() || c == '.')
         && digits.matches('.').count() <= 1;
     if ok { Ok(limit) } else { Err("Speed limit must look like 500K or 2M.".into()) }
-}
-
-/// Options that make yt-dlp run programs or read arbitrary config. They are blocked even for
-/// advanced users, because people routinely paste "recipes" from the internet.
-const DENIED_OPTIONS: &[&str] = &[
-    "--exec",
-    "--exec-before-download",
-    "--netrc-cmd",
-    "--plugin-dirs",
-    "--config-locations",
-    "--config-location",
-    "--print-to-file",
-];
-
-/// Splits like a shell: whitespace separates, single or double quotes group.
-fn split_args(input: &str) -> Result<Vec<String>, String> {
-    let (mut out, mut cur, mut quote, mut has_token) = (Vec::new(), String::new(), None::<char>, false);
-    let mut chars = input.chars().peekable();
-    while let Some(c) = chars.next() {
-        match (quote, c) {
-            (Some(q), c) if c == q => quote = None,
-            (Some('"'), '\\') if matches!(chars.peek(), Some('"') | Some('\\')) => cur.push(chars.next().unwrap()),
-            (Some(_), c) => cur.push(c),
-            (None, '"' | '\'') => {
-                quote = Some(c);
-                has_token = true;
-            }
-            (None, c) if c.is_whitespace() => {
-                if has_token || !cur.is_empty() {
-                    out.push(std::mem::take(&mut cur));
-                    has_token = false;
-                }
-            }
-            (None, c) => cur.push(c),
-        }
-    }
-    if quote.is_some() {
-        return Err("Custom arguments have an unclosed quote.".into());
-    }
-    if has_token || !cur.is_empty() {
-        out.push(cur);
-    }
-    Ok(out)
-}
-
-fn parse_custom_args(input: &str) -> Result<Vec<String>, String> {
-    if input.len() > 2000 || input.contains('\0') {
-        return Err("Custom arguments are too long or contain invalid characters.".into());
-    }
-    let tokens = split_args(input)?;
-    for t in &tokens {
-        if t == "--" {
-            return Err("Custom arguments can't contain a bare `--`.".into());
-        }
-        if let Some(rest) = t.strip_prefix("--") {
-            // yt-dlp accepts unambiguous abbreviations, so match on prefixes too.
-            let name = format!("--{}", rest.split('=').next().unwrap_or_default().to_lowercase());
-            if name.len() > 2 && DENIED_OPTIONS.iter().any(|d| d.starts_with(&name)) {
-                return Err(format!("`{t}` isn't allowed because it can run programs on your computer."));
-            }
-        }
-    }
-    Ok(tokens)
 }
 
 // ---- argument building ------------------------------------------------------------------
@@ -377,9 +330,9 @@ fn build_args(
     for arg in &subtitle_args {
         push(&[arg.as_str()]);
     }
-    if let Some(proxy) = net::proxy_option(extra.proxy.as_deref())? {
-        push(&["--proxy", proxy.as_str()]);
-    }
+    // The proxy is not an argument: it reaches yt-dlp through its environment (see `proc::command_with_proxy`), so a
+    // password in it never shows on the command line. It is only checked here.
+    net::proxy_option(extra.proxy.as_deref())?;
     if let Some(b) = extra.cookies_from_browser {
         push(&["--cookies-from-browser", b.as_arg()]);
     }
@@ -564,8 +517,9 @@ async fn run_download(
     let (ffmpeg_dir, _) = engine::locate_ffmpeg(app).ok_or(NO_FFMPEG)?;
     let js = engine::locate_js_runtime(app).map(|rt| rt.arg());
     let args = build_args(req, url, &ffmpeg_dir, js.as_deref())?;
+    let proxy = net::proxy_option(req.extra.proxy.as_deref())?;
 
-    let mut child = proc::command(&ytdlp).args(&args).spawn().map_err(|e| format!("Failed to start yt-dlp: {e}"))?;
+    let mut child = proc::command_with_proxy(&ytdlp, proxy.as_deref()).args(&args).spawn().map_err(|e| format!("Failed to start yt-dlp: {e}"))?;
     let pid = child.id().ok_or("yt-dlp exited immediately")?;
     let cancelled = Arc::new(AtomicBool::new(false));
     downloads
@@ -573,6 +527,7 @@ async fn run_download(
         .lock()
         .map_err(|_| "download state poisoned")?
         .insert(req.id.clone(), Active { pid, cancelled: cancelled.clone() });
+    let running = ActiveGuard { downloads, id: &req.id };
 
     let stdout = child.stdout.take().ok_or("no stdout")?;
     let stderr = child.stderr.take().ok_or("no stderr")?;
@@ -582,6 +537,7 @@ async fn run_download(
         let mut lines = BufReader::new(stderr).lines();
         let mut buf = String::new();
         while let Ok(Some(line)) = lines.next_line().await {
+            let line = net::redact_urls(&line);
             let _ = log_channel.send(DownloadEvent::Log { line: line.clone() });
             buf.push_str(&line);
             buf.push('\n');
@@ -615,15 +571,14 @@ async fn run_download(
         } else if let Some(path) = line.strip_prefix("KAISU_DONE|") {
             final_path = Some(path.trim().to_string());
         } else if req.extra.verbose {
-            let _ = on_event.send(DownloadEvent::Log { line });
+            let _ = on_event.send(DownloadEvent::Log { line: net::redact_urls(&line) });
         }
     }
 
     let status = child.wait().await.map_err(|e| format!("Failed to wait for yt-dlp: {e}"))?;
     let stderr_text = stderr_task.await.unwrap_or_default();
-    if let Ok(mut m) = downloads.active.lock() {
-        m.remove(&req.id);
-    }
+    // Idle again before the final checks and events, so an update or setup the UI starts right after "done" isn't refused.
+    drop(running);
 
     if cancelled.load(Ordering::SeqCst) {
         let _ = on_event.send(DownloadEvent::Cancelled);
@@ -645,7 +600,13 @@ async fn run_download(
 #[tauri::command]
 pub fn preview_command(req: DownloadRequest) -> Result<String, String> {
     let url = validate_url(&req.url)?.to_string();
-    let args = build_args(&req, &url, std::path::Path::new("<ffmpeg folder>"), None)?;
+    let mut args = build_args(&req, &url, std::path::Path::new("<ffmpeg folder>"), None)?;
+    // A real download sends the proxy through the environment. For copying into a terminal it is shown as an option, with
+    // its password hidden, so the preview never leaks it.
+    if let Some(proxy) = net::proxy_option(req.extra.proxy.as_deref())? {
+        let at = args.len() - 2; // just before the `--` that precedes the link
+        args.splice(at..at, ["--proxy".to_string(), net::redact_urls(&proxy)]);
+    }
     Ok(std::iter::once("yt-dlp".to_string()).chain(args.iter().map(|a| shell_quote(a))).collect::<Vec<_>>().join(" "))
 }
 
@@ -774,13 +735,10 @@ pub async fn get_media_info(
     if let Some(rt) = engine::locate_js_runtime(&app) {
         args.extend(["--js-runtimes".into(), rt.arg()]);
     }
-    if let Some(p) = proxy {
-        args.extend(["--proxy".into(), p]);
-    }
     args.extend(["--".into(), url.to_string()]);
     let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
 
-    let json = proc::run_capture(&ytdlp, &arg_refs, Duration::from_secs(60)).await?;
+    let json = proc::run_capture_proxied(&ytdlp, &arg_refs, Duration::from_secs(60), proxy.as_deref()).await?;
     let v: serde_json::Value = serde_json::from_str(&json).map_err(|e| format!("Unreadable response from yt-dlp: {e}"))?;
 
     let text = |k: &str| v.get(k).and_then(|x| x.as_str()).map(str::to_string);
@@ -886,6 +844,31 @@ mod tests {
     }
 
     #[test]
+    fn a_proxy_never_goes_on_the_command_line_and_the_preview_hides_its_password() {
+        let mut r = req(Preset::Best);
+        r.extra.proxy = Some("socks5://me:hunter2@10.0.0.1:1080".into());
+        let a = args(&r).unwrap();
+        assert!(!a.iter().any(|x| x.contains("hunter2") || x == "--proxy"), "the real command line carries no proxy: {a:?}");
+        let preview = preview_command(r).unwrap();
+        assert!(preview.contains("--proxy 'socks5://me:***@10.0.0.1:1080' -- https://example.com/v"), "quoted, because * would otherwise glob in a shell: {preview}");
+        assert!(!preview.contains("hunter2"));
+        let mut bad = req(Preset::Best);
+        bad.extra.proxy = Some("ftp://nope".into());
+        assert!(args(&bad).is_err(), "a bad proxy is still refused before anything runs");
+    }
+
+    #[test]
+    fn a_finished_download_leaves_the_running_list_however_the_function_ends() {
+        let downloads = Downloads::default();
+        downloads.active.lock().unwrap().insert("a".into(), Active { pid: 1, cancelled: Arc::new(AtomicBool::new(false)) });
+        assert!(!downloads.is_idle());
+        {
+            let _running = ActiveGuard { downloads: &downloads, id: "a" };
+        }
+        assert!(downloads.is_idle());
+    }
+
+    #[test]
     fn rejects_option_like_and_non_http_urls() {
         assert!(validate_url("--exec=touch /tmp/x").is_err());
         assert!(validate_url("file:///etc/passwd").is_err());
@@ -977,33 +960,6 @@ mod tests {
         for bad in ["", "M", "5MB", "--exec", "1.2.3K", "5 K"] {
             assert!(validate_rate_limit(bad).is_err(), "{bad}");
         }
-    }
-
-    #[test]
-    fn custom_args_are_split_like_a_shell() {
-        assert_eq!(split_args(r#"--proxy "http://a b" -x 'q r'"#).unwrap(), ["--proxy", "http://a b", "-x", "q r"]);
-        assert_eq!(split_args(r#"-o "C:\music\%(title)s.%(ext)s""#).unwrap(), ["-o", r"C:\music\%(title)s.%(ext)s"]);
-        assert_eq!(split_args("a  b").unwrap(), ["a", "b"]);
-        assert!(split_args("--x \"unterminated").is_err());
-    }
-
-    #[test]
-    fn dangerous_custom_args_are_blocked_even_abbreviated() {
-        for bad in [
-            "--exec touch /tmp/x",
-            "--exec=calc",
-            "--EXEC=calc",
-            "--exec-before-download id",
-            "--exec-be=calc",
-            "--ex=calc",
-            "--netrc-cmd foo",
-            "--plugin-dirs /tmp",
-            "--print-to-file x y",
-            "--",
-        ] {
-            assert!(parse_custom_args(bad).is_err(), "{bad} should be rejected");
-        }
-        assert!(parse_custom_args("--sponsorblock-mark all --embed-chapters -R 3").is_ok());
     }
 
     #[test]
