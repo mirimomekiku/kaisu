@@ -22,6 +22,14 @@ export const SHORTCUT_GROUPS: Array<{ title: string; items: Array<{ keys: string
     ],
   },
   {
+    title: "Music player",
+    items: [
+      { keys: ["Mod", "Shift", "Space"], action: "Play or pause the music" },
+      { keys: ["Mod", "Shift", "→"], action: "Next track (also the keyboard's media keys)" },
+      { keys: ["Mod", "Shift", "←"], action: "Previous track, or the start of this one" },
+    ],
+  },
+  {
     title: "Go to",
     items: [
       { keys: ["Mod", "1"], action: "Search" },

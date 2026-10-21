@@ -235,10 +235,10 @@ check("player: nothing to complain about", (await sheet(page, "My Movie").getByR
 await sheet(page, "My Movie").getByRole("button", { name: "Close" }).click();
 check("player: Close closes it", (await sheet(page, "My Movie").count()) === 0);
 await page.locator("tr", { hasText: "My Song" }).first().getByRole("button", { name: "Play in Kaisu" }).click();
-await page.waitForFunction(() => document.querySelector("[role=dialog] audio")?.getAttribute("src"));
-check("player: sound files get an audio player", (await sheet(page, "My Song").locator("audio").count()) === 1);
-await page.keyboard.press("Escape");
-check("player: Escape closes it too", (await sheet(page, "My Song").count()) === 0);
+await page.getByRole("region", { name: "Music player" }).waitFor();
+check("player: sound files play in the player bar, not a window", (await page.getByRole("dialog").count()) === 0 && (await page.getByRole("region", { name: "Music player" }).innerText()).includes("My Song"));
+await page.getByRole("button", { name: "Close the player" }).click();
+check("player: the bar can be closed", (await page.getByRole("region", { name: "Music player" }).count()) === 0);
 await page.context().close();
 
 page = await open({ history: [MOVIE], store: { warnDuplicates: false }, mock: { unplayable: true } });

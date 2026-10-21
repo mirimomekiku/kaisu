@@ -2,9 +2,36 @@
 type Ev = Record<string, unknown>;
 let nextId = 1;
 /** Where a file would be played from. Real Kaisu gives an asset address; here a tiny silent sound (or nothing playable). */
+const wavs = new Map<number, string>();
+/** A silent sound of the given length, as an address the page can play. */
+function silentWav(seconds: number): string {
+  const known = wavs.get(seconds);
+  if (known) return known;
+  const rate = 8000;
+  const n = rate * seconds;
+  const buf = new Uint8Array(44 + n).fill(128);
+  const view = new DataView(buf.buffer);
+  const tag = (at: number, text: string) => [...text].forEach((c, i) => (buf[at + i] = c.charCodeAt(0)));
+  tag(0, "RIFF");
+  view.setUint32(4, 36 + n, true);
+  tag(8, "WAVEfmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, rate, true);
+  view.setUint32(28, rate, true);
+  view.setUint16(32, 1, true);
+  view.setUint16(34, 8, true);
+  tag(36, "data");
+  view.setUint32(40, n, true);
+  const url = URL.createObjectURL(new Blob([buf], { type: "audio/wav" }));
+  wavs.set(seconds, url);
+  return url;
+}
 export function convertFileSrc(path: string): string {
   if ((window as any).__mock?.unplayable) return `data:application/octet-stream;base64,AAAA#${encodeURIComponent(path)}`;
-  return "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=";
+  const lengths = (window as any).__mock?.audioSeconds;
+  return silentWav(typeof lengths === "object" && lengths !== null ? (lengths[path] ?? lengths["*"] ?? 30) : (lengths ?? 30));
 }
 export class Channel<T = Ev> {
   id = nextId++;

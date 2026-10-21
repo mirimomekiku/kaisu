@@ -300,8 +300,8 @@ export const openFolder = (path: string) => invoke<void>("open_folder", { path }
 /** Starts a countdown (kept by Kaisu, not the page), then sleeps or shuts down. Refused while downloads are running. */
 export const schedulePower = (action: PowerAction, seconds: number) => invoke<void>("schedule_power", { action, seconds });
 export const cancelPower = () => invoke<void>("cancel_power");
-export const setTrayStatus = (active: number, queued: number, paused: number, mode: CloseMode) =>
-  invoke<void>("set_tray_status", { active, queued, paused, mode });
+export const setTrayStatus = (active: number, queued: number, paused: number, mode: CloseMode, playing: boolean) =>
+  invoke<void>("set_tray_status", { active, queued, paused, mode, playing });
 export const trayAvailable = () => invoke<boolean>("tray_available");
 export const quitApp = () => invoke<void>("quit_app");
 
@@ -336,6 +336,48 @@ export const secretGet = (name: "proxy-password") => invoke<string | null>("secr
 export const secretDelete = (name: "proxy-password") => invoke<void>("secret_delete", { name });
 
 export const checkSetup = () => invoke<SetupInfo>("check_setup");
+
+// ---- the music library ----
+
+export interface LibTrack {
+  path: string;
+  title: string;
+  artist: string;
+  album_artist: string;
+  album: string;
+  track: number | null;
+  disc: number | null;
+  year: number | null;
+  genre: string;
+  /** Seconds. */
+  duration: number;
+  /** Kilobits a second. */
+  bitrate: number | null;
+  sample_rate: number | null;
+  bit_depth: number | null;
+  channels: number | null;
+  /** "MP3", "FLAC", ... */
+  format: string;
+  size: number;
+  /** Seconds since 1970 when the file last changed. */
+  modified: number;
+  has_cover: boolean;
+  /** How loud it is, in LUFS, once measured. */
+  loudness: number | null;
+}
+
+/** What was found by the last scan, at once. */
+export const libraryLoad = () => invoke<LibTrack[]>("library_load");
+
+/** Looks through the download folders for sound files, reading what is new or changed. */
+export function libraryScan(onProgress: (done: number, total: number) => void) {
+  const channel = new Channel<{ done: number; total: number }>();
+  channel.onmessage = (p) => onProgress(p.done, p.total);
+  return invoke<LibTrack[]>("library_scan", { onProgress: channel });
+}
+
+/** A sound file's picture (its own, or a cover.jpg beside it). Rejects when there is none. */
+export const libraryCover = (path: string) => invoke<ArrayBuffer>("library_cover", { path });
 
 // ---- unfinished downloads, playing, previews and converting ----
 

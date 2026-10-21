@@ -5,6 +5,8 @@ import type { AudioFormat, Browser, CloseMode, CoverMode, ExtraOptions, Layout, 
 import { sanitizePresets, type FormatPreset } from "./presets";
 import type { HistorySort } from "./history";
 import type { ScheduleRule } from "./schedule";
+import type { RepeatMode, Track } from "./audioEngine";
+import { sanitizePositions, type Positions } from "./positions";
 import { sanitizeSiteRules, type SiteRule } from "./siteRules";
 
 export type Mode = "simple" | "advanced";
@@ -293,6 +295,82 @@ export async function saveHistory(history: HistoryItem[]) {
     await (await getStore()).set("history", history.slice(0, MAX_HISTORY));
   } catch (e) {
     console.warn("Could not save history", e);
+  }
+}
+
+/** What the music player keeps between sessions: the queue, where it was, and its settings. */
+export interface SavedPlayer {
+  queue: Track[];
+  index: number;
+  /** Seconds into the current track. */
+  position: number;
+  volume: number;
+  rate: number;
+  repeat: RepeatMode;
+  shuffle: boolean;
+}
+
+const asTrack = (t: unknown): Track | null => {
+  const r = t as Partial<Track> | null;
+  if (!r || typeof r.path !== "string" || typeof r.title !== "string") return null;
+  return {
+    path: r.path,
+    title: r.title,
+    artist: typeof r.artist === "string" ? r.artist : undefined,
+    album: typeof r.album === "string" ? r.album : undefined,
+    duration: typeof r.duration === "number" && Number.isFinite(r.duration) ? r.duration : undefined,
+  };
+};
+
+/** Keeps only what is shaped like saved player state; anything else means "nothing saved". */
+export function sanitizePlayer(raw: unknown): SavedPlayer | null {
+  const r = raw as Partial<SavedPlayer> | null;
+  if (!r || !Array.isArray(r.queue)) return null;
+  const queue = r.queue.map(asTrack).filter((t): t is Track => t !== null).slice(0, 2000);
+  if (queue.length === 0) return null;
+  const num = (v: unknown, lo: number, hi: number, fallback: number) => (typeof v === "number" && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : fallback);
+  return {
+    queue,
+    index: Math.round(num(r.index, 0, queue.length - 1, 0)),
+    position: num(r.position, 0, 1e7, 0),
+    volume: num(r.volume, 0, 1, 1),
+    rate: num(r.rate, 0.5, 2, 1),
+    repeat: r.repeat === "all" || r.repeat === "one" ? r.repeat : "off",
+    shuffle: r.shuffle === true,
+  };
+}
+
+export async function loadPlayer(): Promise<SavedPlayer | null> {
+  try {
+    return sanitizePlayer(await (await getStore()).get("player"));
+  } catch (e) {
+    console.warn("Could not read the player state", e);
+    return null;
+  }
+}
+
+export async function savePlayer(player: SavedPlayer | null) {
+  try {
+    await (await getStore()).set("player", player);
+  } catch (e) {
+    console.warn("Could not save the player state", e);
+  }
+}
+
+export async function loadPositions(): Promise<Positions> {
+  try {
+    return sanitizePositions(await (await getStore()).get("positions"));
+  } catch (e) {
+    console.warn("Could not read playback positions", e);
+    return {};
+  }
+}
+
+export async function savePositions(positions: Positions) {
+  try {
+    await (await getStore()).set("positions", positions);
+  } catch (e) {
+    console.warn("Could not save playback positions", e);
   }
 }
 

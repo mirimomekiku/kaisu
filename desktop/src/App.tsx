@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, Loader2 } from "lucide-react";
 import AppBanners from "./components/AppBanners";
+import PlayerBar from "./components/PlayerBar";
 import { useConfirm } from "./components/ConfirmDialog";
 import DownloadsPage from "./components/DownloadsPage";
 import { QUEUE_VIEWS } from "./components/DownloadRow";
@@ -23,6 +24,7 @@ import { useClipboardOffer } from "./hooks/useClipboardOffer";
 import { useDownloadActions } from "./hooks/useDownloadActions";
 import { useLeftovers } from "./hooks/useLeftovers";
 import { MediaActionsContext, useMediaDialogs } from "./hooks/useMediaDialogs";
+import { PlayerContext, useCreatePlayer, usePlayerState } from "./hooks/usePlayer";
 import { useDownloads, sameDownload, type DownloadItem } from "./hooks/useDownloads";
 import { useDropLinks } from "./hooks/useDropLinks";
 import { useEngine } from "./hooks/useEngine";
@@ -48,6 +50,8 @@ const isFinishedStatus = (status: string) => status === "completed" || status ==
 
 export default function App() {
   const confirm = useConfirm();
+  const player = useCreatePlayer();
+  const playerState = usePlayerState(player);
   const [page, setPage] = useState<Page>("search");
   const [defaultDir, setDefaultDir] = useState("");
   const [flash, setFlash] = useState<{ text: string; error: boolean } | null>(null);
@@ -178,6 +182,7 @@ export default function App() {
     showFlash,
     announce: setNote,
     openDownloaded,
+    player,
     onConverted: (from, to) => {
       const original = historyRef.current.find((h) => h.path === from);
       if (original) updateHistory([{ ...original, id: `${original.id}-${Date.now().toString(36)}`, path: to, preset: "audio", timestamp: Date.now(), flag: undefined, transferred: undefined }, ...historyRef.current]);
@@ -266,6 +271,8 @@ export default function App() {
     ready: settingsLoaded,
     pauseAll,
     resumeAll,
+    playing: playerState.playing,
+    onPlayer: (action) => (action === "toggle" ? player.toggle() : action === "next" ? player.next() : player.previous()),
   });
   const dragging = useDropLinks({
     onLink: flow.submitLink,
@@ -292,6 +299,9 @@ export default function App() {
     downloadOpenVideo: (asAudio) => void actions.downloadCurrent({ preset: asAudio ? "audio" : "best", formatId: null, clip: null, estimate: null, subs: defaultSubs(settings), meta: null, cover: null, lyrics: null, audio: null }),
     togglePauseAll: () => (pausedCount > 0 ? resumeAll() : pauseAll()),
     openDownloadFolder: () => openFolder(effectiveOutDir).catch((err) => showFlash(errorText(err), true)),
+    playerToggle: () => player.toggle(),
+    playerNext: () => player.next(),
+    playerPrevious: () => player.previous(),
     openLatest: () => {
       const latest = history.filter((h) => h.path && existing[h.path] !== false).sort((a, b) => b.timestamp - a.timestamp)[0];
       if (latest?.path) openDownloaded(latest.path);
@@ -391,6 +401,7 @@ export default function App() {
   };
 
   return (
+    <PlayerContext.Provider value={player}>
     <MediaActionsContext.Provider value={mediaDialogs.actions}>
     <div className="app">
       <Toolbar
@@ -577,6 +588,8 @@ export default function App() {
         </main>
       </div>
 
+      {playerState.queue.length > 0 && <PlayerBar engine={player} />}
+
       <StatusBar
         left={
           advanced && engine ? (
@@ -633,5 +646,6 @@ export default function App() {
       )}
     </div>
     </MediaActionsContext.Provider>
+    </PlayerContext.Provider>
   );
 }

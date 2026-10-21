@@ -17,6 +17,10 @@ export interface ShortcutContext {
   togglePauseAll: () => void;
   openDownloadFolder: () => void;
   openLatest: () => void;
+  /** The music player. */
+  playerToggle: () => void;
+  playerNext: () => void;
+  playerPrevious: () => void;
 }
 
 const PAGES: Page[] = ["search", "downloads", "history", "settings"];
@@ -57,6 +61,15 @@ export function useShortcuts(ctx: ShortcutContext) {
       } else if (mod && e.shiftKey && key === "p") {
         e.preventDefault();
         c.togglePauseAll();
+      } else if (mod && e.shiftKey && key === " ") {
+        e.preventDefault();
+        c.playerToggle();
+      } else if (mod && e.shiftKey && key === "arrowright") {
+        e.preventDefault();
+        c.playerNext();
+      } else if (mod && e.shiftKey && key === "arrowleft") {
+        e.preventDefault();
+        c.playerPrevious();
       } else if (mod && e.shiftKey && key === "l") {
         e.preventDefault();
         c.openLatest();

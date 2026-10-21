@@ -95,9 +95,12 @@ pub fn init(app: &AppHandle) {
         let status = MenuItem::with_id(app, "status", "No active downloads", false, None::<&str>)?;
         let pause = MenuItem::with_id(app, "pause", "Pause all downloads", true, None::<&str>)?;
         let resume = MenuItem::with_id(app, "resume", "Resume all downloads", true, None::<&str>)?;
+        let play_pause = MenuItem::with_id(app, "player_toggle", "Play / pause music", true, None::<&str>)?;
+        let previous = MenuItem::with_id(app, "player_previous", "Previous track", true, None::<&str>)?;
+        let next = MenuItem::with_id(app, "player_next", "Next track", true, None::<&str>)?;
         let quit_item = MenuItem::with_id(app, "quit", "Quit Kaisu", true, None::<&str>)?;
-        let (sep1, sep2) = (PredefinedMenuItem::separator(app)?, PredefinedMenuItem::separator(app)?);
-        let menu = Menu::with_items(app, &[&show, &sep1, &status, &pause, &resume, &sep2, &quit_item])?;
+        let (sep1, sep2, sep3) = (PredefinedMenuItem::separator(app)?, PredefinedMenuItem::separator(app)?, PredefinedMenuItem::separator(app)?);
+        let menu = Menu::with_items(app, &[&show, &sep1, &status, &pause, &resume, &sep2, &play_pause, &previous, &next, &sep3, &quit_item])?;
 
         let mut builder = TrayIconBuilder::with_id("main")
             .tooltip("Kaisu")
@@ -111,6 +114,10 @@ pub fn init(app: &AppHandle) {
                 }
                 "resume" => {
                     let _ = app.emit("tray-action", "resume_all");
+                }
+                // The music player lives in the page; the tray just tells it what was pressed.
+                id @ ("player_toggle" | "player_previous" | "player_next") => {
+                    let _ = app.emit("tray-action", id);
                 }
                 _ => {}
             })
@@ -148,18 +155,26 @@ pub fn on_window_event(window: &Window, event: &WindowEvent) {
     }
 }
 
-/// The page reports its queue so the tray and the close button can react.
+/// What the tray menu says about the queue.
+fn status_text(active: u32, queued: u32, paused: u32, playing: bool) -> String {
+    match (active, queued, paused) {
+        (0, 0, 0) if playing => "Playing music".to_string(),
+        (0, 0, 0) => "No active downloads".to_string(),
+        (0, 0, p) => format!("{p} paused"),
+        (a, q, _) => format!("{a} downloading{}{}", if q > 0 { format!(", {q} waiting") } else { String::new() }, if playing { " · playing music" } else { "" }),
+    }
+}
+
+/// The page reports its queue (and whether music is playing) so the tray and the close button can react. Music counts as
+/// work: closing the window while it plays keeps Kaisu running in the background, and it quits when the music stops.
 #[tauri::command]
-pub fn set_tray_status(app: AppHandle, state: State<'_, TrayState>, active: u32, queued: u32, paused: u32, mode: CloseMode) {
-    let busy = active + queued;
+pub fn set_tray_status(app: AppHandle, state: State<'_, TrayState>, active: u32, queued: u32, paused: u32, mode: CloseMode, playing: Option<bool>) {
+    let playing = playing.unwrap_or(false);
+    let busy = active + queued + u32::from(playing);
     state.busy.store(busy, Ordering::SeqCst);
     *state.mode.lock().unwrap() = mode;
 
-    let text = match (active, queued, paused) {
-        (0, 0, 0) => "No active downloads".to_string(),
-        (0, 0, p) => format!("{p} paused"),
-        (a, q, _) => format!("{a} downloading{}", if q > 0 { format!(", {q} waiting") } else { String::new() }),
-    };
+    let text = status_text(active, queued, paused, playing);
     if let Some(item) = state.status_item.lock().unwrap().as_ref() {
         let _ = item.set_text(&text);
     }
@@ -207,6 +222,24 @@ mod tests {
         assert!(should_hide(Always, 0, true));
         assert!(!should_hide(Never, 5, true));
         assert!(!should_hide(Always, 9, false), "no tray icon: never hide, or the window would be lost");
+    }
+
+    #[test]
+    fn the_menu_says_what_is_going_on() {
+        assert_eq!(status_text(0, 0, 0, false), "No active downloads");
+        assert_eq!(status_text(0, 0, 0, true), "Playing music");
+        assert_eq!(status_text(0, 0, 3, false), "3 paused");
+        assert_eq!(status_text(2, 1, 0, false), "2 downloading, 1 waiting");
+        assert_eq!(status_text(1, 0, 0, true), "1 downloading · playing music");
+    }
+
+    #[test]
+    fn playing_music_keeps_the_window_alive_in_the_background() {
+        use CloseMode::*;
+        // Music alone counts as one busy thing.
+        assert!(should_hide(Downloads, 1, true));
+        assert!(!should_quit_when_idle(Downloads, 1, true), "still playing");
+        assert!(should_quit_when_idle(Downloads, 0, true), "the music stopped");
     }
 
     #[test]

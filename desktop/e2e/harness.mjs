@@ -7,8 +7,8 @@ export const BASE_URL = process.env.KAISU_E2E_URL ?? "http://localhost:1520/";
 /** Chrome is used as installed (`channel: "chrome"`), so nothing needs downloading. KAISU_E2E_BROWSER overrides it. */
 export const browser = await chromium.launch(
   process.env.KAISU_E2E_BROWSER
-    ? { executablePath: process.env.KAISU_E2E_BROWSER, args: ["--no-sandbox"] }
-    : { channel: "chrome", args: ["--no-sandbox"] },
+    ? { executablePath: process.env.KAISU_E2E_BROWSER, args: ["--no-sandbox", "--autoplay-policy=no-user-gesture-required"] }
+    : { channel: "chrome", args: ["--no-sandbox", "--autoplay-policy=no-user-gesture-required"] },
 );
 export const errors = [];
 export const tally = { passed: 0, failed: 0 };

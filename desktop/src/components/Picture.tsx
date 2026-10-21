@@ -1,14 +1,24 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { loadThumbnail, peekThumbnail } from "../lib/thumbs";
+import { covers } from "../lib/covers";
+import type { ImageLoader } from "../lib/imageLoader";
+import { thumbnails } from "../lib/thumbs";
+
+interface Props {
+  /** What to show: a web address for thumbnails, or a file's path for covers. */
+  url: string | null | undefined;
+  fallback: ReactNode;
+  /** Where pictures come from: the thumbnails fetched from the web (the default), or covers from sound files. */
+  source?: ImageLoader;
+}
 
 /**
- * A thumbnail. It is fetched by Kaisu (through the proxy) once it scrolls near the screen, and `fallback` is shown when
- * there is no address or the picture can't be loaded. Put it inside the box that is the picture's frame: that box is
- * what is watched for coming into view.
+ * A picture. It is fetched by Kaisu (through the proxy, if any) once it scrolls near the screen, and `fallback` is shown when
+ * there is no address or the picture can't be loaded. Put it inside the box that is the picture's frame: that box is what is
+ * watched for coming into view.
  */
-export default function Picture({ url, fallback }: { url: string | null | undefined; fallback: ReactNode }) {
+export default function Picture({ url, fallback, source = thumbnails }: Props) {
   const marker = useRef<HTMLSpanElement>(null);
-  const known = url ? peekThumbnail(url) : null;
+  const known = url ? source.peek(url) : null;
   const [src, setSrc] = useState<string | null | undefined>(known);
   const [near, setNear] = useState(false);
 
@@ -25,16 +35,16 @@ export default function Picture({ url, fallback }: { url: string | null | undefi
 
   useEffect(() => {
     if (!url) return setSrc(null);
-    const hit = peekThumbnail(url);
+    const hit = source.peek(url);
     if (hit !== undefined) return setSrc(hit);
     setSrc(undefined);
     if (!near) return;
     let stale = false;
-    loadThumbnail(url).then((loaded) => !stale && setSrc(loaded));
+    source.load(url).then((loaded) => !stale && setSrc(loaded));
     return () => {
       stale = true;
     };
-  }, [url, near]);
+  }, [url, near, source]);
 
   return (
     <>
@@ -42,4 +52,9 @@ export default function Picture({ url, fallback }: { url: string | null | undefi
       {src ? <img src={src} alt="" /> : src === null ? fallback : null}
     </>
   );
+}
+
+/** The cover of a sound file, or `fallback`. */
+export function CoverArt({ path, fallback }: { path: string | null | undefined; fallback: ReactNode }) {
+  return <Picture url={path} fallback={fallback} source={covers} />;
 }
