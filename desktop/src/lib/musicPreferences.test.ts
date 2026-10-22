@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { relocatePreference, sanitizeMusicPreferences, setPreference } from "./musicPreferences";
+import { relocatePreference, sanitizeMusicPreferences, setPreference, setPreferences } from "./musicPreferences";
 import { mergeListening, recordListeningTime, sanitizeListening } from "./listening";
 import { listeningSummary } from "./listeningDashboard";
 import { blankSmartRule, sanitizeSmart, smartTracks } from "./smartPlaylists";
@@ -21,6 +21,13 @@ describe("favorites and ratings", () => {
     const all = { a: { favorite: true, rating: 3 }, b: { favorite: false, rating: 5 } };
     expect(relocatePreference(all, "a", "b")).toEqual({ b: { favorite: true, rating: 5 } });
     expect(relocatePreference(all, "a", "a")).toBe(all);
+  });
+  it("applies bulk changes without changing unrelated preferences or losing other fields", () => {
+    const all = { a: { favorite: true, rating: 4 }, b: { favorite: false, rating: 2 }, c: { favorite: true, rating: 5 } };
+    const favorites = setPreferences(all, ["a", "b", "b"], { favorite: false });
+    expect(favorites).toEqual({ a: { favorite: false, rating: 4 }, b: { favorite: false, rating: 2 }, c: all.c });
+    expect(setPreferences(favorites, ["a", "b"], { rating: 0 })).toEqual({ c: all.c });
+    expect(all.a).toEqual({ favorite: true, rating: 4 });
   });
   it("supports favorite and rating smart rules, including unrated zero", () => {
     const smart = { match: "all" as const, rules: [{ ...blankSmartRule("favorite"), value: "yes" }, { ...blankSmartRule("rating"), op: "at_least", value: "4" }] };

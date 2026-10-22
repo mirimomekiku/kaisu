@@ -33,6 +33,21 @@ export const calls = (page, cmd) => page.evaluate((c) => window.__mock.calls.fil
 export const waitCalls = (page, cmd, n, t = 30000) => page.waitForFunction(([c, k]) => window.__mock.calls.filter((x) => x.cmd === c).length >= k, [cmd, n], { timeout: t });
 export const box = (page) => page.getByLabel("Search YouTube or paste a link");
 export const nav = (page, name) => page.getByRole("navigation", { name: "Sections" }).getByRole("button", { name: new RegExp(`^${name}`) });
+export const chooseMenu = async (page, menu, item) => {
+  await page.getByRole("button", { name: menu, exact: true }).click();
+  await page.getByRole("menu", { name: menu, exact: true }).getByRole("menuitem", { name: item, exact: typeof item === "string" }).click();
+};
+export const fileAction = async (scope, name) => {
+  await scope.getByRole("button", { name: "File actions", exact: true }).click();
+  await scope.page().getByRole("menu", { name: "File actions", exact: true }).getByRole("menuitem", { name, exact: true }).click();
+};
+export const libraryFilter = async (page, label, value) => {
+  await page.getByRole("button", { name: /^Library filters/ }).click();
+  const panel = page.getByRole("dialog", { name: /^Library filters/ });
+  if (label === "Favorites only") await panel.getByLabel(label, { exact: true }).setChecked(value);
+  else await panel.getByLabel(label, { exact: true }).selectOption(value);
+  await panel.getByRole("button", { name: /^Close Library filters/ }).click();
+};
 export const results = (page) => page.locator("section[aria-label='Search results']");
 export const details = (page) => page.locator("section[aria-label='Video details']");
 export const submit = async (page, text) => { await box(page).fill(text); await box(page).press("Enter"); };

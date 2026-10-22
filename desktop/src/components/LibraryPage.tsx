@@ -1,9 +1,9 @@
-import TrackPreferences from "./TrackPreferences";
+import { ActionMenu, FilterDropdown } from "./Dropdown";
+import SongList from "./SongList";
 import { useMusicPreferences } from "../hooks/useMusicPreferences";
 import ListeningDashboard from "./ListeningDashboard";
-import { ArrowLeft, Disc3, FolderOpen, ListEnd, ListMusic, ListPlus, ListStart, Loader2, Music, Pencil, Play, RefreshCw, Search, X } from "lucide-react";
+import { ArrowLeft, Disc3, ListEnd, ListMusic, ListPlus, ListStart, Loader2, Music, Pencil, Play, Search, X } from "lucide-react";
 import { useMemo, useState } from "react";
-import { useVirtualRows } from "../hooks/useVirtualRows";
 import { usePlayerEngine } from "../hooks/usePlayer";
 import type { EditResult, LibTrack } from "../lib/api";
 import type { TagEditRequest } from "../lib/tagEdit";
@@ -12,7 +12,7 @@ import PlaylistPicker from "./PlaylistPicker";
 import PlaylistsView from "./PlaylistsView";
 import type { PlaylistsApi } from "../hooks/usePlaylists";
 import { formatClock } from "../lib/format";
-import { albumsOf, artistsOf, filterTracks, formatsOf, qualityLabel, sortTracks, toPlayerTrack, totalDuration, type Album, type SortKey } from "../lib/library";
+import { albumsOf, artistsOf, filterTracks, formatsOf, sortTracks, toPlayerTrack, totalDuration, type Album, type SortKey } from "../lib/library";
 import { CoverArt } from "./Picture";
 import type { LibraryManagement } from "../hooks/useLibrary";
 import type { Listening } from "../lib/listening";
@@ -21,7 +21,6 @@ import DuplicateFinder from "./DuplicateFinder";
 
 type View = "songs" | "albums" | "artists" | "playlists" | "listening";
 
-const ROW_HEIGHT = 28;
 /** Playing from a long list queues this many tracks from the one chosen, so the queue stays manageable. */
 const QUEUE_FROM_HERE = 500;
 
@@ -114,6 +113,8 @@ export default function LibraryPage({ playlists, tracks, management, listening, 
     setView(next);
     setOpenAlbum(null);
   };
+  const filterCount = [!!format, availability !== "available", favoritesOnly, minimumRating > 0].filter(Boolean).length;
+  const resetFilters = () => { setFormat(""); setAvailability("available"); setFavoritesOnly(false); setMinimumRating(0); };
   const locate = async (path: string) => {
     try {
       const found = await management.locate(path);
@@ -124,6 +125,11 @@ export default function LibraryPage({ playlists, tracks, management, listening, 
   return (
     <section className="library" aria-label="Music library">
       <header className="lib-bar">
+        <h1 className="lib-title-heading">Library</h1>
+        <select className="field lib-view" aria-label="Library view" value={view} onChange={(e) => changeView(e.target.value as View)}>
+          {(["songs", "albums", "artists", "playlists", "listening"] as const).map((v) => <option key={v} value={v}>{v[0].toUpperCase() + v.slice(1)}</option>)}
+        </select>
+
         {!["playlists", "listening"].includes(view) && <label className="lib-search">
           <Search className="w-3.5 h-3.5" aria-hidden="true" />
           <input type="text" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search your music" aria-label="Search the library" spellCheck={false} />
@@ -133,59 +139,28 @@ export default function LibraryPage({ playlists, tracks, management, listening, 
             </button>
           )}
         </label>}
-        <div role="radiogroup" aria-label="Library view" className="seg">
-          {(["songs", "albums", "artists", "playlists", "listening"] as const).map((v) => (
-            <button key={v} type="button" role="radio" aria-checked={view === v} onClick={() => changeView(v)} className="capitalize">
-              {v}
-            </button>
-          ))}
-        </div>
-        {!["playlists", "listening"].includes(view) && <select className="field" aria-label="Format" value={format} onChange={(e) => setFormat(e.target.value)}>
-          <option value="">All formats</option>
-          {formats.map((f) => (
-            <option key={f} value={f}>
-              {f}
-            </option>
-          ))}
-        </select>}
-        {view === "songs" && (
-          <select className="field" aria-label="Sort by" value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
-            {SORTS.map(([key, label]) => (
-              <option key={key} value={key}>
-                Sort: {label}
-              </option>
-            ))}
-          </select>
-        )}
+        {!["playlists", "listening"].includes(view) && <FilterDropdown label={`Library filters${filterCount ? ` (${filterCount})` : ""}`}>
+          <label>Format<select className="field" aria-label="Format" value={format} onChange={(e) => setFormat(e.target.value)}><option value="">All formats</option>{formats.map((f) => <option key={f} value={f}>{f}</option>)}</select></label>
+          <label>Files<select className="field" aria-label="File availability" value={availability} onChange={(e) => setAvailability(e.target.value)}><option value="available">Available files</option><option value="missing">Missing files</option><option value="all">All files</option></select></label>
+          <label className="dropdown-check"><input type="checkbox" aria-label="Favorites only" checked={favoritesOnly} onChange={(e) => setFavoritesOnly(e.target.checked)} />Favorites only</label>
+          <label>Rating<select className="field" aria-label="Minimum rating" value={minimumRating} onChange={(e) => setMinimumRating(Number(e.target.value))}><option value="0">All ratings</option>{[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n}+ stars</option>)}</select></label>
+          <button className="btn small" onClick={resetFilters}>Reset filters</button>
+        </FilterDropdown>}
+        {view === "songs" && <select className="field" aria-label="Sort by" value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>{SORTS.map(([key, label]) => <option key={key} value={key}>Sort: {label}</option>)}</select>}
         <span className="flex-1" />
-        <span className="dim" aria-label="Library size">
-          {shown.length === tracks.length ? `${tracks.length} songs` : `${shown.length} of ${tracks.length} songs`}
-          {shown.length > 0 ? ` · ${hours(totalDuration(shown))}` : ""}
-        </span>
-        {analysing ? (
-          <button className="btn small" onClick={onStopAnalysing} title="Stop measuring loudness">
-            <Loader2 className="w-3 h-3 animate-spin" /> Measuring {analysing.done} of {analysing.total} · Stop
-          </button>
-        ) : (
-          unmeasuredCount > 0 && (
-            <button className="btn small" onClick={onAnalyse} title="Measure how loud each song is, so the player can keep the volume even">
-              Measure loudness ({unmeasuredCount})
-            </button>
-          )
-        )}
-        <button className="btn small" onClick={onScan} disabled={scanning !== null} title="Look for new and changed files">
-          <RefreshCw className={`w-3 h-3 ${scanning ? "animate-spin" : ""}`} /> Rescan
-        </button>
+        <ActionMenu label="Library tools" items={[
+          { label: "Music folders", onSelect: () => setFoldersOpen(true) },
+          { label: "Find duplicates", onSelect: () => setDuplicatesOpen(true) },
+          { kind: "separator" },
+          { label: "Rescan", onSelect: onScan, disabled: scanning !== null },
+          ...(analysing ? [{ label: `Stop measuring loudness (${analysing.done} of ${analysing.total})`, onSelect: onStopAnalysing }] : [{ label: `Measure loudness (${unmeasuredCount})`, onSelect: onAnalyse, disabled: unmeasuredCount === 0 }]),
+        ]} />
       </header>
-
-      <div className="lib-tools">
-        <button className="btn small" onClick={() => setFoldersOpen(true)}>Music folders</button>
-        <button className="btn small" onClick={() => setDuplicatesOpen(true)}>Find duplicates</button>
-        {!["playlists", "listening"].includes(view) && <select className="field" aria-label="File availability" value={availability} onChange={(e) => setAvailability(e.target.value)}><option value="available">Available files</option><option value="missing">Missing files</option><option value="all">All files</option></select>}
-        <span className="dim">{management.watching ? "Watching for changes" : "Watching paused"}{tracks.some((t) => t.missing) ? ` · ${tracks.filter((t) => t.missing).length} missing` : ""}</span>
+      <div className="lib-summary">
+        <span aria-label="Library size">{shown.length === tracks.length ? `${tracks.length} songs` : `${shown.length} of ${tracks.length} songs`}{shown.length > 0 ? ` · ${hours(totalDuration(shown))}` : ""}</span>
+        <span>{management.watching ? "Watching for changes" : "Watching paused"}{tracks.some((t) => t.missing) ? ` · ${tracks.filter((t) => t.missing).length} missing` : ""}</span>
       </div>
 
-      {!["playlists", "listening"].includes(view) && <div className="lib-preference-filters"><button className="btn small" aria-pressed={favoritesOnly} onClick={() => setFavoritesOnly((v) => !v)}>Favorites only</button><select className="field" aria-label="Minimum rating" value={minimumRating} onChange={(e) => setMinimumRating(Number(e.target.value))}><option value="0">All ratings</option>{[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n}+ stars</option>)}</select></div>}
       {artist && (
         <div className="lib-chip" role="status">
           Showing <b>{artist}</b>
@@ -218,14 +193,16 @@ export default function LibraryPage({ playlists, tracks, management, listening, 
           </div>
           <h2>{scanning || !loaded ? "Reading your music…" : "No music yet"}</h2>
           <p className="m-0">Add an existing music folder or download audio to start your library.</p>
+          <button className="btn primary" onClick={() => setFoldersOpen(true)}>Add music to your library</button>
         </div>
       ) : shown.length === 0 ? (
         <div className="empty" style={{ minHeight: 200 }}>
           <h2>Nothing matches</h2>
-          <p className="m-0">Try different words, or choose another format.</p>
+          <p className="m-0">Clear the search or reset filters to see your music.</p>
+          <button className="btn" onClick={() => { resetFilters(); setQuery(""); setArtist(""); }}>Reset library filters</button>
         </div>
       ) : view === "songs" ? (
-        <SongList tracks={shown} onLocate={(path) => void locate(path)} onPlay={play} onNext={next} onAdd={add} onReveal={onReveal} onEdit={(t) => setEditing([t])} onPlaylist={(t) => setAdding([t])} />
+        <SongList tracks={shown} onLocate={(path) => void locate(path)} onPlay={play} onNext={next} onAdd={add} onReveal={onReveal} onEdit={setEditing} onPlaylist={setAdding} announce={announce} />
       ) : view === "albums" ? (
         album ? (
           <AlbumDetail album={album} onLocate={(path) => void locate(path)} onBack={() => setOpenAlbum(null)} onPlay={play} onNext={next} onAdd={add} onEdit={setEditing} onPlaylist={setAdding} />
@@ -295,63 +272,6 @@ export default function LibraryPage({ playlists, tracks, management, listening, 
         />
       )}
     </section>
-  );
-}
-
-function SongList({ tracks, onLocate, onPlay, onNext, onAdd, onReveal, onEdit, onPlaylist }: { onLocate: (path: string) => void; tracks: LibTrack[]; onPlay: (list: LibTrack[], from: number) => void; onNext: (list: LibTrack[]) => void; onAdd: (list: LibTrack[]) => void; onReveal: (path: string) => void; onEdit: (track: LibTrack) => void; onPlaylist: (track: LibTrack) => void }) {
-  const rows = useVirtualRows(tracks.length, ROW_HEIGHT);
-  return (
-    <>
-      <div className="lib-row lib-head" aria-hidden="true">
-        <span />
-        <span>Title</span>
-        <span>Artist</span>
-        <span>Album</span>
-        <span className="num">Year</span>
-        <span className="num">Time</span>
-        <span>Quality</span>
-        <span />
-      </div>
-      <div className="lib-scroll" ref={rows.ref}>
-        <div role="list" aria-label="Songs" aria-rowcount={tracks.length} style={{ paddingTop: rows.padTop, paddingBottom: rows.padBottom }}>
-          {tracks.slice(rows.start, rows.end).map((t, i) => {
-            const index = rows.start + i;
-            return (
-              <div key={t.path} role="listitem" className="lib-row" style={{ height: ROW_HEIGHT }} onDoubleClick={() => !t.missing && onPlay(tracks, index)}>
-                <span className="num dim mono">{index + 1}</span>
-                <div className="song-title-preferences"><button type="button" className="lib-title link truncate" disabled={!!t.missing} aria-label={`Play ${t.title}`} title={t.missing ? t.path : `Play ${t.title}`} onClick={() => onPlay(tracks, index)}>
-                  {t.title}
-                </button><TrackPreferences path={t.path} title={t.title} /></div>
-                <span className="truncate">{t.artist || <span className="dim">Unknown artist</span>}</span>
-                <span className="truncate">{t.album || <span className="dim">Unknown album</span>}</span>
-                <span className="num">{t.year ?? ""}</span>
-                <span className="num mono">{t.duration > 0 ? formatClock(t.duration) : ""}</span>
-                <span className="dim truncate">{t.missing ? "Missing file" : qualityLabel(t)}</span>
-                <span className="lib-actions">
-                  {t.missing ? <button className="btn small" aria-label={`Locate ${t.title}`} onClick={() => onLocate(t.path)}>Locate file</button> : <>
-                  <button type="button" className="row-btn" aria-label={`Play ${t.title} next`} title="Play next" onClick={() => onNext([t])}>
-                    <ListStart className="w-3 h-3" />
-                  </button>
-                  <button type="button" className="row-btn" aria-label={`Add ${t.title} to the queue`} title="Add to the queue" onClick={() => onAdd([t])}>
-                    <ListEnd className="w-3 h-3" />
-                  </button>
-                  <button type="button" className="row-btn" aria-label={`Add ${t.title} to a playlist`} title="Add to a playlist" onClick={() => onPlaylist(t)}>
-                    <ListPlus className="w-3 h-3" />
-                  </button>
-                  <button type="button" className="row-btn" aria-label={`Edit tags of ${t.title}`} title="Edit tags" onClick={() => onEdit(t)}>
-                    <Pencil className="w-3 h-3" />
-                  </button>
-                  <button type="button" className="row-btn" aria-label={`Show ${t.title} in its folder`} title="Show in folder" onClick={() => onReveal(t.path)}>
-                    <FolderOpen className="w-3 h-3" />
-                  </button>
-                  </>}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </>
   );
 }
 

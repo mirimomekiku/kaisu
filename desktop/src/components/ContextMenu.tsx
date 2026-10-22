@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 export type MenuEntry =
   | { kind?: "item"; label: string; onSelect: () => void; disabled?: boolean }
@@ -35,28 +36,40 @@ export default function ContextMenu({ x, y, label, items, onClose }: Props) {
   const buttons = () => Array.from(ref.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? []);
 
   useEffect(() => {
-    buttons()[0]?.focus();
+    buttons()[0]?.focus({ preventScroll: true });
     const close = () => onClose();
+    // Layout changes can deliver a pending scroll after opening. Dismiss on user scroll intent instead.
+    const onScroll = (e: Event) => { if (!ref.current?.contains(e.target as Node)) onClose(); };
     const onPointerDown = (e: PointerEvent) => {
       if (!ref.current?.contains(e.target as Node)) onClose();
     };
     document.addEventListener("pointerdown", onPointerDown, true);
     window.addEventListener("blur", close);
     window.addEventListener("resize", close);
-    document.addEventListener("scroll", close, true);
+    document.addEventListener("wheel", onScroll, { capture: true, passive: true });
+    document.addEventListener("touchmove", onScroll, { capture: true, passive: true });
     return () => {
       document.removeEventListener("pointerdown", onPointerDown, true);
       window.removeEventListener("blur", close);
       window.removeEventListener("resize", close);
-      document.removeEventListener("scroll", close, true);
+      document.removeEventListener("wheel", onScroll, true);
+      document.removeEventListener("touchmove", onScroll, true);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onClose]);
 
   const onKeyDown = (e: React.KeyboardEvent) => {
+    if (["Escape", "ArrowDown", "ArrowUp", "Home", "End", "Tab"].includes(e.key)) e.stopPropagation();
     const list = buttons();
     const at = list.indexOf(document.activeElement as HTMLButtonElement);
-    const focus = (i: number) => list[(i + list.length) % list.length]?.focus();
+    const focus = (i: number) => {
+      const button = list[(i + list.length) % list.length];
+      const menu = ref.current;
+      if (!button || !menu) return;
+      button.focus({ preventScroll: true });
+      if (button.offsetTop < menu.scrollTop) menu.scrollTop = button.offsetTop;
+      else if (button.offsetTop + button.offsetHeight > menu.scrollTop + menu.clientHeight) menu.scrollTop = button.offsetTop + button.offsetHeight - menu.clientHeight;
+    };
     switch (e.key) {
       case "Escape":
         e.preventDefault();
@@ -85,7 +98,7 @@ export default function ContextMenu({ x, y, label, items, onClose }: Props) {
     }
   };
 
-  return (
+  return createPortal(
     <div
       ref={ref}
       role="menu"
@@ -93,7 +106,7 @@ export default function ContextMenu({ x, y, label, items, onClose }: Props) {
       className="ctx"
       style={{ left: pos.left, top: pos.top }}
       onKeyDown={onKeyDown}
-      onContextMenu={(e) => e.preventDefault()}
+      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
     >
       {items.map((item, i) => {
         if (item.kind === "separator") return <div key={i} role="separator" className="sep" />;
@@ -118,6 +131,6 @@ export default function ContextMenu({ x, y, label, items, onClose }: Props) {
           </button>
         );
       })}
-    </div>
+    </div>, document.body
   );
 }

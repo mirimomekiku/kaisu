@@ -23,6 +23,17 @@ export const SHORTCUT_GROUPS: Array<{ title: string; items: Array<{ keys: string
     ],
   },
   {
+    title: "Music library",
+    items: [
+      { keys: ["Mod", "A"], action: "Select all shown songs when the song list is focused" },
+      { keys: ["Mod", "Click"], action: "Toggle a song in the selection" },
+      { keys: ["Shift", "Click"], action: "Select a range of songs" },
+      { keys: ["↑", "↓"], action: "Move between songs; hold Shift to extend selection" },
+      { keys: ["Space"], action: "Toggle the focused song in the selection" },
+      { keys: ["Esc"], action: "Clear the song selection" },
+    ],
+  },
+  {
     title: "Music player",
     items: [
       { keys: ["Mod", "Shift", "Space"], action: "Play or pause the music" },

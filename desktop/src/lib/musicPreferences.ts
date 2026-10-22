@@ -10,7 +10,13 @@ export function sanitizeMusicPreferences(raw: unknown): MusicPreferences {
   }));
 }
 export function setPreference(all: MusicPreferences, path: string, patch: Partial<MusicPreference>): MusicPreferences {
-  return sanitizeMusicPreferences({ ...all, [path]: { ...(all[path] ?? { favorite: false, rating: 0 }), ...patch } });
+  return setPreferences(all, [path], patch);
+}
+/** Clone and sanitize once, even when applying a preference to a large selection. */
+export function setPreferences(all: MusicPreferences, paths: string[], patch: Partial<MusicPreference>): MusicPreferences {
+  const next = { ...all };
+  for (const path of paths) next[path] = { ...(next[path] ?? { favorite: false, rating: 0 }), ...patch };
+  return sanitizeMusicPreferences(next);
 }
 export function relocatePreference(all: MusicPreferences, from: string, to: string): MusicPreferences {
   if (from === to || !all[from]) return all;
