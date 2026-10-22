@@ -28,11 +28,13 @@ works behind a proxy, and can check again if you installed the tools yourself. A
   again (yt-dlp carries on from where it stopped when it can) or to clear them away.
 - **Queue:** waiting downloads show their place in line. Drag one onto another to change who starts first, or give a
   single download its own speed limit.
+- Queued and restored downloads use your current proxy settings. Proxy addresses and passwords are not saved with the queue.
 
 **Stay organised**
 - **Move to an external drive:** choose a drive or folder and Kaisu moves (or copies) finished downloads there by
   itself, keeping your folders. If the drive isn't plugged in, files wait and go as soon as it appears. Nothing is
   removed until the copy has been checked.
+- Moving a song also updates its playlists, favorites, ratings, listening records and playback queue.
 - **Clean up:** remove downloads older than a number of days. Recycle Bin or Trash is the default; permanent deletion is an explicit choice. Empty the bin to reclaim disk space.
 - **Smart names:** save music as Artist / Album folders with track numbers, and tidy "(Official Video)" and similar out
   of titles.
@@ -41,21 +43,31 @@ works behind a proxy, and can check again if you installed the tools yourself. A
 - **History** shows everything you have downloaded with its size and channel. Sort and filter it, open files,
   download again, clean up entries for files that were deleted, and export the list as CSV or JSON.
 
+**Finding your way**
+- Right-click a download or history row for its actions; Shift+F10 opens the same menu from the keyboard. Selected history rows also offer batch actions.
+- Downloads can be filtered by status; History actions groups export and cleanup. File actions groups queue, conversion, copy and delete controls on downloaded files, with Open and Play kept visible.
+- Settings opens with general preferences. Choose a section or search for a setting; changes save automatically.
+
 **Music**
 - Browse downloaded music by song, album or artist, edit tags, and make playlists you can export as `.m3u8`.
+- **A quieter library:** use the view dropdown to switch between Songs, Albums, Artists, Playlists and Listening. Library filters group format, file availability, favorites and ratings; Library tools holds folders, rescanning and duplicate cleanup.
+- **Select several songs:** tick their boxes, Ctrl/Command-click rows to toggle them, or Shift-click a range. Apply tags,
+  favorites and ratings together, or play, queue and add the selection to a playlist. Selected actions groups tag, favorite, queue and playlist operations; Rate selected applies a rating. Ctrl/Command+A in the song list
+  selects all matching songs, including those off screen; Escape clears the selection. Filtering drops hidden selections.
 - **Artwork editor:** Edit tags > Choose image previews a JPEG/PNG before embedding it as the front cover. Apply one cover to an album or remove embedded artwork. Originals are replaced only after the working copy passes verification. Folder artwork stays in place.
-- **Import your collection:** Library > Music folders adds existing music without moving it. Optional watching checks for
+- **Import your collection:** Library > Library tools > Music folders adds existing music without moving it. Optional watching checks for
   changes every 15 seconds and when the window regains focus. Missing files stay listed; use the Missing files filter
   and Locate file to reconnect a moved song. Import its new containing folder first if needed.
 - **Favorites and ratings:** heart songs from the library or player, rate songs from 0 (unrated) to 5, and filter your collection. Preferences stay local and follow files you relocate.
-- **Listening dashboard:** Library > Listening shows recently played, most played songs, top artists, completed plays and measured playback time. Earlier play counts are retained; time is measured from this version onward.
+- **Listening dashboard:** Library > the Listening view shows recently played, most played songs, top artists, completed plays and measured playback time. Earlier play counts are retained; time is measured from this version onward.
 - **Smart playlists:** match all or any rules for title, artist, album, genre, format, year, play count, recently added,
   played/unplayed, favorite status or rating. Membership updates automatically; a play counts when a track finishes. Exports save the current matches.
 - **Exact duplicates:** compare file contents, choose a copy to keep, and review selected copies before moving them to the Recycle Bin or Trash.
   Permanent deletion is available explicitly. Kaisu checks that copies still match before removal; companion files are kept.
-- Play music in Kaisu with a queue, shuffle, repeat, playback speed and a sleep timer. Long tracks remember your place.
+- **Full-screen player:** use the expand button in the player bar for large artwork, synced or plain lyrics, an Up next queue, and playback controls. Click a timed lyric to seek. Escape returns to the app without restarting the song. Online lyric lookup asks for consent.
+- Play music in Kaisu with a queue, shuffle, repeat, playback speed and a sleep timer. Long tracks remember your place. Speed, sleep and mini-player controls are grouped in Playback options.
 - **Playback transitions:** Settings > Playback transitions enables next-track preloading (on by default) and optional crossfade, up to 12 seconds. Pause, mute and volume affect both songs during overlap. Short tracks use shorter fades; repeat-one and sleep-after-track do not overlap. Exact gapless timing depends on the audio format and system player.
-- **Mini-player:** use Mini in the player bar for a compact always-on-top window with playback, seek and volume controls.
+- **Mini-player:** use Playback options > Open mini-player for a compact always-on-top window with playback, seek and volume controls.
   Return to the full window without restarting playback.
 - Read saved lyrics or choose to look them up online. Measure loudness to make loud songs quieter during playback.
 - Podcasts are temporarily hidden, including background checks and automatic episode downloads. Saved subscriptions and
@@ -96,6 +108,8 @@ the first time. Type words to search, or paste a link, then choose video or audi
 - Thumbnails are fetched by Kaisu itself, through your proxy if you set one.
 - Files sent to the Recycle Bin or Trash can be restored there. If recycling fails, Kaisu reports an error and does not fall back to permanent deletion.
 - Imported music stays in its original folders. Automatic download cleanup does not use imported roots. Removing a music folder from the library keeps its files.
+- Site-rule destinations are included in the library and listed in Music folders. Previously used destinations stay registered
+  after a rule is removed; you can remove them there without deleting their files. Registering a destination does not expand automatic cleanup.
 - The Windows app is not code-signed yet, so Windows may warn you the first time you run it.
 - Kaisu is for downloading content you have the right to save. You are responsible for following the terms of the
   sites you use and the laws where you live.
