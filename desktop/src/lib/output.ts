@@ -18,7 +18,7 @@ export const LAYOUT_LABEL: Record<Layout, string> = {
 };
 
 export const NAME_LABEL: Record<NameStyle, string> = {
-  title_id: "Title [id]  (never collides)",
+  title_id: "Title [id] (never collides)",
   title: "Title",
   channel_title: "Channel - Title",
   date_title: "Date - Title",
