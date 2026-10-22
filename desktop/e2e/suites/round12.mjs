@@ -1,5 +1,20 @@
 import { open, check, calls, waitCalls, nav, done } from "../harness.mjs";
 
+if (process.env.VITE_ENABLE_PODCASTS !== "true") {
+  const page = await open({ clock: true });
+  const subscriptions = [{ id: "kept", url: "https://example.com/feed.xml", title: "Kept Show", auto: true, seen: ["1"], checked: 0 }];
+  await page.evaluate((podcasts) => localStorage.setItem("__store", JSON.stringify({ ...JSON.parse(localStorage.getItem("__store")), podcasts })), subscriptions);
+  await page.reload();
+  check("hidden: podcast navigation removed", await nav(page, "Podcasts").count() === 0);
+  await page.keyboard.press("Control+6");
+  check("hidden: podcast shortcut removed", await page.getByRole("region", { name: "Podcasts", exact: true }).count() === 0);
+  await page.clock.fastForward(6 * 60 * 60 * 1000 + 1000);
+  check("hidden: no background feed requests", (await calls(page, "podcast_fetch")).length === 0);
+  check("hidden: subscriptions preserved and automatic downloads paused", JSON.stringify(await page.evaluate(() => JSON.parse(localStorage.getItem("__store")).podcasts)) === JSON.stringify(subscriptions) && (await calls(page, "start_download")).length === 0);
+  await done();
+  process.exit(process.exitCode ?? 0);
+}
+
 const URL = "https://example.com/feed.xml";
 const episode = (id) => ({ id, title: `Episode ${id}`, url: `https://cdn.example.com/${id}.mp3`, published: "Fri, 02 Jan 2026 10:00:00 +0000", duration: 754, size: 1234 });
 const feed = { title: "Our Show", image: "https://cdn.example.com/cover.jpg", episodes: [episode("2"), episode("1")] };
