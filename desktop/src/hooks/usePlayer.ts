@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useSyncExternalStore } from "react";
-import { fileUrl, playInApp } from "../lib/api";
+import { playInApp } from "../lib/api";
 import { PlayerEngine, type PlayerState, type PlayerTime, type Track } from "../lib/audioEngine";
 import { bindMediaSession } from "../lib/mediaSession";
 import type { Positions } from "../lib/positions";
@@ -46,10 +46,7 @@ export function useCreatePlayer(onPlayed?: (track: Track) => void, onListen?: (t
       createAudio: () => { const next = new Audio(); next.preload = "auto"; return next; },
       onPlayed: (track) => playedRef.current?.(track),
       onListen: (track, seconds) => listenedRef.current?.(track, seconds),
-      resolve: async (track) => {
-        await playInApp(track.path);
-        return fileUrl(track.path);
-      },
+      resolve: (track) => playInApp(track.path),
       getPositions: () => positions.current,
       setPositions: (next) => {
         positions.current = next;

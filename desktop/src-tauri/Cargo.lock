@@ -904,6 +904,7 @@ dependencies = [
  "tokio",
  "trash",
  "url",
+ "uuid",
  "windows",
  "windows-core",
  "xz2",

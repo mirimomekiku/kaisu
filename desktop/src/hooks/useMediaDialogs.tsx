@@ -76,8 +76,8 @@ export function useMediaDialogs({ showFlash, announce, openDownloaded, onConvert
       }
       setViewer({ title: title ?? baseName(path), src: null, audio: false, path });
       try {
-        await playInApp(path);
-        setViewer((v) => (v?.path === path ? { ...v, src: fileUrl(path) } : v));
+        const src = await playInApp(path);
+        setViewer((v) => (v?.path === path ? { ...v, src } : v));
       } catch (e) {
         setViewer(null);
         showFlash(errorText(e), true);

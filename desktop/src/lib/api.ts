@@ -467,8 +467,8 @@ export interface Leftover {
 export const findLeftovers = () => invoke<Leftover[]>("find_leftovers");
 export const removeLeftovers = (paths: string[]) => invoke<Array<{ path: string; ok: boolean; error: string | null }>>("remove_leftovers", { paths });
 
-/** Lets the page show one downloaded file; then `fileUrl` gives the address to play it from. */
-export const playInApp = (path: string) => invoke<void>("play_in_app", { path });
+/** Returns a local streaming URL for one authorized media file, with byte ranges for seeking. */
+export const playInApp = (path: string) => invoke<string>("play_in_app", { path });
 export const fileUrl = (path: string) => convertFileSrc(path);
 /** Downloads the first seconds of a video in low quality, for watching before downloading it. Resolves to the file's path. */
 export const previewClip = (url: string) => invoke<string>("preview_clip", { url, proxy: currentProxy });

@@ -14,6 +14,8 @@
     "build:exe:windows": "tauri build --no-bundle --runner cargo-xwin --target x86_64-pc-windows-msvc",
     "test:smoke": "node e2e/smoke.mjs",
     "test:real": "node e2e/real/run.mjs",
+    "test:real:audit": "node e2e/real/audit.mjs",
+    "test:real:playback": "node e2e/real/playback.mjs",
     "test:real:media": "node e2e/real/media.mjs"
   },
   "dependencies": {

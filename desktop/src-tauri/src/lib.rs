@@ -11,6 +11,7 @@ mod links;
 mod loudness;
 mod lyrics;
 mod media;
+mod media_stream;
 mod meta;
 mod mini;
 mod net;
@@ -79,6 +80,7 @@ pub fn run() {
         .manage(thumbs::Thumbs::default())
         .manage(mini::MiniState::default())
         .manage(artwork::ArtworkStore::default())
+        .manage(media_stream::MediaStream::default())
         .setup(|app| {
             library_folders::restore(app.handle(), &app.state::<scope::Scope>());
             media::clean_previews(app.handle());

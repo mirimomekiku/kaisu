@@ -316,7 +316,7 @@ export async function invoke(cmd: string, args: any = {}): Promise<any> {
       return args.paths.map((path: string) => ({ path, ok: true, error: null }));
     case "play_in_app":
       if (w.__mock.playRefused) throw "That file isn't in a download folder.";
-      return;
+      return convertFileSrc(args.path);
     case "preview_clip":
       await sleep(w.__mock.previewDelay ?? 60);
       if (w.__mock.previewFail) throw "Previews wait until your downloads have finished.";

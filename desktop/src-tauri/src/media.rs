@@ -1,7 +1,7 @@
 //! Playing, previewing and converting media inside Kaisu.
 //!
-//! - **Playing:** the page shows files through Tauri's asset protocol, which only serves files it has been told about.
-//!   `play_in_app` tells it about one downloaded file at a time (a media file inside a download folder, nothing else).
+//! - **Playing:** `play_in_app` returns a capability URL for one authorized media file. The loopback stream supports
+//!   byte ranges and native decoders, including Linux decoders that cannot read the webview's custom asset scheme.
 //! - **Preview:** a short, low-quality copy of the start of a video is downloaded into the app's cache, played, and
 //!   deleted afterwards. The page never loads anything from the internet itself, so previews work through the proxy and
 //!   the same checks as every other download.
@@ -31,12 +31,11 @@ const CONVERT_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
 // ---- playing ---------------------------------------------------------------------------------
 
-/// Lets the page show one downloaded file (through the asset protocol). Refuses anything that isn't a media file inside a
-/// download folder.
+/// Prepares one media file in a registered download, moved, or imported library folder for streaming.
 #[tauri::command]
-pub fn play_in_app(app: AppHandle, scope: State<'_, Scope>, path: String) -> Result<(), String> {
+pub fn play_in_app(app: AppHandle, scope: State<'_, Scope>, stream: State<'_, crate::media_stream::MediaStream>, path: String) -> Result<String, String> {
     let real = scope.media_file(&path)?;
-    app.asset_protocol_scope().allow_file(&real).map_err(|e| format!("Couldn't prepare the file for playing: {e}"))
+    stream.authorize(&app, real)
 }
 
 // ---- preview ---------------------------------------------------------------------------------
