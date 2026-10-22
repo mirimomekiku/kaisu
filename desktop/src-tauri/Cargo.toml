@@ -36,7 +36,16 @@ url = "2.5.8"
 keyring = "4.2.0"
 lofty = "0.25.4"
 quick-xml = "0.42"
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"] }
 
+
+
+[target.'cfg(not(target_os = "windows"))'.dependencies]
+trash = "5.2.9"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-core = "0.62.2"
+windows = { version = "0.62.2", features = ["Win32_System_Com", "Win32_UI_Shell", "Win32_Foundation"] }
 
 [target."cfg(unix)".dependencies]
 libc = "0.2"

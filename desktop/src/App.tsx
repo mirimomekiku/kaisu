@@ -1,8 +1,13 @@
+import { MusicPreferencesContext, useCreateMusicPreferences } from "./hooks/useMusicPreferences";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, Loader2 } from "lucide-react";
 import AppBanners from "./components/AppBanners";
 import LibraryPage from "./components/LibraryPage";
 import PodcastsPage from "./components/PodcastsPage";
+import { FEATURES } from "./lib/features";
+import MiniPlayer from "./components/MiniPlayer";
+import { useMiniPlayer } from "./hooks/useMiniPlayer";
+import { useListening } from "./hooks/useListening";
 import PlayerBar from "./components/PlayerBar";
 import { useConfirm } from "./components/ConfirmDialog";
 import DownloadsPage from "./components/DownloadsPage";
@@ -55,7 +60,9 @@ const isFinishedStatus = (status: string) => status === "completed" || status ==
 
 export default function App() {
   const confirm = useConfirm();
-  const player = useCreatePlayer();
+  const musicPreferences = useCreateMusicPreferences();
+  const listening = useListening();
+  const player = useCreatePlayer(listening.record, listening.recordTime);
   const playerState = usePlayerState(player);
   const [page, setPage] = useState<Page>("search");
   const [defaultDir, setDefaultDir] = useState("");
@@ -70,10 +77,12 @@ export default function App() {
   const session = useSessionStats();
 
   const showFlash = useCallback((text: string, error = false) => setFlash({ text, error }), []);
+  const mini = useMiniPlayer(showFlash);
   useAutoClear(flash, setFlash, 6000);
   useAutoClear(note, setNote, 4500);
 
   const { settings, settingsRef, settingsLoaded, changeSettings, changeSettingsGuarded, ensureLyricsConsent, applyLoaded } = useAppSettings(confirm);
+  useEffect(() => { if (settingsLoaded) player.setTransitions(settings.gaplessPlayback, settings.crossfadeSeconds); }, [player, settingsLoaded, settings.gaplessPlayback, settings.crossfadeSeconds]);
   const { history, historyRef, setHistory, updateHistory } = useHistoryStore();
   const setup = useEngine({ settingsLoaded, settingsRef, changeSettings });
   const { engine } = setup;
@@ -141,7 +150,7 @@ export default function App() {
   const { existing, sizes, recheck, openDownloaded, revealDownloaded, mover, cleaner, deleteDownloaded } = files;
 
   // The music library: what was found last time, then what has changed since.
-  const library = useLibrary({ ready: files.ready, historyCount: history.length, showFlash });
+  const library = useLibrary({ ready: files.ready, historyCount: history.length, historyKey: history.map((h) => `${h.path}:${h.timestamp}`).join("\n"), showFlash });
   useLoudness({ engine: player, enabled: settings.levelVolume, tracks: library.tracks, measure: library.measure });
 
   const copyText = useCallback(
@@ -177,7 +186,7 @@ export default function App() {
     setBatchNotice: flow.setBatchNotice,
   });
 
-  const podcastsReady = files.ready && !!engine?.ready;
+  const podcastsReady = FEATURES.podcasts && files.ready && !!engine?.ready;
   const podcasts = usePodcasts({ ready: podcastsReady, outDir: effectiveOutDir, submitDownloads: actions.submitDownloads, showFlash });
 
   // Unfinished downloads left in the download folder, looked for once when nothing is running.
@@ -416,8 +425,10 @@ export default function App() {
   };
 
   return (
+    <MusicPreferencesContext.Provider value={musicPreferences}>
     <PlayerContext.Provider value={player}>
     <MediaActionsContext.Provider value={mediaDialogs.actions}>
+    {mini.mini ? <MiniPlayer engine={player} onRestore={() => void mini.change(false)} busy={mini.busy} error={flash?.error ? flash.text : undefined} /> : <>
     <div className="app">
       <Toolbar
         title={page === "settings" ? "Settings" : page === "library" ? "Library" : page === "podcasts" ? "Podcasts" : null}
@@ -513,7 +524,7 @@ export default function App() {
         />
 
         <main className="content" aria-label={page}>
-          {page === "podcasts" && <PodcastsPage api={podcasts} ready={podcastsReady} />}
+          {FEATURES.podcasts && page === "podcasts" && <PodcastsPage api={podcasts} ready={podcastsReady} />}
           {page === "search" && (
             <SearchPage
               flow={flow}
@@ -582,7 +593,7 @@ export default function App() {
             />
           )}
 
-          {page === "library" && <LibraryPage tracks={library.tracks} unmeasuredCount={library.unmeasuredCount} scanning={library.scanning} loaded={library.loaded} onScan={() => void library.scan()} onReveal={revealDownloaded} onEditTags={library.editTags} analysing={library.analysing} onAnalyse={() => void library.analyse()} onStopAnalysing={library.stopAnalysing} announce={setNote} flash={showFlash} />}
+          {page === "library" && <LibraryPage tracks={library.tracks} management={library.management} listening={listening.stats} onRelocated={(from, to) => { listening.relocate(from, to); musicPreferences.relocate(from, to); player.replacePath(from, to); updateHistory(historyRef.current.map((h) => h.path === from ? { ...h, path: to } : h)); }} unmeasuredCount={library.unmeasuredCount} scanning={library.scanning} loaded={library.loaded} onScan={() => void library.scan()} onReveal={revealDownloaded} onEditTags={async (paths, edit) => { const release = player.releaseFiles(paths); try { const results = await library.editTags(paths, edit); if (edit.artwork) player.invalidateCovers(results.filter((r) => r.ok).map((r) => r.path)); return results; } finally { release(); } }} analysing={library.analysing} onAnalyse={() => void library.analyse()} onStopAnalysing={library.stopAnalysing} announce={setNote} flash={showFlash} />}
 
           {page === "settings" && (
             <SettingsPage
@@ -607,7 +618,7 @@ export default function App() {
         </main>
       </div>
 
-      {playerState.queue.length > 0 && <PlayerBar engine={player} />}
+      {playerState.queue.length > 0 && <PlayerBar engine={player} onMini={() => void mini.change(true)} miniBusy={mini.busy} />}
 
       <StatusBar
         left={
@@ -664,7 +675,9 @@ export default function App() {
         </div>
       )}
     </div>
+    </>}
     </MediaActionsContext.Provider>
     </PlayerContext.Provider>
+    </MusicPreferencesContext.Provider>
   );
 }

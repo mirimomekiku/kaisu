@@ -83,13 +83,13 @@ export function useAppSettings(confirm: ReturnType<typeof useConfirm>) {
     async (patch: Partial<Settings>) => {
       if (patch.lyricsMode !== undefined && patch.lyricsMode !== "off" && !(await ensureLyricsConsent())) return;
       const days = patch.autoDeleteDays;
-      if (days !== undefined && days > 0 && settingsRef.current.autoDeleteDays === 0) {
+      const permanent = patch.cleanupPermanent ?? settingsRef.current.cleanupPermanent;
+      if ((days !== undefined && days > 0 && settingsRef.current.autoDeleteDays === 0) || (patch.cleanupPermanent === true && !settingsRef.current.cleanupPermanent)) {
         const answer = await confirm.ask({
-          title: "Delete old downloads automatically?",
+          title: patch.cleanupPermanent === true ? "Permanently delete during cleanup?" : "Delete old downloads automatically?",
           body: (
             <p className="m-0">
-              Downloads older than <b>{days} days</b> will be deleted from your computer, with their subtitle and lyrics files. This can't be undone, and only files Kaisu
-              downloaded are touched.
+              Downloads older than <b>{days ?? (settingsRef.current.autoDeleteDays || "the selected number of")} days</b> and their subtitle and lyrics files {permanent ? "will be permanently deleted. This can't be undone." : "will be moved to the Recycle Bin or Trash, where you can restore them. Space is reclaimed when you empty it."} Only files Kaisu downloaded are touched.
             </p>
           ),
           buttons: [

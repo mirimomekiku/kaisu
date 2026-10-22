@@ -10,10 +10,12 @@ Kaisu is a desktop downloader for videos and music (Tauri v2: Rust backend in `d
 
 ## 1. Current state in one paragraph
 
-The music player, library, lyrics, tag editor, playlists and volume leveling are committed on `main`. The podcast work started by
-CLAUDE has now been completed in the working tree: RSS parsing, subscriptions, manual/automatic downloads, persistence, a Podcasts
-page and Ctrl+6 navigation. The two small library polish items are also fixed. These changes are committed on `main` in separate feature commits (section 5).
-Native-app behavior has still not been verified in this environment; see section 6.
+The published baseline is on `main` through `45179d5`. New work in the working tree implements the user's selected
+features: imported music folders with polling and missing-file recovery, smart playlists, exact duplicate review/removal,
+and an always-on-top mini-player. Podcasts are temporarily hidden; their implementation and saved subscriptions are retained,
+and background feed checks/automatic downloads are disabled by default. See section 7 for the current changes and verification.
+The next requests add favorites/ratings, a listening dashboard and recoverable deletion (section 8), then artwork editing and preloaded/crossfade playback (section 9).
+Native-app behavior has still not been verified in this environment.
 
 ---
 
@@ -24,8 +26,8 @@ Native-app behavior has still not been verified in this environment; see section
   - `winget` is blocked. Rust, MSVC Build Tools (Desktop C++ workload) and Node were installed by hand.
   - AppLocker has an allow rule for `D:\laragon\www\kaisu\*`. Freshly built executables are **sometimes** still refused with
     `os error 4551` ("An Application Control policy has blocked this file"), e.g. `target\debug\desktop.exe` and occasionally the
-    `main.rs` test binary. **The real app (`desktop.exe`) has never been launched in this environment.** Everything Rust is
-    verified through `cargo test --lib`; everything UI through browser tests against a scripted backend.
+    `main.rs` test binary. **The real app (`desktop.exe`) has never been launched in this environment.** The published baseline used
+    `cargo test --lib`; the latest test executable is now also blocked (see section 7). UI verification uses browser tests against a scripted backend.
   - Do **not** try to bypass the policy. Run the app on a machine without Application Control to do a real end-to-end pass.
 - Every shell call starts fresh: **refresh PATH first** or `cargo` is not found:
   `$env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')`
@@ -152,7 +154,7 @@ The features suite's stale three-group shortcut assertion also now includes the 
 - Queue persistence stores `extra.proxy` unchanged, so proxy credentials can still land in `kaisu.json` despite settings using
   the credential store. Strip credentials from saved queue entries and restore the current proxy at download time.
 - Site-rule folders outside the two registered roots do not participate in library scanning or scoped media actions.
-- Library automatic rescans are driven by history count, so repeated downloads or file moves can leave stale entries.
+- Rescan finding addressed by section 7: history path/timestamp revisions now trigger scans, plus optional 15-second/focus polling.
 - Keep-both transfer naming chooses media and companion names independently, which can detach subtitles/lyrics from a renamed song.
 
 ### Other open items from earlier suggestions
@@ -184,3 +186,136 @@ screen readers); subscriptions for channels; auto-update of Kaisu itself.
   cover URLs; `engine.position` has its own subscription (it changes 4x a second) so only the bar re-renders; leveling is volume-only
   (Web Audio `createMediaElementSource` can output silence for cross-origin asset URLs); lyrics, tags and any other third-party lookup
   must stay opt-in; the page never gets to pick arbitrary paths (always `Scope::media_file`).
+
+
+## 7. Current feature work (2026-10-22, uncommitted)
+
+The user asked to hide Podcasts without deleting it and implement recommendations 1, 4, 7 and 8. No new pull/commit/push
+was requested for this work. Do not confuse the historical verification in section 6 with these new changes.
+
+### Behavior and implementation
+- **Podcasts paused:** `lib/features.ts` defaults off. Navigation, Ctrl+6 and its shortcut entry are hidden; the existing
+  hook receives `ready=false`, so startup checks, six-hour checks and automatic downloads stop. Subscription storage is
+  untouched. `VITE_ENABLE_PODCASTS=true` at build/dev time restores the retained feature and runs the full legacy round12 suite.
+- **Imported collections:** Library > Music folders uses a native Rust folder chooser; roots persist in backend-owned
+  `library-folders.json` and restore at startup. Up to 50 roots; existing scanner caps remain 100,000 tracks and eight levels.
+  Files stay in place. Imported roots allow playback, tags, lyrics, loudness and explicit duplicate removal; automatic
+  transfer/delete cleanup still uses only download/moved roots. Removing a library root never deletes its files.
+- **Watching/missing files:** optional polling every 15 seconds and on window focus, saved under `libraryWatch` (default on).
+  Cached missing entries remain under registered roots. Available/Missing/All filters, missing counts and Locate file
+  reconnect moved files. Import their containing folder first if outside existing roots. Relocation updates manual playlists,
+  listening stats, history, player queue and long-track resume positions. History path/timestamp changes trigger rescans
+  even when the history count is unchanged. Scans coalesce overlapping requests.
+- **Smart playlists:** New smart playlist in Library > Playlists; all/any rules for title/artist/album/genre/format/year,
+  play count, added-within-days and played/unplayed. Stored rules resolve against available music, sorted by title (max 5,000).
+  Rules can be edited, renamed, deleted, queued or exported as a snapshot. Existing manual playlists are retained.
+  `listening` stores completed play counts/lastPlayed; pauses/skips do not count, completed repeats do. Time rules refresh
+  at least every minute while the playlists view is mounted. `added` persists import time, falling back to modified for legacy caches.
+- **Duplicates:** explicit SHA-256 byte comparison, size prefilter, streamed reads with change checks. No removals preselected.
+  User chooses a keeper, selects other copies and reviews before permanent deletion. Backend revalidates scope and both hashes
+  before each removal; the keeper cannot be removed. Companion files stay. Successful removals purge cache entries and refresh UI.
+- **Mini-player:** Mini button in the player bar switches the existing main webview to 480x210, minimum 420x180, always on top.
+  Same audio engine and queue continue; previous/play/next/seek/volume controls work. Full window restores geometry,
+  resizability, topmost and maximized state. Failed window operations surface errors and leave restore available.
+- `library::CACHE_EDIT` serializes scan, tag, loudness, relocation and duplicate cache writes.
+
+### Current verification
+- Frontend: 260 unit tests in 30 files passed; TypeScript and the production Vite build passed (existing large-chunk warning).
+- Browser baseline regressions: features 70, flow 92, round8 56, round9 45, round10 49 and round11 12 passed (324 checks).
+- Default hidden-podcast round12: 4 checks passed, including preserved automatic subscriptions and no feed/download requests.
+- Retained enabled-podcast round12: 27 checks passed with `VITE_ENABLE_PODCASTS=true`. These changes hide/pause the feature without deleting it.
+- Total distinct checks across the selected browser suites/feature-flag variants: 387 passed.
+- New round13: 32 checks passed, including relocation across playlists/listening/history, watcher persistence/cancellation,
+  smart-playlist snapshot exports and mini-player layout at 480x210 and 420x180. Round9/round10 also passed again after final missing-album safeguards.
+- Mini-player screenshot inspected at 480x210: all controls fit; screenshot is under ignored `src-tauri/target/mini-player.png`.
+- Rust: a first compilation of the new modules succeeded, but the rebuilt library test executable was blocked before it ran.
+  Subsequent `cargo check --all-targets` was blocked at the app build script, and `cargo clippy --all-targets` was blocked at
+  cargo-clippy itself (`os error 4551`). Therefore the final Rust edits have not passed native compile/test/lint verification.
+  New Rust tests cover exact hashing/removal refusal, missing-file restoration/cache migration/root removal and imported scope isolation.
+- Native playback, native choosers and actual always-on-top/window geometry remain unverified. Application Control blocks
+  the native app. Do not bypass that policy.
+
+
+## 8. Favorites, listening dashboard and recoverable removal (2026-10-22, uncommitted)
+
+The next user selected recommendations 1, 7 and 8. These changes build on section 7; nothing was committed or pushed.
+
+- `musicPreferences` in plugin-store holds favorite/rating per file. Values are sanitized (integer 0..5, 0 unrated), empty
+  entries removed, and relocation merges favorite flags and keeps the higher rating. An App-level context shares preferences
+  across library and player. Song rows show heart/rating controls; the player bar has a heart. Library filters favorites/minimum
+  rating. Smart rules add `favorite` (yes/no) and `rating` (is/at least/at most); memberships update immediately.
+- Library > Listening is an all-time, local dashboard: total completed plays, measured listening time, distinct tracks,
+  recently played, most played songs and top artists. Counts include unavailable tracks, with playback disabled for them.
+  Metadata snapshots preserve titles/artists after files leave the library. Legacy counts remain; historical listening time
+  is not invented. Unknown per-song/artist time is shown as `--`.
+- The player engine samples actual media advance against elapsed wall time, adjusted for playback speed. It batches `onListen`
+  callbacks, flushing on pause, seek, track switch, clear and end. Buffering, seeks, paused time and suspended-clock gaps >30s
+  are excluded. Partial listening adds seconds without incrementing completed plays. New optional `ListeningEntry` fields:
+  `seconds`, `lastListened`, `title`, `artist`. Relocation/load merges counts, seconds and latest timestamps.
+- Manual file removal offers Cancel / Move to Recycle Bin / Delete file permanently. Duplicate removal defaults to recycling,
+  with an explicit permanent mode; changing mode clears review so a new review is required. Existing hash/scope checks remain.
+- Settings > Clean up adds a deletion method (recycle by default). Both automatic and manual age-based cleanup use it.
+  Enabling permanent cleanup requires confirmation. Emptying the bin is required to reclaim disk space. Imported roots remain
+  outside automatic cleanup. Companion-file removal failures now surface as warnings after the media file succeeds.
+- Rust `removal.rs` dispatches permanent unlink vs recycling with no fallback. Windows uses `IFileOperation` on a fresh COM
+  apartment, a progress sink that vetoes any PreDeleteItem lacking `TSF_DELETE_RECYCLE_IF_POSSIBLE`, explicit recycle flags,
+  and abort/error checks. Non-Windows uses `trash` 5.2.9. Windows `windows`/`windows-core` 0.62.2 are direct target dependencies.
+  The Windows guard follows the [PreDeleteItem contract](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ifileoperationprogresssink-predeleteitem).
+
+Verification completed for the available checks:
+- `npm run build`: TypeScript + Vite pass (existing large-chunk warning). `npm test`: 271 passed in 31 files.
+- `cargo check --all-targets`: passes, including the Windows COM implementation and native test sources.
+- Browser regression suites: round10 49, round11 12, round13 33, round14 26, round5 56, round8 56, round9 45:
+  **277 checks passed**, no page errors. Round13 includes favorites/ratings relocation; round14 covers persistence,
+  filters, live smart rules, dashboard totals/rankings, partial playback vs completion, pause accounting, deletion mode
+  choices, failed recycling and guarded permanent cleanup. Legacy round5 assertions now expect recoverable default copy.
+- Screenshots inspected for song preferences/player heart and the dashboard; artifacts are ignored under `src-tauri/target/`.
+- The rebuilt Rust test executable and cargo-clippy are blocked by Application Control (4551); no policy bypass attempted.
+  Native recycling/restore, playback and window behavior remain unverified in the real Tauri app.
+- Removal helpers reject directories and symbolic links; companion failures are reported as warnings. Native unit coverage
+  verifies recycling failure keeps the original and never falls back to permanent deletion, and that directories never
+  reach the recycling API (compiled, not executed due to policy).
+
+
+## 9. Artwork editor and playback transitions (2026-10-22, uncommitted)
+
+The latest user chose recommendations 3 and 7. This work builds on sections 7/8; nothing committed or pushed.
+
+### Artwork
+- Edit tags now contains a current/selected preview, Choose image, Remove embedded artwork and Keep current artwork.
+  The same action applies to all selected album songs; partial failures stay visible and can be retried. Save is blocked
+  while choosing/loading a preview. Native image selection does not write any music until Save.
+- Rust `artwork.rs`: native JPEG/PNG chooser, bounded 8 MiB read, image 0.25.10 decoding with 4096x4096 dimension and
+  64 MiB allocation limits. At most four selected byte buffers are retained behind tokens. Preview returns binary bytes;
+  closing/replacing a selection discards its token and browser URL. No arbitrary image path is accepted from the page.
+- `TagEdit.artwork` is replace-with-token or remove. Replacing preserves other picture types and replaces the front cover;
+  removal clears embedded pictures only. Shared folder covers are retained and can still appear afterward.
+- Existing copy/write/read-back/rename safety now verifies embedded image bytes/type as well as tags and duration. Failed
+  edits keep the original. Working-copy reservation uses create_new so existing files cannot be overwritten or removed;
+  library/duplicate scans exclude reserved `.kaisu-tag-tmp.` names. Up to 500 songs per edit.
+- Cover lookup prefers front covers. ImageLoader invalidation notifies rendered covers and rejects old in-flight responses.
+  Queue cover revisions refresh player/system artwork. Editing releases active/preloaded file handles and blocks reopening
+  those paths until saving completes; playback stays paused and can resume at its previous position.
+
+### Playback transitions
+- Settings > Playback transitions: `gaplessPlayback` defaults true, `crossfadeSeconds` defaults 0 (off), range 0..12.
+  Disabling preloading also disables active crossfade; the saved duration remains available for re-enabling.
+- `PlayerEngine` can create a standby audio element, pre-authorize/preload the actual successor, and promote the prepared
+  element after the outgoing track ends without resolving it again. Timing is browser/format-dependent; sample-accurate
+  gapless playback is not guaranteed. No Web Audio graph is used (asset-protocol compatibility).
+- Crossfade monitors media position every 40 ms, capped at half each song's duration, and uses complementary linear gains.
+  Per-track loudness gain and global volume/mute are applied to both decks. A completed outgoing tail is counted once;
+  interrupted tails retain resume positions without a completion. Listening seconds are gain-weighted during overlap to
+  avoid doubling total listening time. Incoming UI/queue/Media Session represent the incoming song from promotion onward.
+- Pause/resume and buffering pause/resume both decks. Seek, manual track changes, queue-order changes, disabling transitions,
+  clear and disposal cancel outgoing tails or stale preloads. Next failures leave the current song playing and fall back to
+  normal loading at the boundary. Repeat-one and sleep-after-track do not overlap; repeat-all can preload the first track.
+- Current cover-only metadata updates do not invalidate a prepared successor. Source-load tokens prevent canceled loads
+  and promotions from resurrecting playback or reopening a file during editing.
+
+### Verification
+- Frontend unit tests/build in progress; affected browser suites pending final results.
+- Rust library tests ran successfully: 170 passed, 1 ignored, including image bounds/decoding, verified artwork add/remove,
+  invalid artwork preserving originals, working-copy collision protection, and previous removal/scope tests.
+- Clippy remains blocked by Application Control (4551). Native Tauri window/audio/chooser integration remains unverified;
+  real browser audio is exercised through the scripted-backend suites. Do not bypass the policy.

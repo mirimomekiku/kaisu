@@ -615,7 +615,10 @@ export default function SettingsPage({ settings, effectiveOutDir, engine, engine
         )}
       </Group>
 
-      <Group title="Clean up" hint="Delete old downloads for good, so your disk doesn't fill up. Only files Kaisu downloaded are touched.">
+      <Group title="Clean up" hint="Remove old downloads. Only files Kaisu downloaded are touched; imported music is excluded.">
+        <Row label="Deletion method" hint="Recycle Bin or Trash allows recovery. Space is reclaimed when you empty it. If recycling fails, files stay in place.">
+          <select className="field" aria-label="Cleanup deletion method" value={settings.cleanupPermanent ? "permanent" : "trash"} onChange={(e) => onChange({ cleanupPermanent: e.target.value === "permanent" })}><option value="trash">Recycle Bin or Trash</option><option value="permanent">Permanently delete</option></select>
+        </Row>
         <Row label="Delete downloads older than">
           <select value={settings.autoDeleteDays} onChange={(e) => onChange({ autoDeleteDays: Number(e.target.value) })} className="field" aria-label="Delete downloads older than">
             {DELETE_AFTER_CHOICES.map((d) => (
@@ -694,6 +697,10 @@ export default function SettingsPage({ settings, effectiveOutDir, engine, engine
         )}
       </Group>
 
+      <Group title="Playback transitions" hint="Preload the next queued song to reduce gaps. Exact transitions depend on the audio format and system player.">
+        <div className="pref-row"><label className="flex items-center gap-2"><input type="checkbox" aria-label="Gapless playback" checked={settings.gaplessPlayback} onChange={(e) => onChange({ gaplessPlayback: e.target.checked })} />Gapless playback (preload next track)</label></div>
+        <Row label="Crossfade" hint="Optional overlap between songs. Short tracks use a shorter fade. Sleep after this track and repeat-one play without overlap."><select className="field" aria-label="Crossfade duration" disabled={!settings.gaplessPlayback} value={settings.crossfadeSeconds} onChange={(e) => onChange({ crossfadeSeconds: Number(e.target.value) })}>{[0, 1, 2, 3, 4, 5, 6, 8, 10, 12].map((n) => <option key={n} value={n}>{n === 0 ? "Off" : `${n} seconds`}</option>)}</select></Row>
+      </Group>
       <Group title="Helpers">
         <div className="pref-row">
           <label className="flex items-center gap-2">

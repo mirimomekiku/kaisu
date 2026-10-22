@@ -262,9 +262,10 @@ export interface DeleteResult {
   path: string;
   ok: boolean;
   error: string | null;
+  warning?: string | null;
 }
 /** Deletes downloaded files (and their subtitle/lyrics files) from the download folder, and from the moved-to folder when `includeMoved` is set. */
-export const deleteFiles = (paths: string[], includeMoved: boolean) => invoke<DeleteResult[]>("delete_files", { paths, includeMoved });
+export const deleteFiles = (paths: string[], includeMoved: boolean, permanent = false) => invoke<DeleteResult[]>("delete_files", { paths, includeMoved, permanent });
 export const openFile = (path: string) => invoke<void>("open_file", { path });
 export const revealFile = (path: string) => invoke<void>("reveal_file", { path });
 export const openUrl = (url: string) => invoke<void>("open_url", { url });
@@ -341,6 +342,8 @@ export const checkSetup = () => invoke<SetupInfo>("check_setup");
 // ---- the music library ----
 
 export interface LibTrack {
+  added?: number;
+  missing?: boolean;
   path: string;
   title: string;
   artist: string;
@@ -369,6 +372,22 @@ export interface LibTrack {
 
 /** What was found by the last scan, at once. */
 export const libraryLoad = () => invoke<LibTrack[]>("library_load");
+
+export interface MusicFolder { path: string; available: boolean }
+export const libraryFolders = () => invoke<MusicFolder[]>("library_folders");
+export const libraryAddFolder = () => invoke<MusicFolder[]>("library_add_folder");
+export const libraryRemoveFolder = (path: string) => invoke<MusicFolder[]>("library_remove_folder", { path });
+export interface RelocatedTrack { from: string; track: LibTrack }
+export const libraryLocate = (path: string) => invoke<RelocatedTrack | null>("library_locate", { path });
+export interface DuplicateGroup { hash: string; size: number; paths: string[] }
+export interface DuplicateScan { groups: DuplicateGroup[]; skipped: number }
+export function libraryDuplicates(onProgress: (done: number, total: number) => void) {
+  const channel = new Channel<{ done: number; total: number }>();
+  channel.onmessage = ({ done, total }) => onProgress(done, total);
+  return invoke<DuplicateScan>("library_duplicates", { onProgress: channel });
+}
+export const libraryRemoveDuplicates = (keep: string, paths: string[], hash: string, permanent = false) => invoke<Array<{ path: string; ok: boolean; error: string | null }>>("library_remove_duplicates", { keep, paths, hash, permanent });
+export const setMiniMode = (mini: boolean) => invoke<void>("set_mini_mode", { mini });
 
 /** Looks through the download folders for sound files, reading what is new or changed. */
 export function libraryScan(onProgress: (done: number, total: number) => void) {
@@ -460,3 +479,8 @@ export function runSetup(onEvent: (e: SetupEvent) => void) {
   channel.onmessage = onEvent;
   return invoke<EngineInfo>("run_setup", { onEvent: channel, proxy: currentProxy });
 }
+
+export interface ArtworkChoice { token: string; name: string }
+export const libraryChooseArtwork = () => invoke<ArtworkChoice | null>("library_choose_artwork");
+export const libraryArtworkPreview = (token: string) => invoke<ArrayBuffer>("library_artwork_preview", { token });
+export const libraryDiscardArtwork = (token: string) => invoke<void>("library_discard_artwork", { token });

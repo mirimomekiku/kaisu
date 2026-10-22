@@ -169,6 +169,7 @@ export async function invoke(cmd: string, args: any = {}): Promise<any> {
       const allowed = [f.download, ...(args.includeMoved && f.moved ? [f.moved] : [])];
       (w.__mock.deleteCalls ??= []).push({ ...JSON.parse(JSON.stringify(args)), allowed });
       return args.paths.map((p: string) => {
+        if (w.__mock.recycleFail && !args.permanent) return { path: p, ok: false, error: "Couldn't move the file to the Recycle Bin. The file was not permanently deleted." };
         if (w.__mock.deleteFail) return { path: p, ok: false, error: "Couldn't delete it: permission denied" };
         (w.__mock.missing ??= []).push(p);
         return { path: p, ok: true, error: null };
@@ -197,8 +198,46 @@ export async function invoke(cmd: string, args: any = {}): Promise<any> {
       (w.__mock.lyrics ??= {})[args.path] = found;
       return found;
     }
+    case "library_folders":
+      return structuredClone(w.__mock.musicFolders ?? []);
+    case "library_add_folder": {
+      if (w.__mock.folderFail) throw "Couldn't open that folder.";
+      const path = w.__mock.importFolder;
+      const folders = (w.__mock.musicFolders ??= []);
+      if (path && !folders.some((f: any) => f.path === path)) {
+        folders.push({ path, available: true });
+        w.__mock.library = [...(w.__mock.library ?? []), ...(w.__mock.importTracks ?? [])];
+      }
+      return structuredClone(folders);
+    }
+    case "library_remove_folder":
+      w.__mock.musicFolders = (w.__mock.musicFolders ?? []).filter((f: any) => f.path !== args.path);
+      w.__mock.library = (w.__mock.library ?? []).filter((t: any) => !t.path.startsWith(args.path + "/"));
+      return structuredClone(w.__mock.musicFolders);
+    case "library_locate": {
+      const track = w.__mock.relocations?.[args.path];
+      if (!track) return null;
+      w.__mock.library = [...(w.__mock.library ?? []).filter((t: any) => t.path !== args.path && t.path !== track.path), track];
+      return { from: args.path, track };
+    }
+    case "library_duplicates":
+      args.onProgress.onmessage({ done: 2, total: 2 });
+      await sleep(30);
+      return { groups: w.__mock.duplicateGroups ?? [], skipped: w.__mock.duplicateSkipped ?? 0 };
+    case "library_remove_duplicates": {
+      if (w.__mock.recycleFail && !args.permanent) throw "Couldn't move the file to the Recycle Bin. The file was not permanently deleted.";
+      if (w.__mock.duplicateFail) throw "A copy changed since comparison. Compare again before removing it.";
+      const results = args.paths.map((path: string) => ({ path, ok: path !== args.keep, error: path === args.keep ? "Keep this copy." : null }));
+      const removed = results.filter((r: any) => r.ok).map((r: any) => r.path);
+      w.__mock.library = (w.__mock.library ?? []).filter((t: any) => !removed.includes(t.path));
+      return results;
+    }
+    case "set_mini_mode":
+      if (w.__mock.miniFail) throw "Couldn't change the window size.";
+      w.__mock.mini = args.mini;
+      return;
     case "library_load":
-      return w.__mock.library ?? [];
+      return structuredClone(w.__mock.library ?? []);
     case "library_scan": {
       const ch: Channel = args.onProgress;
       const found = w.__mock.library ?? [];
@@ -208,8 +247,15 @@ export async function invoke(cmd: string, args: any = {}): Promise<any> {
         await sleep(w.__mock.scanDelay ?? 20);
       }
       w.__mock.scanning = false;
-      return w.__mock.library ?? [];
+      return structuredClone(w.__mock.library ?? []);
     }
+    case "library_choose_artwork":
+      if (w.__mock.artworkFail) throw "Choose a valid JPEG or PNG image up to 8 MB.";
+      return w.__mock.cancelArtwork ? null : { token: "art-test", name: "Album cover.png" };
+    case "library_artwork_preview":
+      return Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="), (c) => c.charCodeAt(0)).buffer;
+    case "library_discard_artwork":
+      (w.__mock.discardedArtwork ??= []).push(args.token); return;
     case "library_edit_tags": {
       (w.__mock.tagEdits ??= []).push({ paths: args.paths, edit: JSON.parse(JSON.stringify(args.edit)) });
       await sleep(w.__mock.tagDelay ?? 30);
@@ -219,7 +265,8 @@ export async function invoke(cmd: string, args: any = {}): Promise<any> {
         const at = lib.findIndex((t) => t.path === path);
         const field: Record<string, string> = { title: "title", artist: "artist", album: "album", album_artist: "album_artist", genre: "genre" };
         const track = { ...lib[at] };
-        for (const [k, v] of Object.entries(args.edit as Record<string, string>)) {
+        for (const [k, v] of Object.entries(args.edit as Record<string, any>)) {
+          if (k === "artwork") { track.has_cover = v.action === "replace"; continue; }
           if (field[k]) track[field[k]] = v;
           else track[k] = v === "" ? null : Number(v);
         }

@@ -1,9 +1,11 @@
+import { sanitizeMusicPreferences, type MusicPreferences } from "./musicPreferences";
 import { load, type Store } from "@tauri-apps/plugin-store";
 import { secretDelete, secretGet, secretSet } from "./api";
 import { joinProxyPassword, splitProxyPassword } from "./proxy";
 import type { AudioFormat, Browser, CloseMode, CoverMode, ExtraOptions, Layout, LyricsMode, MoveConflict, MoveMode, NameStyle, Preset, SearchSource, SponsorBlock } from "./api";
 import { sanitizePresets, type FormatPreset } from "./presets";
 import { sanitizePlaylists, type Playlist } from "./playlists";
+import { sanitizeListening, type Listening } from "./listening";
 import { sanitizePodcasts, type PodcastSubscription } from "./podcasts";
 import type { HistorySort } from "./history";
 import type { ScheduleRule } from "./schedule";
@@ -65,6 +67,8 @@ export interface Settings {
   warnDuplicates: boolean;
   /** Play loud songs a little quieter so the volume stays even. */
   levelVolume: boolean;
+  gaplessPlayback: boolean;
+  crossfadeSeconds: number;
   watchClipboard: boolean;
   closeMode: CloseMode;
   theme: Theme;
@@ -89,6 +93,7 @@ export interface Settings {
   autoDeleteDays: number;
   /** Also clean the folder downloads are moved to. */
   autoDeleteMoved: boolean;
+  cleanupPermanent: boolean;
   // Network and searching.
   searchSource: SearchSource;
   proxy: string;
@@ -152,6 +157,8 @@ export const DEFAULT_SETTINGS: Settings = {
   notifyWhenDone: true,
   warnDuplicates: true,
   levelVolume: false,
+  gaplessPlayback: true,
+  crossfadeSeconds: 0,
   watchClipboard: true,
   closeMode: "downloads",
   theme: "aqua",
@@ -168,6 +175,7 @@ export const DEFAULT_SETTINGS: Settings = {
   moveConflict: "keep_both",
   autoDeleteDays: 0,
   autoDeleteMoved: false,
+  cleanupPermanent: false,
   searchSource: "youtube",
   proxy: "",
   schedule: [],
@@ -215,6 +223,9 @@ export async function loadSettings(): Promise<Settings> {
     merged.autoDeleteDays = Math.min(3650, Math.max(0, Math.round(Number(merged.autoDeleteDays) || 0)));
     // Before language choice existed there was one on/off switch for English subtitles.
     if (saved?.subtitles === true && saved.subtitleMode === undefined) merged.subtitleMode = "embed";
+    merged.gaplessPlayback = merged.gaplessPlayback !== false;
+    merged.crossfadeSeconds = Math.min(12, Math.max(0, Number(merged.crossfadeSeconds) || 0));
+    merged.cleanupPermanent = merged.cleanupPermanent === true;
     merged.lyricsConsent = merged.lyricsConsent === true;
     merged.siteRules = sanitizeSiteRules(saved?.siteRules);
     merged.proxy = typeof merged.proxy === "string" ? merged.proxy : "";
@@ -371,6 +382,23 @@ export async function loadPlaylists(): Promise<Playlist[]> {
   }
 }
 
+export async function loadListening(): Promise<Listening> {
+  try { return sanitizeListening(await (await getStore()).get("listening")); }
+  catch (e) { console.warn("Could not read listening history", e); return {}; }
+}
+export async function saveListening(listening: Listening) {
+  try { await (await getStore()).set("listening", listening); }
+  catch (e) { console.warn("Could not save listening history", e); }
+}
+export async function loadLibraryWatch(): Promise<boolean> {
+  try { return (await (await getStore()).get("libraryWatch")) !== false; }
+  catch { return true; }
+}
+export async function saveLibraryWatch(watch: boolean) {
+  try { await (await getStore()).set("libraryWatch", watch); }
+  catch (e) { console.warn("Could not save library watching", e); }
+}
+
 export async function loadPodcasts(): Promise<PodcastSubscription[]> {
   try {
     return sanitizePodcasts(await (await getStore()).get("podcasts"));
@@ -428,4 +456,13 @@ export async function saveQueue(queue: SavedDownload[]) {
   } catch (e) {
     console.warn("Could not save the queue", e);
   }
+}
+
+export async function loadMusicPreferences(): Promise<MusicPreferences> {
+  try { return sanitizeMusicPreferences(await (await getStore()).get("musicPreferences")); }
+  catch { return {}; }
+}
+export async function saveMusicPreferences(value: MusicPreferences) {
+  try { await (await getStore()).set("musicPreferences", value); }
+  catch (e) { console.warn("Could not save favorites and ratings", e); }
 }

@@ -33,7 +33,7 @@ works behind a proxy, and can check again if you installed the tools yourself. A
 - **Move to an external drive:** choose a drive or folder and Kaisu moves (or copies) finished downloads there by
   itself, keeping your folders. If the drive isn't plugged in, files wait and go as soon as it appears. Nothing is
   removed until the copy has been checked.
-- **Clean up:** optionally delete downloads older than a number of days so your disk doesn't fill up.
+- **Clean up:** remove downloads older than a number of days. Recycle Bin or Trash is the default; permanent deletion is an explicit choice. Empty the bin to reclaim disk space.
 - **Smart names:** save music as Artist / Album folders with track numbers, and tidy "(Official Video)" and similar out
   of titles.
 - Files are sorted into folders and named the way you like (by channel, by year, video and audio apart, and so on).
@@ -41,13 +41,25 @@ works behind a proxy, and can check again if you installed the tools yourself. A
 - **History** shows everything you have downloaded with its size and channel. Sort and filter it, open files,
   download again, clean up entries for files that were deleted, and export the list as CSV or JSON.
 
-**Music and podcasts**
+**Music**
 - Browse downloaded music by song, album or artist, edit tags, and make playlists you can export as `.m3u8`.
+- **Artwork editor:** Edit tags > Choose image previews a JPEG/PNG before embedding it as the front cover. Apply one cover to an album or remove embedded artwork. Originals are replaced only after the working copy passes verification. Folder artwork stays in place.
+- **Import your collection:** Library > Music folders adds existing music without moving it. Optional watching checks for
+  changes every 15 seconds and when the window regains focus. Missing files stay listed; use the Missing files filter
+  and Locate file to reconnect a moved song. Import its new containing folder first if needed.
+- **Favorites and ratings:** heart songs from the library or player, rate songs from 0 (unrated) to 5, and filter your collection. Preferences stay local and follow files you relocate.
+- **Listening dashboard:** Library > Listening shows recently played, most played songs, top artists, completed plays and measured playback time. Earlier play counts are retained; time is measured from this version onward.
+- **Smart playlists:** match all or any rules for title, artist, album, genre, format, year, play count, recently added,
+  played/unplayed, favorite status or rating. Membership updates automatically; a play counts when a track finishes. Exports save the current matches.
+- **Exact duplicates:** compare file contents, choose a copy to keep, and review selected copies before moving them to the Recycle Bin or Trash.
+  Permanent deletion is available explicitly. Kaisu checks that copies still match before removal; companion files are kept.
 - Play music in Kaisu with a queue, shuffle, repeat, playback speed and a sleep timer. Long tracks remember your place.
+- **Playback transitions:** Settings > Playback transitions enables next-track preloading (on by default) and optional crossfade, up to 12 seconds. Pause, mute and volume affect both songs during overlap. Short tracks use shorter fades; repeat-one and sleep-after-track do not overlap. Exact gapless timing depends on the audio format and system player.
+- **Mini-player:** use Mini in the player bar for a compact always-on-top window with playback, seek and volume controls.
+  Return to the full window without restarting playback.
 - Read saved lyrics or choose to look them up online. Measure loudness to make loud songs quieter during playback.
-- Subscribe to a podcast's RSS feed and download individual episodes, or turn on automatic downloads for new episodes.
-  Existing episodes are not downloaded when you subscribe. Feeds are checked at startup and every six hours while Kaisu is open.
-  Episodes keep their original audio format and save under `Podcasts/<show>` in your download folder. Press Ctrl+6 to open Podcasts.
+- Podcasts are temporarily hidden, including background checks and automatic episode downloads. Saved subscriptions and
+  the implementation are retained.
 
 **Stay in control**
 - Run in the background from the tray icon, get a notification when downloads finish, or have Kaisu open the folder,
@@ -82,7 +94,8 @@ the first time. Type words to search, or paste a link, then choose video or audi
   spells them (Settings shows the list). Anything that runs programs or reads or writes files at a path you give is refused.
 - Looking up lyrics is off until you agree: it sends the song's artist and title to the free LRCLIB service (lrclib.net).
 - Thumbnails are fetched by Kaisu itself, through your proxy if you set one.
-- Subscribing to a podcast contacts that feed website through your proxy. Unsubscribing stops checks and keeps downloaded episodes.
+- Files sent to the Recycle Bin or Trash can be restored there. If recycling fails, Kaisu reports an error and does not fall back to permanent deletion.
+- Imported music stays in its original folders. Automatic download cleanup does not use imported roots. Removing a music folder from the library keeps its files.
 - The Windows app is not code-signed yet, so Windows may warn you the first time you run it.
 - Kaisu is for downloading content you have the right to save. You are responsible for following the terms of the
   sites you use and the laws where you live.

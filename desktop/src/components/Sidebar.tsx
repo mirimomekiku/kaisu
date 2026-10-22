@@ -1,5 +1,6 @@
 import { Download, Film, History as HistoryIcon, Library as LibraryIcon, Podcast, Search, Settings as SettingsIcon, type LucideIcon } from "lucide-react";
 import Picture from "./Picture";
+import { FEATURES } from "../lib/features";
 
 export type Page = "search" | "downloads" | "history" | "library" | "podcasts" | "settings";
 
@@ -45,7 +46,7 @@ export default function Sidebar({ page, onNavigate, active, total, historyCount,
         <Item icon={HistoryIcon} label="History" page="history" current={page} count={historyCount} onNavigate={onNavigate} />
         <div className="source-header">Music</div>
         <Item icon={LibraryIcon} label="Library" page="library" current={page} count={songCount} onNavigate={onNavigate} />
-        <Item icon={Podcast} label="Podcasts" page="podcasts" current={page} onNavigate={onNavigate} />
+        {FEATURES.podcasts && <Item icon={Podcast} label="Podcasts" page="podcasts" current={page} onNavigate={onNavigate} />}
         <div className="source-header">Kaisu</div>
         <Item icon={SettingsIcon} label="Settings" page="settings" current={page} onNavigate={onNavigate} />
       </nav>

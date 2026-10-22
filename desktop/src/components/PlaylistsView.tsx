@@ -1,14 +1,19 @@
+import { useMusicPreferences } from "../hooks/useMusicPreferences";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { ArrowDown, ArrowLeft, ArrowUp, Download, ListEnd, ListMusic, ListStart, Pencil, Play, Trash2, X } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { PlaylistsApi } from "../hooks/usePlaylists";
 import { errorText, exportText, type LibTrack } from "../lib/api";
 import { formatClock } from "../lib/format";
 import { baseName } from "../lib/mediaKind";
 import { m3uFileName, toM3u, type Playlist } from "../lib/playlists";
 import Sheet from "./Sheet";
+import SmartPlaylistEditor from "./SmartPlaylistEditor";
+import { smartTracks } from "../lib/smartPlaylists";
+import type { Listening } from "../lib/listening";
 
 interface Props {
+  listening: Listening;
   api: PlaylistsApi;
   /** Every song in the library, by path. */
   byPath: Map<string, LibTrack>;
@@ -22,15 +27,31 @@ interface Props {
 const count = (n: number) => `${n} song${n === 1 ? "" : "s"}`;
 
 /** Playlists: made from the library, played in order, and exported as .m3u8. */
-export default function PlaylistsView({ api, byPath, onPlay, onNext, onAdd, announce, flash }: Props) {
+export default function PlaylistsView({ api, byPath, listening, onPlay, onNext, onAdd, announce, flash }: Props) {
+  const preferences = useMusicPreferences()?.preferences;
   const [openId, setOpenId] = useState<string | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const open = api.playlists.find((p) => p.id === openId) ?? null;
+  const [smartEdit, setSmartEdit] = useState<Playlist | "new" | null>(null);
+  const [minute, tick] = useState(0);
+  useEffect(() => { const timer = setInterval(() => tick((n) => n + 1), 60_000); return () => clearInterval(timer); }, []);
+  const resolved = useMemo(() => api.playlists.map((p) => p.smart ? { ...p, paths: smartTracks([...byPath.values()], p.smart, listening, Date.now(), preferences).map((t) => t.path) } : p), [api.playlists, byPath, listening, minute, preferences]);
+  const open = resolved.find((p) => p.id === openId) ?? null;
+  const smartDialog = smartEdit && <SmartPlaylistEditor initial={smartEdit === "new" ? undefined : smartEdit.smart} initialName={smartEdit === "new" ? "" : smartEdit.name} onClose={() => setSmartEdit(null)} onSave={(name, rules) => {
+    if (smartEdit === "new") {
+      const made = api.create(name, [], rules);
+      if ("problem" in made) return made.problem;
+      setOpenId(made.playlist.id);
+      announce({ title: "Smart playlist created", subtitle: name });
+      return null;
+    }
+    return api.rename(smartEdit.id, name) ?? api.editSmart(smartEdit.id, rules);
+  }} />;
 
   if (!open) {
     return (
-      <div className="lib-scroll">
+      <><div className="lib-scroll">
+        <div className="lib-tools"><button className="btn small" disabled={!api.loaded} onClick={() => setSmartEdit("new")}>New smart playlist</button></div>
         {api.playlists.length === 0 ? (
           <div className="empty" style={{ minHeight: 200 }}>
             <div className="big">
@@ -41,23 +62,23 @@ export default function PlaylistsView({ api, byPath, onPlay, onNext, onAdd, anno
           </div>
         ) : (
           <ul className="artist-list" aria-label="Playlists">
-            {api.playlists.map((p) => (
+            {resolved.map((p) => (
               <li key={p.id}>
                 <button type="button" className="artist-row" aria-label={`Open ${p.name}`} onClick={() => setOpenId(p.id)}>
                   <b className="truncate">{p.name}</b>
-                  <span className="dim">{count(p.paths.length)}</span>
+                  <span className="dim">{p.smart ? "Smart · " : ""}{count(p.paths.length)}</span>
                 </button>
               </li>
             ))}
           </ul>
         )}
-      </div>
+      </div>{smartDialog}</>
     );
   }
 
   const found = open.paths.flatMap((path) => {
     const t = byPath.get(path);
-    return t ? [t] : [];
+    return t && !t.missing ? [t] : [];
   });
   const missing = open.paths.length - found.length;
   const total = found.reduce((s, t) => s + (t.duration > 0 ? t.duration : 0), 0);
@@ -85,7 +106,7 @@ export default function PlaylistsView({ api, byPath, onPlay, onNext, onAdd, anno
   };
 
   return (
-    <div className="lib-scroll">
+    <><div className="lib-scroll">
       <div className="album-detail">
         <div className="flex flex-col gap-1.5 min-w-0">
           <button type="button" className="btn small w-fit" onClick={back}>
@@ -97,7 +118,9 @@ export default function PlaylistsView({ api, byPath, onPlay, onNext, onAdd, anno
             {total > 0 ? ` · ${formatClock(total)}` : ""}
             {missing > 0 ? ` · ${missing} not in the library now` : ""}
           </div>
+          {open.smart && <p className="dim">Smart playlist · automatically matches {open.smart.match === "all" ? "all" : "any"} of {open.smart.rules.length} rules. Up to 5,000 available songs, sorted by title.</p>}
           <div className="flex gap-2 flex-wrap">
+            {open.smart && <button className="btn small" onClick={() => setSmartEdit(open)}>Edit rules</button>}
             <button type="button" className="btn small primary" disabled={found.length === 0} onClick={() => onPlay(found)}>
               <Play className="w-3 h-3" /> Play playlist
             </button>
@@ -138,7 +161,7 @@ export default function PlaylistsView({ api, byPath, onPlay, onNext, onAdd, anno
           </div>
         </div>
         {open.paths.length === 0 ? (
-          <p className="dim">This playlist is empty. Add songs from the Songs or Albums view.</p>
+          <p className="dim">{open.smart ? "No songs match these rules. Edit the rules or add more music to your library." : "This playlist is empty. Add songs from the Songs or Albums view."}</p>
         ) : (
           <ol className="album-tracks" aria-label="Tracks">
             {open.paths.map((path, i) => {
@@ -147,7 +170,7 @@ export default function PlaylistsView({ api, byPath, onPlay, onNext, onAdd, anno
               return (
                 <li key={path} className="lib-row album-track">
                   <span className="num dim mono">{i + 1}</span>
-                  {t ? (
+                  {t && !t.missing ? (
                     <button type="button" className="lib-title link truncate" aria-label={`Play ${title}`} onClick={() => onPlay(found.slice(found.indexOf(t)))}>
                       {title}
                     </button>
@@ -157,7 +180,7 @@ export default function PlaylistsView({ api, byPath, onPlay, onNext, onAdd, anno
                     </span>
                   )}
                   <span className="num mono">{t && t.duration > 0 ? formatClock(t.duration) : ""}</span>
-                  <span className="lib-actions">
+                  {!open.smart && <span className="lib-actions">
                     <button type="button" className="row-btn" aria-label={`Move ${title} up`} disabled={i === 0} onClick={() => api.move(open.id, i, i - 1)}>
                       <ArrowUp className="w-3 h-3" />
                     </button>
@@ -167,7 +190,7 @@ export default function PlaylistsView({ api, byPath, onPlay, onNext, onAdd, anno
                     <button type="button" className="row-btn" aria-label={`Remove ${title} from the playlist`} onClick={() => api.removeTrack(open.id, i)}>
                       <X className="w-3 h-3" />
                     </button>
-                  </span>
+                  </span>}
                 </li>
               );
             })}
@@ -175,7 +198,7 @@ export default function PlaylistsView({ api, byPath, onPlay, onNext, onAdd, anno
         )}
       </div>
       {renaming && <RenameSheet playlist={open} onRename={(name) => api.rename(open.id, name)} onClose={() => setRenaming(false)} />}
-    </div>
+    </div>{smartDialog}</>
   );
 }
 

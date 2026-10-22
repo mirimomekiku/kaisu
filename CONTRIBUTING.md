@@ -37,6 +37,14 @@ npm run test:smoke               # launches the built exe and checks it stays up
 `test:ui` needs Chrome (or `KAISU_E2E_BROWSER=/path/to/chrome`). `test:real` needs `cargo install tauri-driver
 --locked`, `webkit2gtk-driver` and a display (`xvfb-run -a` on servers). Terminal app: `cd tui && uv run python -m unittest`.
 
+Podcasts are retained behind `VITE_ENABLE_PODCASTS=true`; the default build hides their UI and pauses background checks.
+Use the same environment variable with `npm run test:ui -- round12` to run the retained subscription/download regression suite.
+Without it, round12 checks the hidden/paused state. `round13` covers imported music, polling, relocation, smart playlists,
+duplicate review and the mini-player through the browser backend mock. Native choosers, file hashes/deletion and window
+geometry still require Rust tests and a real Tauri run on a machine whose application policy permits them.
+`round14` covers favorites/ratings, listening statistics and recycle/permanent removal choices. Windows recycling uses
+a guarded native shell operation; other platforms use the `trash` crate. Never fall back to permanent removal on a recycling error.
+
 ## How it fits together
 
 - The frontend never builds command lines. It sends typed requests; `download.rs` builds yt-dlp arguments from an

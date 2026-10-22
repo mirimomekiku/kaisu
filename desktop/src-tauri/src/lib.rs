@@ -1,19 +1,24 @@
+mod artwork;
 mod custom_args;
 mod download;
+mod duplicates;
 mod engine;
 mod files;
 mod leftovers;
 mod library;
+mod library_folders;
 mod links;
 mod loudness;
 mod lyrics;
 mod media;
 mod meta;
+mod mini;
 mod net;
 mod output;
 mod podcast;
 mod power;
 mod proc;
+mod removal;
 mod scope;
 mod secrets;
 mod search;
@@ -72,7 +77,10 @@ pub fn run() {
         .manage(scope::Scope::default())
         .manage(power::PowerTimer::default())
         .manage(thumbs::Thumbs::default())
+        .manage(mini::MiniState::default())
+        .manage(artwork::ArtworkStore::default())
         .setup(|app| {
+            library_folders::restore(app.handle(), &app.state::<scope::Scope>());
             media::clean_previews(app.handle());
             tray::init(app.handle());
             Ok(())
@@ -107,7 +115,17 @@ pub fn run() {
             custom_args::allowed_custom_options,
             custom_args::check_custom_args,
             leftovers::find_leftovers,
+            artwork::library_choose_artwork,
+            artwork::library_artwork_preview,
+            artwork::library_discard_artwork,
             library::library_load,
+            library_folders::library_folders,
+            library_folders::library_add_folder,
+            library_folders::library_remove_folder,
+            library_folders::library_locate,
+            duplicates::library_duplicates,
+            duplicates::library_remove_duplicates,
+            mini::set_mini_mode,
             library::library_scan,
             library::library_cover,
             lyrics::lyrics_read,
