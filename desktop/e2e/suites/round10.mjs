@@ -1,5 +1,5 @@
 // Step 4 of the music player: lyrics, the tag editor and playlists.
-import { open, check, calls, waitCalls, nav, now, done } from "../harness.mjs";
+import { chooseMenu, open, check, calls, waitCalls, nav, now, done } from "../harness.mjs";
 
 const DL = "/home/u/Downloads";
 const DAY = 86_400_000;
@@ -95,7 +95,7 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 page = await open({ store: { warnDuplicates: false }, mock: { library: LIB } });
 await nav(page, "Library").click();
 await library(page).getByRole("list", { name: "Songs" }).waitFor();
-await library(page).getByRole("button", { name: "Edit tags of Da Funk" }).click();
+await chooseMenu(page, "Actions for Da Funk", "Edit tags of Da Funk");
 const ed = () => editor(page, "Edit tags");
 await ed().waitFor();
 check("tags: the editor starts with the song's own tags", (await ed().getByLabel("Title").inputValue()) === "Da Funk" && (await ed().getByLabel("Artist", { exact: true }).inputValue()) === "Daft Punk" && (await ed().getByLabel("Year").inputValue()) === "1997" && (await ed().getByLabel("Track number").inputValue()) === "1");
@@ -116,7 +116,7 @@ await page.context().close();
 // cancelling changes nothing
 page = await open({ store: { warnDuplicates: false }, mock: { library: LIB } });
 await nav(page, "Library").click();
-await library(page).getByRole("button", { name: "Edit tags of Formation" }).click();
+await chooseMenu(page, "Actions for Formation", "Edit tags of Formation");
 await ed().getByLabel("Title").fill("Something else");
 await ed().getByRole("button", { name: "Cancel" }).click();
 check("tags: cancel sends nothing", (await calls(page, "library_edit_tags")).length === 0 && (await titles(page)).includes("Formation"));
@@ -125,7 +125,7 @@ await page.context().close();
 // a whole album
 page = await open({ store: { warnDuplicates: false }, mock: { library: LIB } });
 await nav(page, "Library").click();
-await library(page).getByRole("radio", { name: "Albums" }).click();
+await page.getByLabel("Library view", { exact: true }).selectOption("albums");
 await library(page).getByRole("button", { name: "Open Homework by Daft Punk" }).click();
 await library(page).getByRole("button", { name: "Edit album" }).click();
 const many = () => editor(page, "Edit 3 songs");
@@ -145,7 +145,7 @@ await page.context().close();
 // some files can't be changed
 page = await open({ store: { warnDuplicates: false }, mock: { library: LIB, tagFail: [LIB[1].path] } });
 await nav(page, "Library").click();
-await library(page).getByRole("radio", { name: "Albums" }).click();
+await page.getByLabel("Library view", { exact: true }).selectOption("albums");
 await library(page).getByRole("button", { name: "Open Homework by Daft Punk" }).click();
 await library(page).getByRole("button", { name: "Edit album" }).click();
 await many().getByLabel("Artist", { exact: true }).fill("Daft Punk & Co");
@@ -154,7 +154,7 @@ await many().getByRole("alert").filter({ hasText: "couldn't be changed" }).waitF
 check("failure: a file that can't be changed is named, with why", (await many().innerText()).includes("1 of 3 couldn't be changed") && (await many().innerText()).includes("Revolution 909") && (await many().innerText()).includes("Access is denied"));
 check("failure: the dialog stays open", (await many().count()) === 1);
 await many().getByRole("button", { name: "Cancel" }).click();
-await library(page).getByRole("radio", { name: "Songs" }).click();
+await page.getByLabel("Library view", { exact: true }).selectOption("songs");
 const artistsNow = await page.evaluate(() => [...document.querySelectorAll(".library [aria-label=Songs] [role=listitem]")].map((r) => r.textContent));
 check("failure: the files that did work show their change", artistsNow.filter((t) => t.includes("Daft Punk & Co")).length === 2);
 await page.context().close();
@@ -167,10 +167,10 @@ const plTitles = (page) => page.evaluate(() => [...document.querySelectorAll(".l
 page = await open({ store: { warnDuplicates: false }, mock: { library: LIB } });
 await nav(page, "Library").click();
 await library(page).getByRole("list", { name: "Songs" }).waitFor();
-await library(page).getByRole("radio", { name: "Playlists" }).click();
+await page.getByLabel("Library view", { exact: true }).selectOption("playlists");
 check("playlists: with none, it says how to start one", (await library(page).innerText()).includes("No playlists yet"));
-await library(page).getByRole("radio", { name: "Songs" }).click();
-await library(page).getByRole("button", { name: "Add Da Funk to a playlist" }).click();
+await page.getByLabel("Library view", { exact: true }).selectOption("songs");
+await chooseMenu(page, "Actions for Da Funk", "Add Da Funk to a playlist");
 await picker(page).waitFor();
 check("playlists: a new name is needed before creating", await picker(page).getByRole("button", { name: "Create and add" }).isDisabled());
 await picker(page).getByLabel("New playlist name").fill("Road trip");
@@ -179,20 +179,20 @@ await picker(page).waitFor({ state: "detached" });
 check("playlists: creating one adds the song and is saved", same((await saved(page))?.map((p) => [p.name, p.paths]), [["Road trip", [LIB[0].path]]]), JSON.stringify(await saved(page)));
 
 // a second song, then a duplicate, then a name that is taken
-await library(page).getByRole("button", { name: "Add Revolution 909 to a playlist" }).click();
+await chooseMenu(page, "Actions for Revolution 909", "Add Revolution 909 to a playlist");
 await picker(page).getByRole("button", { name: "Add to Road trip" }).click();
 await picker(page).waitFor({ state: "detached" });
-await library(page).getByRole("button", { name: "Add Revolution 909 to a playlist" }).click();
+await chooseMenu(page, "Actions for Revolution 909", "Add Revolution 909 to a playlist");
 await picker(page).getByRole("button", { name: "Add to Road trip" }).click();
 check("playlists: adding a song twice keeps one copy", (await saved(page))[0].paths.length === 2);
-await library(page).getByRole("button", { name: "Add Formation to a playlist" }).click();
+await chooseMenu(page, "Actions for Formation", "Add Formation to a playlist");
 await picker(page).getByLabel("New playlist name").fill("road TRIP");
 await picker(page).getByRole("button", { name: "Create and add" }).click();
 check("playlists: a taken name is explained", (await picker(page).getByRole("alert").innerText()).includes("already"));
 await picker(page).getByRole("button", { name: "Cancel" }).click();
 
 // a whole album
-await library(page).getByRole("radio", { name: "Albums" }).click();
+await page.getByLabel("Library view", { exact: true }).selectOption("albums");
 await library(page).getByRole("button", { name: "Open Homework by Daft Punk" }).click();
 await library(page).getByRole("button", { name: "Add to playlist" }).click();
 await picker(page).getByRole("button", { name: "Add to Road trip" }).click();
@@ -200,7 +200,7 @@ await picker(page).waitFor({ state: "detached" });
 check("playlists: a whole album can be added, without repeats", (await saved(page))[0].paths.length === 3);
 
 // the playlist
-await library(page).getByRole("radio", { name: "Playlists" }).click();
+await page.getByLabel("Library view", { exact: true }).selectOption("playlists");
 await library(page).getByRole("button", { name: "Open Road trip" }).click();
 check("playlists: it lists its songs in order", same(await plTitles(page), ["Da Funk", "Revolution 909", "Around the World"]), JSON.stringify(await plTitles(page)));
 await library(page).getByRole("button", { name: "Move Around the World up" }).click();
@@ -218,9 +218,9 @@ const exp = await page.evaluate(() => window.__mock.exports[0]);
 check("playlists: the export is an extended M3U with the songs in order", exp.contents.startsWith("#EXTM3U\n#PLAYLIST:Road trip\n#EXTINF:203,Daft Punk - Around the World\n") && exp.contents.trimEnd().endsWith("02 Revolution 909.mp3"), exp.contents);
 
 // rename
-await library(page).getByRole("button", { name: "Rename" }).click();
+await library(page).getByRole("button", { name: "Rename", exact: true }).click();
 await page.getByRole("dialog", { name: "Rename playlist" }).getByLabel("Playlist name").fill("Drive");
-await page.getByRole("dialog", { name: "Rename playlist" }).getByRole("button", { name: "Rename" }).click();
+await page.getByRole("dialog", { name: "Rename playlist" }).getByRole("button", { name: "Rename", exact: true }).click();
 check("playlists: renaming shows and saves the new name", (await library(page).innerText()).includes("Drive") && (await saved(page))[0].name === "Drive");
 
 // delete needs a second click
@@ -239,7 +239,7 @@ await page.evaluate((path) => {
 }, LIB[3].path);
 await page.reload();
 await nav(page, "Library").click();
-await library(page).getByRole("radio", { name: "Playlists" }).click();
+await page.getByLabel("Library view", { exact: true }).selectOption("playlists");
 await library(page).getByRole("button", { name: "Open Old" }).click();
 check("playlists: a saved playlist is there after a restart", (await plTitles(page))[0] === "Formation");
 check("playlists: a file that is gone is shown as missing", (await library(page).innerText()).includes("Lost (missing)") && (await library(page).innerText()).includes("1 not in the library now"));

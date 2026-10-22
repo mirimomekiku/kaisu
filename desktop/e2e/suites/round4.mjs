@@ -101,7 +101,7 @@ await details(page).getByRole("button", { name: "Download audio" }).click();
 await waitCalls(page, "start_download", 1);
 req = await lastReq(page);
 check("presets: its choices are what gets sent", req.preset === "audio" && req.extra.lyrics === "file" && req.extra.cover.mode === "square" && same(req.extra.audio, { quality: "128K", normalize: true, trim_silence: true }), JSON.stringify(req.extra));
-await nav(page, "Settings").click();
+await nav(page, "Settings").click(); await page.getByLabel("Settings section", { exact: true }).selectOption("All settings");
 check("presets: listed in Settings", await page.getByRole("group", { name: "Preset Podcast" }).count() === 1);
 await page.getByRole("button", { name: "Delete preset Podcast" }).click();
 check("presets: can be deleted", await page.getByRole("group", { name: "Preset Podcast" }).count() === 0 && (await settingsOf(page)).presets.length === 0);
@@ -234,7 +234,7 @@ await page.context().close();
 // ================= themes =================
 page = await open();
 check("theme: Aqua by default", (await page.evaluate(() => document.documentElement.dataset.theme)) === "aqua");
-await nav(page, "Settings").click();
+await nav(page, "Settings").click(); await page.getByLabel("Settings section", { exact: true }).selectOption("All settings");
 await page.getByLabel("Theme").selectOption("dark");
 check("theme: Dark applies at once", (await page.evaluate(() => document.documentElement.dataset.theme)) === "dark" && (await settingsOf(page)).theme === "dark");
 await page.getByLabel("Theme").selectOption("graphite");
@@ -260,7 +260,7 @@ await page.context().close();
 
 // ================= validation and safety =================
 page = await open();
-await nav(page, "Settings").click();
+await nav(page, "Settings").click(); await page.getByLabel("Settings section", { exact: true }).selectOption("All settings");
 check("folder: ready message with free space", await page.getByLabel("Download folder check").locator("text=/Ready\\. .* free/").count() === 1);
 await page.getByLabel("Proxy", { exact: true }).fill("ftp://nope");
 check("proxy: a bad scheme is flagged as typed", await page.locator("section[aria-label='Network']").getByRole("alert").locator("text=aren't supported").count() === 1 && await page.getByRole("button", { name: "Test proxy" }).isDisabled());
@@ -271,7 +271,7 @@ check("proxy: a good address clears the warning", await page.locator("section[ar
 await page.context().close();
 
 page = await open({ store: adv });
-await nav(page, "Settings").click();
+await nav(page, "Settings").click(); await page.getByLabel("Settings section", { exact: true }).selectOption("All settings");
 await page.getByLabel("Speed limit", { exact: true }).fill("fast");
 check("speed limit: flagged as typed", await page.getByRole("alert").locator("text=like 500K or 2M").count() === 1);
 await page.getByLabel("Speed limit", { exact: true }).fill("2M");
@@ -283,7 +283,7 @@ check("audio quality: fine once valid", await page.getByRole("alert").locator("t
 await page.context().close();
 
 page = await open({ mock: { folderProblem: "Kaisu can't write to that folder. Choose another one." } });
-await nav(page, "Settings").click();
+await nav(page, "Settings").click(); await page.getByLabel("Settings section", { exact: true }).selectOption("All settings");
 check("folder: a problem is shown in Settings", await page.getByLabel("Download folder check").locator("text=can't write to that folder").count() === 1);
 await nav(page, "Search").click();
 await card(page);
@@ -296,7 +296,7 @@ await page.context().close();
 page = await open();
 check("accent: blue by default", (await page.evaluate(() => document.documentElement.dataset.accent)) === "blue");
 const primaryFilter = async (sel) => page.evaluate((q) => getComputedStyle(document.querySelector(q)).filter, sel);
-await nav(page, "Settings").click();
+await nav(page, "Settings").click(); await page.getByLabel("Settings section", { exact: true }).selectOption("All settings");
 const accents = await page.getByLabel("Accent colour").locator("option").allTextContents();
 check("accent: the choices", JSON.stringify(accents) === JSON.stringify(["Blue", "Orange", "Green", "Purple", "Pink", "Red", "Teal"]), JSON.stringify(accents));
 check("accent: blue leaves the colours alone", (await primaryFilter(".sidebar")) === "none");
@@ -308,7 +308,7 @@ await nav(page, "Search").click();
 await card(page);
 check("accent: the download button follows", /hue-rotate\(175deg\)/.test(await primaryFilter(".btn.primary")));
 await page.getByLabel("Search source").count();
-await nav(page, "Settings").click();
+await nav(page, "Settings").click(); await page.getByLabel("Settings section", { exact: true }).selectOption("All settings");
 for (const a of ["green", "purple", "pink", "red", "teal"]) {
   await page.getByLabel("Accent colour").selectOption(a);
   check(`accent: ${a}`, (await page.evaluate(() => document.documentElement.dataset.accent)) === a && /hue-rotate\(/.test(await primaryFilter(".sidebar")));

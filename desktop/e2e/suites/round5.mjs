@@ -1,4 +1,4 @@
-import { browser, BASE_URL, open, check, calls, waitCalls, nav, details, submit, now, done } from "../harness.mjs";
+import { fileAction, browser, BASE_URL, open, check, calls, waitCalls, nav, details, submit, now, done } from "../harness.mjs";
 
 const anyBox = (page) => page.getByLabel(/^Search .* or paste a link$/);
 const settingsOf = (page) => page.evaluate(() => JSON.parse(localStorage.getItem("__store")).settings);
@@ -17,7 +17,7 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 // ================= moving downloads to another drive =================
 let page = await open({ store: { warnDuplicates: false } });
-await nav(page, "Settings").click();
+await nav(page, "Settings").click(); await page.getByLabel("Settings section", { exact: true }).selectOption("All settings");
 const group = () => page.locator("section[aria-label='Move downloads']");
 check("move: off by default, with nothing else shown", await group().getByLabel("Move or copy").count() === 0);
 await group().getByLabel("Move finished downloads to another folder").check();
@@ -56,7 +56,7 @@ await page.context().close();
 page = await open({ history: HISTORY, store: { ...moveStore, moveWhen: "manual", moveKeepLayout: false, moveConflict: "skip" } });
 await wait(page, 3500);
 check("move: 'only when I press' waits", (await transfers(page)).length === 0);
-await nav(page, "Settings").click();
+await nav(page, "Settings").click(); await page.getByLabel("Settings section", { exact: true }).selectOption("All settings");
 check("move: shows how many are waiting", await group().getByRole("status", { name: "Waiting to move" }).locator("text=2 downloads are waiting").count() === 1);
 await group().getByRole("button", { name: "Move now" }).click();
 await waitCalls(page, "transfer_files", 1);
@@ -81,7 +81,7 @@ await page.context().close();
 
 // the drive isn't plugged in
 page = await open({ history: HISTORY, store: moveStore, mock: { destMissing: true } });
-await nav(page, "Settings").click();
+await nav(page, "Settings").click(); await page.getByLabel("Settings section", { exact: true }).selectOption("All settings");
 await group().getByRole("alert", { name: "Move destination check" }).waitFor();
 check("drive: a missing drive is explained", await group().getByRole("alert").locator("text=isn't connected").count() === 1 && await group().locator("text=carry on by itself").count() === 1);
 check("drive: nothing is tried meanwhile", (await transfers(page)).length === 0);
@@ -110,7 +110,7 @@ await page.context().close();
 // ================= deleting old downloads =================
 const OLD = [H("old", "Old video", "best", `${DL}/Old.mp4`, 40), H("new", "New video", "best", `${DL}/New.mp4`, 3), H("usb", "Old on the drive", "best", `${USB}/Usb.mp4`, 90), H("far", "Elsewhere", "best", "/mnt/other/Far.mp4", 90)];
 page = await open({ history: OLD });
-await nav(page, "Settings").click();
+await nav(page, "Settings").click(); await page.getByLabel("Settings section", { exact: true }).selectOption("All settings");
 const clean = () => page.locator("section[aria-label='Clean up']");
 check("clean up: off by default", await clean().getByLabel("Delete downloads older than").inputValue() === "0");
 await clean().getByLabel("Delete downloads older than").selectOption("30");
@@ -156,15 +156,15 @@ page = await open({ history: [H("q1", "Quick video", "best", `${DL}/Quick.mp4`)]
 await nav(page, "History").click();
 await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
 const row = () => page.locator("tr", { hasText: "Quick video" }).first();
-await row().getByRole("button", { name: "Copy file location" }).click();
+await fileAction(row(), "Copy file location");
 await page.getByRole("status").filter({ hasText: "File location copied" }).waitFor();
 check("quick: copy the file's location", (await page.evaluate(() => navigator.clipboard.readText())) === `${DL}/Quick.mp4`);
-await row().getByRole("button", { name: "Delete file" }).click();
+await fileAction(row(), "Delete file");
 await page.getByRole("alertdialog").waitFor();
 check("quick: deleting asks first", await page.getByRole("alertdialog").locator("text=restored there").count() === 1);
 await page.getByRole("alertdialog").getByRole("button", { name: "Cancel" }).click();
 check("quick: cancel deletes nothing", (await deletes(page)).length === 0 && (await historyOf(page)).length === 1);
-await row().getByRole("button", { name: "Delete file" }).click();
+await fileAction(row(), "Delete file");
 await page.getByRole("alertdialog").getByRole("button", { name: "Delete file" }).click();
 await waitCalls(page, "delete_files", 1);
 d = (await deletes(page))[0];
@@ -182,12 +182,14 @@ await card(page);
 await details(page).getByRole("button", { name: "Download video" }).click();
 await nav(page, "Downloads").click();
 await page.waitForSelector(".progress.done", { timeout: 20000 });
-check("quick: finished downloads offer the same actions", await page.getByRole("button", { name: "Copy file location" }).count() === 1 && await page.getByRole("button", { name: "Delete file" }).count() === 1);
+await page.getByRole("button", { name: "File actions", exact: true }).click();
+check("quick: finished downloads offer the same actions", await page.getByRole("menuitem", { name: "Copy file location", exact: true }).count() === 1 && await page.getByRole("menuitem", { name: "Delete file", exact: true }).count() === 1);
+await page.keyboard.press("Escape");
 await page.context().close();
 
 // ================= smart naming =================
 page = await open({ store: { warnDuplicates: false } });
-await nav(page, "Settings").click();
+await nav(page, "Settings").click(); await page.getByLabel("Settings section", { exact: true }).selectOption("All settings");
 const layouts = await page.getByLabel("Folder layout").locator("option").allTextContents();
 check("naming: a music layout is offered", layouts.includes("Artist / Album folders (for music)"), JSON.stringify(layouts));
 await page.getByLabel("Folder layout").selectOption("music");

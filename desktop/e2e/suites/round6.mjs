@@ -34,7 +34,7 @@ await page.context().close();
 page = await open({ history: [H("old", "Old video", "best", `${DL}/Old.mp4`, 40), H("usb", "Old on the drive", "best", `${USB}/Usb.mp4`, 90)], store: { ...moveStore, autoDeleteDays: 30, autoDeleteMoved: true, moveWhen: "manual" } });
 await waitCalls(page, "delete_files", 1, 30000);
 let del = (await calls(page, "delete_files"))[0].args;
-check("folders: a delete names no folders, only whether the drive's folder counts", keys(del) === keys({ paths: 1, includeMoved: 1 }) && del.includeMoved === true, JSON.stringify(del));
+check("folders: cleanup names no folders and keeps recoverable deletion outside the library", keys(del) === keys({ paths: 1, includeMoved: 1, permanent: 1, includeLibrary: 1 }) && del.includeMoved === true && del.permanent === false && del.includeLibrary === false, JSON.stringify(del));
 check("folders: …and registration came first", (await order(page)).indexOf("set_managed_folders") < (await order(page)).indexOf("delete_files"));
 await page.context().close();
 
@@ -91,7 +91,7 @@ await page.context().close();
 
 // ================= lyrics need consent =================
 page = await open({ store: { mode: "advanced", warnDuplicates: false } });
-await nav(page, "Settings").click();
+await nav(page, "Settings").click(); await page.getByLabel("Settings section", { exact: true }).selectOption("All settings");
 const lyrics = page.getByLabel("Default lyrics");
 await lyrics.selectOption("file");
 await dialog(page).waitFor();
@@ -152,7 +152,7 @@ const STRIPPED = "socks5://me@127.0.0.1:1080";
 const secrets = (page) => page.evaluate(() => window.__mock.secrets ?? {});
 
 page = await open({ store: { warnDuplicates: false } });
-await nav(page, "Settings").click();
+await nav(page, "Settings").click(); await page.getByLabel("Settings section", { exact: true }).selectOption("All settings");
 await page.getByLabel("Proxy", { exact: true }).fill(SECRET_PROXY);
 await page.waitForFunction((p) => JSON.parse(localStorage.getItem("__store")).settings.proxy === p, STRIPPED);
 check("proxy password: the settings file holds the address without it", !JSON.stringify(await page.evaluate(() => localStorage.getItem("__store"))).includes("hunter2"));
@@ -161,7 +161,7 @@ await nav(page, "Search").click();
 await submit(page, "lofi");
 await results(page).waitFor();
 check("proxy password: requests still use the full address", (await calls(page, "search_media")).at(-1).args.proxy === SECRET_PROXY);
-await nav(page, "Settings").click();
+await nav(page, "Settings").click(); await page.getByLabel("Settings section", { exact: true }).selectOption("All settings");
 await page.getByLabel("Proxy", { exact: true }).fill("socks5://127.0.0.1:1080");
 await page.waitForFunction(() => window.__mock.secrets?.["proxy-password"] === undefined);
 check("proxy password: removing it also removes the stored copy", (await secrets(page))["proxy-password"] === undefined);
@@ -171,7 +171,7 @@ page = await open({ store: { proxy: STRIPPED, warnDuplicates: false }, mock: { s
 await submit(page, "lofi");
 await results(page).waitFor();
 check("proxy password: after a restart the stored password is put back", (await calls(page, "search_media")).at(-1).args.proxy === SECRET_PROXY);
-await nav(page, "Settings").click();
+await nav(page, "Settings").click(); await page.getByLabel("Settings section", { exact: true }).selectOption("All settings");
 check("proxy password: …and the box covers it until it is edited", (await page.locator("[data-proxy-cover]").innerText()) === "socks5://me:***@127.0.0.1:1080");
 await page.getByLabel("Proxy", { exact: true }).focus();
 check("proxy password: …then shows what was typed", (await page.locator("[data-proxy-cover]").count()) === 0 && (await page.getByLabel("Proxy", { exact: true }).inputValue()) === SECRET_PROXY);
@@ -186,7 +186,7 @@ check("proxy password: …and still works", (await calls(page, "search_media")).
 await page.context().close();
 
 page = await open({ store: { warnDuplicates: false }, mock: { noKeyring: true } });
-await nav(page, "Settings").click();
+await nav(page, "Settings").click(); await page.getByLabel("Settings section", { exact: true }).selectOption("All settings");
 await page.getByLabel("Proxy", { exact: true }).fill(SECRET_PROXY);
 await page.waitForFunction((p) => JSON.parse(localStorage.getItem("__store")).settings.proxy === p, SECRET_PROXY);
 await nav(page, "Search").click();

@@ -1,5 +1,5 @@
 // Step 5 of the music player: keeping the volume even between songs.
-import { open, check, calls, nav, done } from "../harness.mjs";
+import { chooseMenu, open, check, calls, nav, done } from "../harness.mjs";
 
 const DL = "/home/u/Downloads";
 const T = (title, track, extra = {}) => ({
@@ -65,15 +65,15 @@ check("level off: the volume stays as it is", near(await lastVolume(page), 1), S
 check("level off: nothing is measured on the side", ((await page.evaluate(() => window.__mock.analyzed ?? [])).length) === 0);
 
 // measuring the whole library
-await page.getByRole("button", { name: "Measure loudness (1)" }).click();
+await chooseMenu(page, "Library tools", "Measure loudness (1)");
 await page.waitForFunction(() => (window.__mock.analyzed ?? []).length > 0);
-await page.getByRole("button", { name: /^Measure loudness/ }).waitFor({ state: "detached" });
+await page.waitForFunction(() => (window.__mock.analyzed ?? []).length > 0);
 check("measure: the button measures what is missing and goes away", (await page.evaluate(() => window.__mock.analyzed.flat())).length === 1);
 await page.context().close();
 
 // the setting
 page = await open({ store: { warnDuplicates: false }, mock: { library: LIB } });
-await nav(page, "Settings").click();
+await nav(page, "Settings").click(); await page.getByLabel("Settings section", { exact: true }).selectOption("All settings");
 const box = page.getByLabel(/even volume/);
 check("setting: it starts off", !(await box.isChecked()));
 await box.check();
@@ -83,10 +83,10 @@ await page.context().close();
 // A failed measurement is not offered repeatedly during the same session.
 page = await open({ mock: { library: [LIB[2]], analyzeFail: [LIB[2].path] } });
 await nav(page, "Library").click();
-await page.getByRole("button", { name: "Measure loudness (1)" }).click();
-await page.getByRole("button", { name: /^Measure loudness/ }).waitFor({ state: "detached" });
+await chooseMenu(page, "Library tools", "Measure loudness (1)");
+await page.waitForFunction(() => (window.__mock.analyzed ?? []).length > 0);
 check("measure: an unreadable song leaves the pending count", (await page.evaluate(() => window.__mock.analyzed.flat())).length === 1);
-await library(page).getByRole("radio", { name: "Playlists" }).click();
+await page.getByLabel("Library view", { exact: true }).selectOption("playlists");
 check("playlists: unrelated filters are hidden", await library(page).getByLabel("Search the library").count() === 0 && await library(page).getByLabel("Format", { exact: true }).count() === 0);
 await page.context().close();
 

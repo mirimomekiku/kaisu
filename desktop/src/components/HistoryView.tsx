@@ -1,5 +1,8 @@
+import ContextMenu, { type MenuEntry } from "./ContextMenu";
+import { useRowMenu } from "../hooks/useRowMenu";
+import { fileMenu } from "../lib/fileMenu";
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ArrowDown, ArrowUp, ChevronDown, Download as DownloadIcon, Film, History as HistoryIcon, ListEnd, Play, RefreshCw, RotateCcw, Search, Trash2 } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, ChevronDown, Download as DownloadIcon, Film, History as HistoryIcon, ListEnd, Play, RotateCcw, Search, Trash2 } from "lucide-react";
 import type { Preset } from "../lib/api";
 import { PRESET_LABEL, formatBytes } from "../lib/format";
 import { sortHistory, type HistoryRow, type HistorySort } from "../lib/history";
@@ -9,6 +12,8 @@ import FileActions from "./FileActions";
 import { useMediaActions } from "../hooks/useMediaDialogs";
 import { isAudioFile } from "../lib/mediaKind";
 import Picture from "./Picture";
+import PageHeading from "./PageHeading";
+import { ActionMenu } from "./Dropdown";
 
 export const HISTORY_VIEWS: ViewMode[] = ["details", "list", "grid", "compact"];
 
@@ -93,6 +98,8 @@ export default function HistoryView(p: Props) {
   const media = useMediaActions();
   /** The ticked items that are sound files still on disk, which the music player can take. */
   const pickedSongs = pickedRows.flatMap((r) => (r.item.path && isAudioFile(r.item.path) && p.exists[r.item.path] !== false ? [{ path: r.item.path, title: r.item.title }] : []));
+  const context = useRowMenu(shown.map((r) => r.item.id));
+  const contextItem = shown.find((r) => r.item.id === context.menu?.id)?.item;
   const toggle = (id: string) =>
     setPicked((prev) => {
       const next = new Set(prev);
@@ -100,6 +107,27 @@ export default function HistoryView(p: Props) {
       return next;
     });
   const toggleAll = () => setPicked(allPicked ? new Set() : new Set(shown.map((r) => r.item.id)));
+
+  const multiple = !!contextItem && picked.has(contextItem.id) && pickedRows.length > 1;
+  const entries: MenuEntry[] = contextItem ? multiple ? [
+    { kind: "heading", label: `${pickedRows.length} selected` },
+    ...(media && pickedSongs.length ? [
+      { label: `Play ${pickedSongs.length} songs`, onSelect: () => media.queue(pickedSongs, "play") },
+      { label: "Add selected to queue", onSelect: () => media.queue(pickedSongs, "add") },
+    ] : []),
+    { label: "Download selected again", onSelect: () => p.onDownloadAgainMany(pickedRows.map((r) => r.item)) },
+    { kind: "separator" },
+    { label: "Remove selected from history", onSelect: () => { p.onRemoveMany(pickedRows.map((r) => r.item.id)); setPicked(new Set()); } },
+    { label: "Select none", onSelect: () => setPicked(new Set()) },
+  ] : [
+    { kind: "heading", label: contextItem.title },
+    ...fileMenu(contextItem.path, contextItem.path ? p.exists[contextItem.path] : false, media, { onOpen: p.onOpen, onReveal: p.onReveal, onCopyPath: p.onCopyPath, onDelete: p.onDeleteFile }),
+    { kind: "separator" },
+    { label: "Download again", onSelect: () => p.onDownloadAgain(contextItem, contextItem.preset) },
+    { label: picked.has(contextItem.id) ? "Deselect" : "Select", onSelect: () => toggle(contextItem.id) },
+    { label: "Remove from history", onSelect: () => p.onRemove(contextItem.id) },
+  ] : [];
+  const contextMenu = contextItem && context.menu && <ContextMenu {...context.menu} label={multiple ? "Selected history actions" : `History actions for ${contextItem.title}`} items={entries} onClose={context.close} />;
 
   const when = (h: HistoryItem) => new Date(h.timestamp).toLocaleString();
   const day = (h: HistoryItem) => new Date(h.timestamp).toLocaleDateString();
@@ -188,7 +216,7 @@ export default function HistoryView(p: Props) {
       <tbody>
         {shown.map(({ item: h }) => (
           <Fragment key={h.id}>
-            <tr aria-selected={picked.has(h.id)}>
+            <tr aria-selected={picked.has(h.id)} {...context.bind(h.id)} data-history-id={h.id}>
               <td className="fit">{check(h)}</td>
               <td>
                 <div className="flex items-center gap-2 min-w-0">
@@ -229,7 +257,7 @@ export default function HistoryView(p: Props) {
   const renderItem = ({ item: h }: HistoryRow) => {
     if (view === "grid") {
       return (
-        <li key={h.id} className="row-card overflow-hidden flex flex-col">
+        <li key={h.id} {...context.bind(h.id)} data-history-id={h.id} className="row-card overflow-hidden flex flex-col">
           {thumb(h, "w-full aspect-video !border-0 !shadow-none")}
           <div className="p-2 flex flex-col gap-1.5 min-w-0">
             <div className="flex items-start gap-1.5">
@@ -256,7 +284,7 @@ export default function HistoryView(p: Props) {
 
     if (view === "compact") {
       return (
-        <li key={h.id} className="row-card zebra px-2 py-1 flex flex-col">
+        <li key={h.id} {...context.bind(h.id)} data-history-id={h.id} className="row-card zebra px-2 py-1 flex flex-col">
           <div className="flex items-center gap-2.5">
             {check(h)}
             {thumb(h, "w-10 aspect-video")}
@@ -278,7 +306,7 @@ export default function HistoryView(p: Props) {
     }
 
     return (
-      <li key={h.id} className="row-card zebra p-2 flex flex-col">
+      <li key={h.id} {...context.bind(h.id)} data-history-id={h.id} className="row-card zebra p-2 flex flex-col">
         <div className="flex items-center gap-3">
           {check(h)}
           {thumb(h, "w-24 aspect-video")}
@@ -317,6 +345,8 @@ export default function HistoryView(p: Props) {
 
   return (
     <div className="flex flex-col min-h-0">
+      {contextMenu}
+      <PageHeading title="History" description="Your finished downloads. Filter to find a file or download it again." />
       <div className="flex items-center gap-3 flex-wrap px-3 py-1.5" style={bar}>
         <label className="searchfield" style={{ width: 220 }}>
           <span className="lead">
@@ -353,23 +383,14 @@ export default function HistoryView(p: Props) {
           </button>
         </label>
         <div className="flex-1" />
-        <button onClick={p.onRecheck} className="btn small" title="Look again at which files still exist">
-          <RefreshCw className="w-3 h-3" /> Check files
-        </button>
-        {missing > 0 && (
-          <button onClick={() => p.onRemoveMany(rows.filter((r) => r.exists === false && r.item.path).map((r) => r.item.id))} className="btn small">
-            Remove {missing} missing
-          </button>
-        )}
-        <button onClick={() => p.onExport(exportRows, "csv")} className="btn small" disabled={exportRows.length === 0} title={pickedRows.length > 0 ? "Export the selected items" : "Export the items shown"}>
-          Export CSV
-        </button>
-        <button onClick={() => p.onExport(exportRows, "json")} className="btn small" disabled={exportRows.length === 0}>
-          Export JSON
-        </button>
-        <button onClick={p.onClear} className="btn small">
-          <Trash2 className="w-3 h-3" /> Clear History
-        </button>
+        <ActionMenu label="History actions" items={[
+          { label: "Check files", onSelect: p.onRecheck },
+          { label: "Export CSV", onSelect: () => p.onExport(exportRows, "csv"), disabled: exportRows.length === 0 },
+          { label: "Export JSON", onSelect: () => p.onExport(exportRows, "json"), disabled: exportRows.length === 0 },
+          { kind: "separator" },
+          ...(missing > 0 ? [{ label: `Remove ${missing} missing`, onSelect: () => p.onRemoveMany(rows.filter((r) => r.exists === false && r.item.path).map((r) => r.item.id)) }] : []),
+          { label: "Clear History", onSelect: p.onClear },
+        ]} />
       </div>
 
       {pickedRows.length > 0 && (

@@ -87,13 +87,13 @@ await details(page).getByRole("button", { name: "Download video" }).click();
 await waitCalls(page, "start_download", 1);
 await nav(page, "Downloads").click();
 await page.getByRole("button", { name: "Pause download" }).first().click();
-await page.waitForSelector("text=/Paused/");
+await page.getByText(/Paused/).filter({ visible: true }).first().waitFor();
 check("pause: asks the backend to stop the process", (await calls(page, "cancel_download")).length === 1);
 check("pause: row shows Paused with a Resume button", await page.getByRole("button", { name: "Resume download" }).count() === 1);
 check("pause: sidebar badge is not 'active'", await nav(page, "Downloads").locator(".count.hot").count() === 0);
 await page.getByLabel("Status display").locator("text=Downloads paused").waitFor({ timeout: 8000 });   // after the "Added" note has had its moment
 check("pause: display says paused", true);
-check("pause: not marked as cancelled/failed", await page.locator("text=Cancelled").count() === 0);
+check("pause: not marked as cancelled/failed", await page.getByText("Cancelled", { exact: true }).filter({ visible: true }).count() === 0);
 await page.getByRole("button", { name: "Resume download" }).click();
 await waitCalls(page, "start_download", 2);
 check("resume: the same download starts again", (await calls(page, "start_download"))[0].args.req.id === (await calls(page, "start_download"))[1].args.req.id);

@@ -1,5 +1,5 @@
 // The music player: the bar, transport, seeking, speed, sleep timer, volume, remembered queue, media keys and the tray.
-import { open, check, calls, waitCalls, nav, now, done } from "../harness.mjs";
+import { fileAction, open, check, calls, waitCalls, nav, now, done } from "../harness.mjs";
 
 const DL = "/home/u/Downloads";
 const DAY = 86_400_000;
@@ -82,13 +82,14 @@ await nav(page, "History").click();
 await playOnRow(page, "First Song");
 await bar(page).waitFor();
 await waitPosition(page, 1);
-check("speed: it starts at normal speed", (await bar(page).getByLabel("Playback speed").inputValue()) === "1");
-await bar(page).getByLabel("Playback speed").selectOption("2");
+await bar(page).getByRole("button", { name: "Playback options", exact: true }).click();
+check("speed: it starts at normal speed", (await page.getByRole("dialog", { name: "Playback options", exact: true }).getByLabel("Playback speed").inputValue()) === "1");
+await page.getByRole("dialog", { name: "Playback options", exact: true }).getByLabel("Playback speed").selectOption("2");
 const t0 = await position(page);
 await page.waitForTimeout(2500);
 const gained = (await position(page)) - t0;
 check("speed: at 2× the time moves about twice as fast", gained >= 3, `gained ${gained}s in 2.5s`);
-await bar(page).getByLabel("Playback speed").selectOption("0.5");
+await page.getByRole("dialog", { name: "Playback options", exact: true }).getByLabel("Playback speed").selectOption("0.5");
 const t1 = await position(page);
 await page.waitForTimeout(2500);
 check("speed: at 0.5× it moves slowly", (await position(page)) - t1 <= 2);
@@ -99,14 +100,15 @@ page = await open({ history: SONGS, store: { warnDuplicates: false }, mock: { au
 await nav(page, "History").click();
 await playOnRow(page, "First Song");
 await bar(page).waitFor();
-check("sleep: off to begin with", (await bar(page).getByLabel("Sleep timer").inputValue()) === "off");
-await bar(page).getByLabel("Sleep timer").selectOption("15");
-check("sleep: a timer shows how long is left", (await bar(page).getByLabel("Sleep timer").locator("option:checked").innerText()).includes("15 min left"));
-await bar(page).getByLabel("Sleep timer").selectOption("off");
-check("sleep: it can be switched off", (await bar(page).getByLabel("Sleep timer").inputValue()) === "off");
-await bar(page).getByLabel("Sleep timer").selectOption("track");
+await bar(page).getByRole("button", { name: "Playback options", exact: true }).click();
+check("sleep: off to begin with", (await page.getByRole("dialog", { name: "Playback options", exact: true }).getByLabel("Sleep timer").inputValue()) === "off");
+await page.getByRole("dialog", { name: "Playback options", exact: true }).getByLabel("Sleep timer").selectOption("15");
+check("sleep: a timer shows how long is left", (await page.getByRole("dialog", { name: "Playback options", exact: true }).getByLabel("Sleep timer").locator("option:checked").innerText()).includes("15 min left"));
+await page.getByRole("dialog", { name: "Playback options", exact: true }).getByLabel("Sleep timer").selectOption("off");
+check("sleep: it can be switched off", (await page.getByRole("dialog", { name: "Playback options", exact: true }).getByLabel("Sleep timer").inputValue()) === "off");
+await page.getByRole("dialog", { name: "Playback options", exact: true }).getByLabel("Sleep timer").selectOption("track");
 await bar(page).getByRole("button", { name: "Play", exact: true }).waitFor({ timeout: 12000 });
-check("sleep: stops at the end of the track", (await bar(page).getByLabel("Sleep timer").inputValue()) === "off");
+check("sleep: stops at the end of the track", (await page.getByRole("dialog", { name: "Playback options", exact: true }).getByLabel("Sleep timer").inputValue()) === "off");
 check("sleep: …and stays on that track", (await bar(page).innerText()).includes("First Song"));
 await page.context().close();
 
@@ -157,11 +159,13 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 page = await open({ history: [...SONGS, VIDEO_ROW], store: { warnDuplicates: false }, mock: { audioSeconds: 3 } });
 await nav(page, "History").click();
-check("queue: a video isn't offered to the music queue", (await page.locator("tr", { hasText: "A Movie" }).first().getByRole("button", { name: "Add to queue" }).count()) === 0);
+await page.locator("tr", { hasText: "A Movie" }).first().getByRole("button", { name: "File actions", exact: true }).click();
+check("queue: a video isn't offered to the music queue", (await page.getByRole("menu", { name: "File actions", exact: true }).getByRole("menuitem", { name: "Add to queue", exact: true }).count()) === 0);
+await page.keyboard.press("Escape");
 await playOnRow(page, "First Song");
 await bar(page).waitFor();
-await page.locator("tr", { hasText: "Third Song" }).first().getByRole("button", { name: "Add to queue" }).click();
-await page.locator("tr", { hasText: "Second Song" }).first().getByRole("button", { name: "Play next" }).click();
+await fileAction(page.locator("tr", { hasText: "Third Song" }).first(), "Add to queue");
+await fileAction(page.locator("tr", { hasText: "Second Song" }).first(), "Play next");
 await bar(page).getByRole("button", { name: "Show the queue" }).click();
 await queuePanel(page).waitFor();
 check("queue: the button shows how many tracks are queued", (await bar(page).getByRole("button", { name: "Show the queue" }).innerText()).includes("3"));
@@ -247,8 +251,8 @@ page = await open({ history: SONGS, store: { warnDuplicates: false }, mock: { au
 await nav(page, "History").click();
 await playOnRow(page, "First Song");
 await bar(page).waitFor();
-await page.locator("tr", { hasText: "Second Song" }).first().getByRole("button", { name: "Add to queue" }).click();
-await page.locator("tr", { hasText: "Third Song" }).first().getByRole("button", { name: "Add to queue" }).click();
+await fileAction(page.locator("tr", { hasText: "Second Song" }).first(), "Add to queue");
+await fileAction(page.locator("tr", { hasText: "Third Song" }).first(), "Add to queue");
 await bar(page).getByRole("button", { name: "Pause", exact: true }).click();
 await page.waitForFunction(() => JSON.parse(localStorage.getItem("__store")).player?.queue?.length === 3, null, { timeout: 8000 });
 await page.reload();

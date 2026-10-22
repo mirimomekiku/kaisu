@@ -1,4 +1,4 @@
-import { Fragment, useState, type DragEvent, type ReactNode } from "react";
+import { Fragment, useState, type DragEvent, type ReactNode, type HTMLAttributes } from "react";
 import { AlertCircle, AlertTriangle, Check, ChevronsDown, ChevronsUp, Film, Gauge, Loader2, Pause, Play, RotateCcw, ScrollText, X } from "lucide-react";
 import type { DownloadItem } from "../hooks/useDownloads";
 import Picture from "./Picture";
@@ -28,7 +28,10 @@ export interface Handlers {
   onDeleteFile: (path: string) => void;
 }
 
+type RowMenu = (id: string) => HTMLAttributes<HTMLElement>;
+
 interface Props extends Handlers {
+  rowMenu?: RowMenu;
   item: DownloadItem;
   mode: Mode;
   view: ViewMode;
@@ -225,14 +228,14 @@ function Thumb({ item, cls }: { item: DownloadItem; cls: string }) {
 }
 
 /** The list / grid / compact layouts for a single download. The table layout is `DownloadTable`. */
-export default function DownloadRow({ item, mode, view, position, ...h }: Props) {
+export default function DownloadRow({ item, mode, view, position, rowMenu, ...h }: Props) {
   const advanced = mode === "advanced";
   const [showLog, setShowLog] = useState(false);
   const actions = <Actions item={item} advanced={advanced} iconOnly={view !== "list"} showLog={showLog} onToggleLog={() => setShowLog((v) => !v)} {...h} />;
 
   if (view === "grid") {
     return (
-      <div className="row-card overflow-hidden flex flex-col" {...dragProps(item, h)}>
+      <div className="row-card overflow-hidden flex flex-col" {...dragProps(item, h)} {...rowMenu?.(item.id)} data-download-id={item.id}>
         <div className="relative">
           <Thumb item={item} cls="w-full aspect-video !border-0 !shadow-none" />
           <div className="absolute inset-x-1.5 bottom-1.5">
@@ -256,7 +259,7 @@ export default function DownloadRow({ item, mode, view, position, ...h }: Props)
 
   if (view === "compact") {
     return (
-      <div className="row-card zebra px-2 py-1 flex flex-col gap-1" {...dragProps(item, h)}>
+      <div className="row-card zebra px-2 py-1 flex flex-col gap-1" {...dragProps(item, h)} {...rowMenu?.(item.id)} data-download-id={item.id}>
         <div className="flex items-center gap-2.5">
           <Thumb item={item} cls="w-10 aspect-video" />
           <span className="flex-1 min-w-0 truncate" title={item.title}>
@@ -273,7 +276,7 @@ export default function DownloadRow({ item, mode, view, position, ...h }: Props)
   }
 
   return (
-    <div className="row-card zebra p-2 flex flex-col gap-1.5" {...dragProps(item, h)}>
+    <div className="row-card zebra p-2 flex flex-col gap-1.5" {...dragProps(item, h)} {...rowMenu?.(item.id)} data-download-id={item.id}>
       <div className="flex items-center gap-3">
         <Thumb item={item} cls="w-24 aspect-video" />
         <div className="min-w-0 flex-1 flex flex-col gap-1">
@@ -300,7 +303,7 @@ export default function DownloadRow({ item, mode, view, position, ...h }: Props)
 }
 
 /** The iTunes-style list: one line per download with an Aqua progress bar column. */
-export function DownloadTable({ items, mode, positions, ...h }: { items: DownloadItem[]; mode: Mode; positions: Map<string, number> } & Handlers) {
+export function DownloadTable({ items, mode, positions, rowMenu, ...h }: { items: DownloadItem[]; mode: Mode; positions: Map<string, number>; rowMenu?: RowMenu } & Handlers) {
   const advanced = mode === "advanced";
   const [open, setOpen] = useState<string | null>(null);
   return (
@@ -320,7 +323,7 @@ export function DownloadTable({ items, mode, positions, ...h }: { items: Downloa
           const hasDetail = (item.status === "error" && !!item.errorMsg) || !!item.warning || (advanced && (item.log.length > 0 || item.status === "completed"));
           return (
             <Fragment key={item.id}>
-              <tr {...dragProps(item, h)}>
+              <tr {...dragProps(item, h)} {...rowMenu?.(item.id)} data-download-id={item.id}>
                 <td>
                   <div className="flex items-center gap-2 min-w-0">
                     <Thumb item={item} cls="w-[34px] aspect-video !shadow-none" />

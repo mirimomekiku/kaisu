@@ -1,4 +1,4 @@
-import { BASE_URL, browser } from "../harness.mjs";
+import { fileAction, BASE_URL, browser } from "../harness.mjs";
 const errors = [];
 let failed = 0, passed = 0;
 const check = (name, ok) => { ok ? passed++ : failed++; if (!ok) console.log("FAIL", name); };
@@ -66,7 +66,7 @@ check("shell: sidebar sections", (await Promise.all(["Search", "Downloads", "His
 check("shell: History badge shows 4", await nav(page, "History").locator(".count", { hasText: "4" }).count() === 1);
 check("shell: search page is current", (await nav(page, "Search").getAttribute("aria-current")) === "page");
 check("shell: display idle text", await lcd(page).locator("text=Paste a link or search YouTube").count() === 1);
-check("shell: empty state", await page.locator("text=Search YouTube or paste a link").count() >= 1);
+check("shell: empty state", await page.getByRole("heading", { name: "What would you like to download?", exact: true }).count() === 1);
 check("shell: no header mode toggle", await page.locator("[aria-label='Interface mode']").count() === 0);
 check("shell: search box focused on launch", await box(page).evaluate((e) => document.activeElement === e));
 
@@ -197,7 +197,7 @@ check("history: table", await page.locator("table.itable tbody tr").count() >= 4
 const row = (t) => page.locator("tr", { hasText: t }).first();
 check("history: Open labelled", await row("Searchable Song").getByRole("button", { name: "Open file" }).locator("text=Open").count() === 1);
 await row("Searchable Song").getByRole("button", { name: "Open file" }).click();
-await row("Searchable Song").getByRole("button", { name: "Show in folder" }).click();
+await fileAction(row("Searchable Song"), "Show in folder");
 await page.waitForTimeout(150);
 check("history: open + reveal", (await calls(page, "open_file")).at(-1)?.args.path === "/home/u/Downloads/song.mp3" && (await calls(page, "reveal_file")).at(-1)?.args.path === "/home/u/Downloads/song.mp3");
 check("history: moved file flagged", await row("Moved Away Clip").locator("svg").count() >= 1 && await row("Moved Away Clip").getByRole("button", { name: "Open file" }).count() === 0);
@@ -221,7 +221,7 @@ for (const [v, probe] of [["Grid view", "ul.grid"], ["Compact view", "ul.gap-1"]
 check("history: status bar", await page.locator("footer").locator("text=/\\d+ items?/").count() === 1);
 
 // ============ settings & advanced ============
-await go(page, "Settings");
+await go(page, "Settings"); await page.getByLabel("Settings section", { exact: true }).selectOption("All settings");
 check("settings: its own page", await page.locator("h1:has-text('Settings')").count() === 1 && await box(page).count() === 1);
 check("settings: simple hides advanced", await page.locator("section[aria-label='Advanced options']").count() === 0);
 await page.getByRole("radio", { name: /^advanced/i }).click();
@@ -254,7 +254,7 @@ await go(page, "Downloads");
 check("advanced: per-download log", await page.locator("tr", { hasText: "Big Buck Bunny" }).first().locator("button[aria-expanded]").count() === 1);
 
 // simple ignores advanced
-await go(page, "Settings");
+await go(page, "Settings"); await page.getByLabel("Settings section", { exact: true }).selectOption("All settings");
 await page.getByRole("radio", { name: /^simple/i }).click();
 await search(page, "https://www.youtube.com/watch?v=simple000001");
 await details(page).getByRole("heading", { name: /Big Buck Bunny/ }).waitFor();

@@ -94,6 +94,7 @@ await cur("toolbar drag area", page.locator("header.toolbar"), "default");
 await cur("table row body", results(page).locator("tbody tr").first(), "default");
 await cur("column header", results(page).locator("thead th").first(), "default");
 await page.getByRole("button", { name: /^Settings/ }).click();
+await page.getByLabel("Settings section", { exact: true }).selectOption("Engine");
 await page.getByRole("button", { name: "Check for updates" }).evaluate((b) => (b.disabled = true));
 await cur("disabled button", page.getByRole("button", { name: "Check for updates" }), "not-allowed");
 await page.getByRole("button", { name: /^Search/ }).click();

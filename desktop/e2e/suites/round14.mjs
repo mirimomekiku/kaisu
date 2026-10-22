@@ -1,4 +1,4 @@
-import { open, check, calls, nav, done } from "../harness.mjs";
+import { fileAction, libraryFilter, chooseMenu, open, check, calls, nav, done } from "../harness.mjs";
 const DL = "/home/u/Downloads";
 const t = (title, extra = {}) => ({ path: `${DL}/${title}.mp3`, title, artist: "Band", album_artist: "", album: "Album", track: null, disc: null, year: 2020, genre: "Rock", duration: 120, bitrate: 192, sample_rate: 44100, bit_depth: null, channels: 2, format: "MP3", size: 1000, modified: 1000, added: 1000, has_cover: false, loudness: -18, ...extra });
 const A = t("Alpha"), B = t("Beta", { artist: "Other" });
@@ -15,13 +15,13 @@ await lib(page).getByRole("button", { name: "Favorite Alpha", exact: true }).cli
 await lib(page).getByLabel("Rating for Alpha", { exact: true }).selectOption("5");
 await page.waitForFunction((path) => JSON.parse(localStorage.getItem("__store")).musicPreferences?.[path]?.rating === 5, A.path);
 check("preferences: favorite and rating saved", await lib(page).getByRole("button", { name: "Unfavorite Alpha", exact: true }).getAttribute("aria-pressed") === "true");
-await lib(page).getByRole("button", { name: "Favorites only", exact: true }).click();
+await libraryFilter(page, "Favorites only", true);
 check("preferences: favorites filter narrows songs", await lib(page).getByRole("button", { name: "Play Beta", exact: true }).count() === 0);
-await lib(page).getByRole("button", { name: "Favorites only", exact: true }).click();
-await lib(page).getByLabel("Minimum rating").selectOption("4");
+await libraryFilter(page, "Favorites only", false);
+await libraryFilter(page, "Minimum rating", "4");
 check("preferences: rating filter excludes unrated songs", await lib(page).getByRole("button", { name: "Play Beta", exact: true }).count() === 0);
-await lib(page).getByLabel("Minimum rating").selectOption("0");
-await lib(page).getByRole("radio", { name: "Playlists" }).click();
+await libraryFilter(page, "Minimum rating", "0");
+await page.getByLabel("Library view", { exact: true }).selectOption("playlists");
 await lib(page).getByRole("button", { name: "New smart playlist", exact: true }).click();
 await dlg(page).getByLabel("Playlist name").fill("Top favorites");
 await dlg(page).getByLabel("Rule 1 field").selectOption("favorite");
@@ -33,10 +33,11 @@ await dlg(page).getByRole("button", { name: "Save smart playlist", exact: true }
 await lib(page).getByRole("button", { name: "Play Alpha", exact: true }).waitFor();
 check("smart: favorite and minimum rating rules combine", await lib(page).locator(".album-tracks > li").count() === 1);
 await lib(page).getByRole("button", { name: "Play Alpha", exact: true }).click();
-await bar(page).getByRole("button", { name: "Unfavorite Alpha", exact: true }).click();
+await bar(page).getByRole("button", { name: "Playback options", exact: true }).click();
+await page.getByRole("dialog", { name: "Playback options", exact: true }).getByRole("button", { name: "Unfavorite Alpha", exact: true }).click();
 await lib(page).getByRole("button", { name: "Play Alpha", exact: true }).waitFor({ state: "detached" });
 check("smart: player heart updates membership immediately", await lib(page).locator(".album-tracks > li").count() === 0);
-await bar(page).getByRole("button", { name: "Favorite Alpha", exact: true }).click();
+await page.getByRole("dialog", { name: "Playback options", exact: true }).getByRole("button", { name: "Favorite Alpha", exact: true }).click();
 await page.reload(); await nav(page, "Library").click();
 check("preferences: favorite and rating survive restart", await lib(page).getByRole("button", { name: "Unfavorite Alpha", exact: true }).count() === 1 && await lib(page).getByLabel("Rating for Alpha", { exact: true }).inputValue() === "5");
 await page.screenshot({ path: "src-tauri/target/favorites-library.png" });
@@ -44,7 +45,7 @@ await page.context().close();
 
 page = await open({ mock: { library: [A, B], audioSeconds: 5 } });
 await seed(page, { listening: { [A.path]: { plays: 3, lastPlayed: 100 }, [B.path]: { plays: 1, lastPlayed: 200, seconds: 123, lastListened: 200 } } });
-await nav(page, "Library").click(); await lib(page).getByRole("radio", { name: "Listening" }).click();
+await nav(page, "Library").click(); await page.getByLabel("Library view", { exact: true }).selectOption("listening");
 const dash = () => page.getByRole("region", { name: "Listening dashboard", exact: true });
 await dash().waitFor();
 check("dashboard: totals preserve legacy counts and measured time", (await dash().locator(".listening-totals").innerText()).includes("4") && (await dash().locator(".listening-totals").innerText()).includes("2m 3s"));
@@ -63,31 +64,31 @@ check("listening: paused time not counted", await page.evaluate((path) => JSON.p
 await bar(page).getByRole("button", { name: "Play", exact: true }).click();
 await page.waitForFunction((path) => JSON.parse(localStorage.getItem("__store")).listening[path].plays === 2, B.path);
 check("listening: completion updates dashboard", (await dash().locator(".listening-totals").innerText()).includes("5"));
-await page.reload(); await nav(page, "Library").click(); await lib(page).getByRole("radio", { name: "Listening" }).click();
+await page.reload(); await nav(page, "Library").click(); await page.getByLabel("Library view", { exact: true }).selectOption("listening");
 check("dashboard: history survives restart", (await dash().locator(".listening-totals").innerText()).includes("5"));
 await page.context().close();
 
 page = await open({ history: [history(A), history(B)], mock: { recycleFail: true } });
 await nav(page, "History").click();
 const row = (name) => page.locator("tr", { hasText: name }).first();
-await row("Alpha").getByRole("button", { name: "Delete file", exact: true }).click();
+await fileAction(row("Alpha"), "Delete file");
 check("manual removal: offers recoverable and explicit permanent actions", await confirm(page).getByRole("button", { name: "Move to Recycle Bin", exact: true }).count() === 1 && await confirm(page).getByRole("button", { name: "Delete file permanently", exact: true }).count() === 1);
 await confirm(page).getByRole("button", { name: "Move to Recycle Bin", exact: true }).click();
 await page.waitForFunction(() => window.__mock.deleteCalls?.length === 1);
 check("manual removal: failed recycling keeps history and does not permanently delete", (await calls(page, "delete_files"))[0].args.permanent === false && await row("Alpha").count() === 1 && await page.evaluate(() => window.__mock.missing.length) === 0);
 await page.evaluate(() => window.__mock.recycleFail = false);
-await row("Alpha").getByRole("button", { name: "Delete file", exact: true }).click();
+await fileAction(row("Alpha"), "Delete file");
 await confirm(page).getByRole("button", { name: "Move to Recycle Bin", exact: true }).click();
 await row("Alpha").waitFor({ state: "detached" });
 check("manual removal: successful recycling removes history entry", (await calls(page, "delete_files")).at(-1).args.permanent === false);
-await row("Beta").getByRole("button", { name: "Delete file", exact: true }).click();
+await fileAction(row("Beta"), "Delete file");
 await confirm(page).getByRole("button", { name: "Delete file permanently", exact: true }).click();
 await row("Beta").waitFor({ state: "detached" });
 check("manual removal: permanent deletion is explicit", (await calls(page, "delete_files")).at(-1).args.permanent === true);
 await page.context().close();
 
 page = await open({ mock: { library: [A, B], duplicateGroups: [{ hash: "same", size: 1000, paths: [A.path, B.path] }], recycleFail: true } });
-await nav(page, "Library").click(); await lib(page).getByRole("button", { name: "Find duplicates", exact: true }).click();
+await nav(page, "Library").click(); await chooseMenu(page, "Library tools", "Find duplicates");
 await dlg(page).getByLabel(`Remove ${B.path}`, { exact: true }).check();
 check("duplicates: recoverable deletion is default", await dlg(page).getByLabel("Duplicate removal method").inputValue() === "trash");
 await dlg(page).getByRole("button", { name: "Review removal (1)", exact: true }).click();
@@ -103,7 +104,7 @@ check("duplicates: permanent removal sends only the selected copy", (await calls
 await page.context().close();
 
 page = await open({ history: [history(A, 60)] });
-await nav(page, "Settings").click();
+await nav(page, "Settings").click(); await page.getByLabel("Settings section", { exact: true }).selectOption("All settings");
 const clean = () => page.getByRole("region", { name: "Clean up", exact: true });
 check("cleanup: recycle is default", await clean().getByLabel("Cleanup deletion method").inputValue() === "trash");
 await clean().getByLabel("Cleanup deletion method").selectOption("permanent");

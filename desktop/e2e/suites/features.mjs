@@ -89,7 +89,7 @@ check("clip: not offered for live streams", await clipBtn().count() === 0);
 
 // ================= output organisation =================
 page = await open();
-await nav(page, "Settings").click();
+await nav(page, "Settings").click(); await page.getByLabel("Settings section", { exact: true }).selectOption("All settings");
 const ex = () => page.getByLabel("Example path").innerText();
 const exPl = () => page.getByLabel("Example playlist path").innerText();
 check("output: default example", (await ex()) === "Big Buck Bunny [aqz-KE-bpKQ].mp4", await ex());
@@ -121,7 +121,7 @@ check("output: request carries the chosen layout and name", req.extra.output.lay
 
 // custom template (Advanced)
 page = await open({ store: { mode: "advanced" } });
-await nav(page, "Settings").click();
+await nav(page, "Settings").click(); await page.getByLabel("Settings section", { exact: true }).selectOption("All settings");
 const custom = page.getByLabel("Custom file name template");
 await custom.fill("../escape/%(title)s");
 check("output: custom template with '..' is flagged immediately", await page.getByRole("alert").locator("text=can't be empty, '.' or '..'").count() === 1);
@@ -139,7 +139,7 @@ await details(page).getByRole("button", { name: "Download video" }).click();
 await waitCalls(page, "start_download", 1);
 check("output: request carries the template", (await lastReq(page)).extra.output.custom === "%(channel)s/%(title)s");
 // switching to Simple ignores it
-await nav(page, "Settings").click();
+await nav(page, "Settings").click(); await page.getByLabel("Settings section", { exact: true }).selectOption("All settings");
 await page.getByRole("radio", { name: /^simple/i }).click();
 await nav(page, "Search").click();
 await card(page, "https://www.youtube.com/watch?v=second000001");
@@ -153,7 +153,7 @@ page = await open();
 await page.keyboard.press("F1");
 await page.getByRole("dialog", { name: "Keyboard shortcuts" }).waitFor();
 const sections = await page.getByRole("dialog", { name: "Keyboard shortcuts" }).locator("section").evaluateAll((els) => els.map((e) => e.getAttribute("aria-label")));
-check("shortcuts: F1 opens the cheat sheet with its groups", JSON.stringify(sections) === JSON.stringify(["Search", "Downloading", "Music player", "Go to"]));
+check("shortcuts: F1 opens the cheat sheet with its groups", JSON.stringify(sections) === JSON.stringify(["Search", "Downloading", "Music library", "Music player", "Go to"]));
 check("shortcuts: shows Ctrl (or the Mac key) not 'Mod'", (await page.getByRole("dialog").innerText()).includes("Ctrl") && !(await page.getByRole("dialog").innerText()).includes("Mod"));
 await page.keyboard.press("Control+2");
 check("shortcuts: ignored while a dialog is open", (await current(page)).startsWith("Search"));
@@ -234,7 +234,7 @@ page = await open();
 await page.waitForFunction(() => window.__mock.calls.some((c) => c.cmd === "set_tray_status"));
 let tray = (await calls(page, "set_tray_status")).at(-1).args;
 check("tray: reports an idle queue and the close behaviour on start", tray.active === 0 && tray.queued === 0 && tray.paused === 0 && tray.mode === "downloads", JSON.stringify(tray));
-await nav(page, "Settings").click();
+await nav(page, "Settings").click(); await page.getByLabel("Settings section", { exact: true }).selectOption("All settings");
 await page.getByLabel("When I close the window").selectOption("always");
 await page.waitForFunction(() => window.__mock.calls.filter((c) => c.cmd === "set_tray_status").at(-1).args.mode === "always");
 check("tray: changing the close behaviour is reported", true);
@@ -254,7 +254,7 @@ await page.waitForFunction(() => window.__mock.notifications?.length > 0);
 check("tray: going to the background tells you downloads continue", /still downloading/.test(await page.evaluate(() => window.__mock.notifications.at(-1).title)));
 
 page = await open({ mock: { tray: false } });
-await nav(page, "Settings").click();
+await nav(page, "Settings").click(); await page.getByLabel("Settings section", { exact: true }).selectOption("All settings");
 await page.getByLabel("When I close the window").waitFor();
 check("tray: no tray support → control disabled with an explanation", await page.getByLabel("When I close the window").isDisabled() && await page.locator("text=doesn't show tray icons").count() === 1);
 
