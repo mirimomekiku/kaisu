@@ -9,6 +9,7 @@ import { canonicalUrl, playlistOf } from "../lib/links";
 import type { FormatPreset } from "../lib/presets";
 import type { HistoryItem, Settings } from "../lib/storage";
 import MediaCard from "./MediaCard";
+import PageHeading from "./PageHeading";
 import SearchResults from "./SearchResults";
 import type { Page } from "./Sidebar";
 
@@ -49,6 +50,7 @@ export default function SearchPage({ flow, actions, settings, visibleMedia, hist
 
   return (
     <div className="page flush">
+      <PageHeading title="Search" description="Find a video or paste a link, then choose video or audio." />
       {(errorMessage && friendlyInputError) || (previouslyDownloaded && !visibleMedia) ? (
         <div className="px-4 pt-3 flex flex-col gap-2">
           {previouslyDownloaded && !visibleMedia && (
@@ -172,8 +174,8 @@ export default function SearchPage({ flow, actions, settings, visibleMedia, hist
           <div className="big">
             <Search className="w-14 h-14" strokeWidth={1.25} />
           </div>
-          <h2>Search YouTube or paste a link</h2>
-          <p className="m-0">Type in the search box at the top right and press Return. Tick several results to download them all at once.</p>
+          <h2>What would you like to download?</h2>
+          <p className="m-0">Use the search box above. Choose a source, type a name or paste a link, and press Enter.</p>
         </div>
       )}
     </div>

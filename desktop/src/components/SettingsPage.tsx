@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { AlertTriangle, FolderOpen, Keyboard, RefreshCw, Route, Wrench } from "lucide-react";
 import { allowedCustomOptions, checkCustomArgs, checkFolder, errorText, testProxy, type AudioFormat, type CustomOption, type Browser, type CloseMode, type Component, type EngineInfo, type Layout, type NameStyle, type SponsorBlock } from "../lib/api";
@@ -53,7 +53,31 @@ const MODE_TEXT: Record<Mode, string> = {
   advanced: "Exact formats and streams, audio format choice, speed limit, SponsorBlock, cookies, per-download logs and your own yt-dlp arguments.",
 };
 
+const SETTINGS_SECTIONS: Record<string, { section: string; keywords: string }> = {
+  Interface: { section: "General", keywords: "mode simple advanced" },
+  Appearance: { section: "General", keywords: "theme accent dark light system colour" },
+  "Notifications and background": { section: "General", keywords: "close tray notification background" },
+  Helpers: { section: "General", keywords: "clipboard shortcuts tour duplicate volume loudness" },
+  Downloads: { section: "Downloads", keywords: "folder output name layout audio mp3 quality cover lyrics subtitles speed concurrent" },
+  "Saved presets": { section: "Downloads", keywords: "preset format choices" },
+  "Playback transitions": { section: "Playback", keywords: "music audio gapless crossfade player" },
+  "Move downloads": { section: "Automation", keywords: "move copy external drive destination" },
+  "Clean up": { section: "Automation", keywords: "delete trash older days cleanup" },
+  "Site rules": { section: "Automation", keywords: "site channel format destination rules" },
+  "Bandwidth schedule": { section: "Automation", keywords: "schedule time pause speed bandwidth" },
+  Network: { section: "Network & advanced", keywords: "proxy connection socks password" },
+  "Advanced options": { section: "Network & advanced", keywords: "sponsorblock cookies browser arguments logs verbose" },
+  "Download engine": { section: "Engine", keywords: "repair setup update ffmpeg yt-dlp runtime" },
+};
+const SettingsFilter = createContext({ section: "General", query: "" });
+const matchesSettings = (title: string, section: string, query: string) => {
+  const entry = SETTINGS_SECTIONS[title];
+  return query ? query.toLowerCase().trim().split(/\s+/).every((word) => `${title} ${entry?.keywords ?? ""}`.toLowerCase().includes(word)) : section === "All settings" || entry?.section === section;
+};
+
 function Group({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
+  const { section, query } = useContext(SettingsFilter);
+  if (!matchesSettings(title, section, query)) return null;
   return (
     <section className="panel overflow-hidden" aria-label={title}>
       <div className="panel-title">{title}</div>
@@ -82,6 +106,8 @@ function componentLine(name: string, c: Component | undefined) {
 }
 
 export default function SettingsPage({ settings, effectiveOutDir, engine, engineState, onChange, onCheckUpdate, onOpenSetup, onRevealEngine, onShowShortcuts, onShowTour, scheduleState, moveStatus, cleanup, trayAvailable }: Props) {
+  const [section, setSection] = useState("General");
+  const [query, setQuery] = useState("");
   // Is the download folder usable? Checked whenever it changes, so a problem shows up here and not mid-download.
   const [folder, setFolder] = useState<{ problem?: string; free?: number }>({});
   useEffect(() => {
@@ -152,11 +178,19 @@ export default function SettingsPage({ settings, effectiveOutDir, engine, engine
   };
 
   return (
-    <div className="page" style={{ maxWidth: 680, margin: "0 auto", width: "100%" }}>
+    <SettingsFilter.Provider value={{ section, query }}>
+    <div className="page settings-page" style={{ maxWidth: 760, margin: "0 auto", width: "100%" }}>
       <div>
         <h1 className="m-0 text-[17px] font-bold">Settings</h1>
         <p className="m-0 pref-hint">Changes are saved automatically.</p>
       </div>
+
+      <div className="settings-navigation">
+        <label>Section<select className="field" aria-label="Settings section" value={section} onChange={(e) => { setSection(e.target.value); setQuery(""); }}>{["General", "Downloads", "Playback", "Automation", "Network & advanced", "Engine", "All settings"].map((s) => <option key={s}>{s}</option>)}</select></label>
+        <label className="settings-search">Find a setting<input className="field" type="search" aria-label="Find a setting" placeholder="Try “audio”, “folder” or “proxy”" value={query} onChange={(e) => setQuery(e.target.value)} /></label>
+        {query && <button className="btn small" onClick={() => setQuery("")}>Clear search</button>}
+      </div>
+      {query && !Object.keys(SETTINGS_SECTIONS).some((title) => matchesSettings(title, section, query) && (advanced || !["Advanced options", "Site rules", "Bandwidth schedule"].includes(title))) && <div className="empty"><h2>No settings found</h2><p>Try a different word, or clear the search to browse sections.</p></div>}
 
       <Group title="Interface">
         <div className="pref-row" style={{ alignItems: "flex-start" }}>
@@ -776,5 +810,6 @@ export default function SettingsPage({ settings, effectiveOutDir, engine, engine
         </div>
       </Group>
     </div>
+    </SettingsFilter.Provider>
   );
 }

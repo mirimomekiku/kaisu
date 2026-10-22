@@ -1,4 +1,5 @@
 import TrackPreferences from "./TrackPreferences";
+import { FilterDropdown } from "./Dropdown";
 import { Captions, ListMusic, Loader2, Music, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward, Volume2, VolumeX, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { usePlayerState, usePlayerTime } from "../hooks/usePlayer";
@@ -146,22 +147,25 @@ export default function PlayerBar({ engine, onMini, miniBusy }: { engine: Player
       </div>
 
       <div className="pb-extras">
-        <TrackPreferences path={track.path} title={track.title} compact />
-        {onMini && <button className="btn small" disabled={miniBusy} aria-label="Open mini-player" title="Compact, always-on-top player" onClick={onMini}>Mini</button>}
         <button className="row-btn" aria-label="Show the lyrics" aria-expanded={panel === "lyrics"} title="Lyrics" style={panel === "lyrics" ? { background: "rgba(59,130,230,.25)" } : undefined} onClick={() => setPanel((p) => (p === "lyrics" ? null : "lyrics"))}>
           <Captions className="w-3.5 h-3.5" />
         </button>
         <button className="row-btn" aria-label="Show the queue" aria-expanded={panel === "queue"} title={`Play queue (${state.queue.length})`} style={panel === "queue" ? { background: "rgba(59,130,230,.25)" } : undefined} onClick={() => setPanel((p) => (p === "queue" ? null : "queue"))}>
           <ListMusic className="w-3.5 h-3.5" /> {state.queue.length}
         </button>
-        <select className="field" aria-label="Playback speed" title="Playback speed" value={state.rate} onChange={(e) => engine.setRate(Number(e.target.value))}>
+        <FilterDropdown label="Playback options">
+        <TrackPreferences path={track.path} title={track.title} compact />
+        <label>Speed<select className="field" aria-label="Playback speed" title="Playback speed" value={state.rate} onChange={(e) => engine.setRate(Number(e.target.value))}>
           {RATES.map((r) => (
             <option key={r} value={r}>
               {r}×
             </option>
           ))}
-        </select>
-        <SleepPicker engine={engine} />
+        </select></label>
+        <label>Sleep timer<SleepPicker engine={engine} /></label>
+        {onMini && <button className="btn small" disabled={miniBusy} aria-label="Open mini-player" title="Compact, always-on-top player" onClick={onMini}>Open mini-player</button>}
+        {state.sleep && <span className="dim">{state.sleep.kind === "track" ? "Stops after this track." : `Stops in ${minutesLeft(state.sleep, Date.now())} minutes.`}</span>}
+        </FilterDropdown>
         <button className="row-btn" aria-label={state.volume === 0 ? "Unmute" : "Mute"} title={state.volume === 0 ? "Unmute" : "Mute"} onClick={() => engine.setVolume(state.volume === 0 ? 1 : 0)}>
           {state.volume === 0 ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
         </button>
