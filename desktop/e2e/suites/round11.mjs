@@ -10,9 +10,15 @@ const T = (title, track, extra = {}) => ({
 const LIB = [T("Loud One", 1, { loudness: -10 }), T("Quiet One", 2, { loudness: -22 }), T("Unknown One", 3)];
 const library = (page) => page.getByRole("region", { name: "Music library" });
 const bar = (page) => page.getByRole("region", { name: "Music player" });
-const volumes = (page) => page.evaluate(() => (window.__vol ?? []).filter((r) => !r.audio.paused).map((r) => r.value));
+const volumes = (page) => page.evaluate(() => [...(window.__volumeAudio ?? [])].filter((audio) => !audio.paused).map((audio) => audio.volume));
 const watchVolume = (page) =>
   page.evaluate(() => {
+    window.__volumeAudio = new Set();
+    const play = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = function(...args) {
+      window.__volumeAudio.add(this);
+      return play.apply(this, args);
+    };
     const d = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "volume");
     window.__vol = [];
     Object.defineProperty(HTMLMediaElement.prototype, "volume", {
