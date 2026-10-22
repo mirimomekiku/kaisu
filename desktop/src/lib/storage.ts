@@ -3,6 +3,7 @@ import { secretDelete, secretGet, secretSet } from "./api";
 import { joinProxyPassword, splitProxyPassword } from "./proxy";
 import type { AudioFormat, Browser, CloseMode, CoverMode, ExtraOptions, Layout, LyricsMode, MoveConflict, MoveMode, NameStyle, Preset, SearchSource, SponsorBlock } from "./api";
 import { sanitizePresets, type FormatPreset } from "./presets";
+import { sanitizePlaylists, type Playlist } from "./playlists";
 import type { HistorySort } from "./history";
 import type { ScheduleRule } from "./schedule";
 import type { RepeatMode, Track } from "./audioEngine";
@@ -354,6 +355,23 @@ export async function savePlayer(player: SavedPlayer | null) {
     await (await getStore()).set("player", player);
   } catch (e) {
     console.warn("Could not save the player state", e);
+  }
+}
+
+export async function loadPlaylists(): Promise<Playlist[]> {
+  try {
+    return sanitizePlaylists(await (await getStore()).get("playlists"));
+  } catch (e) {
+    console.warn("Could not read the playlists", e);
+    return [];
+  }
+}
+
+export async function savePlaylists(playlists: Playlist[]) {
+  try {
+    await (await getStore()).set("playlists", playlists);
+  } catch (e) {
+    console.warn("Could not save the playlists", e);
   }
 }
 

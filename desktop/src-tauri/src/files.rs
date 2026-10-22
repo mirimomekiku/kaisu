@@ -106,7 +106,7 @@ pub fn file_info(paths: Vec<String>) -> Vec<FileInfo> {
 
 const MAX_EXPORT_BYTES: usize = 20 * 1024 * 1024;
 
-/// Saves exported history to a place the user picked. Only .csv and .json, only absolute paths, never over a folder.
+/// Saves exported history to a place the user picked. Only .csv, .json and playlists (.m3u/.m3u8), only absolute paths, never over a folder.
 #[tauri::command]
 pub fn export_text(path: String, contents: String) -> Result<(), String> {
     write_export(Path::new(&path), &contents)
@@ -117,8 +117,8 @@ fn write_export(p: &Path, contents: &str) -> Result<(), String> {
         return Err("Not a valid file location.".into());
     }
     let ext = p.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).unwrap_or_default();
-    if ext != "csv" && ext != "json" {
-        return Err("Exports are saved as .csv or .json.".into());
+    if !["csv", "json", "m3u", "m3u8"].contains(&ext.as_str()) {
+        return Err("Exports are saved as .csv, .json or .m3u8.".into());
     }
     if contents.len() > MAX_EXPORT_BYTES {
         return Err("That export is too large.".into());
@@ -291,6 +291,7 @@ mod tests {
         assert!(write_export(&dir.join("h.csv"), "a,b").is_ok());
         assert_eq!(std::fs::read_to_string(dir.join("h.csv")).unwrap(), "a,b");
         assert!(write_export(&dir.join("h.json"), "[]").is_ok());
+        assert!(write_export(&dir.join("p.m3u8"), "#EXTM3U").is_ok());
         assert!(write_export(&dir.join("h.exe"), "x").is_err());
         assert!(write_export(&dir, "x").is_err());
         assert!(write_export(Path::new("h.csv"), "x").is_err());
