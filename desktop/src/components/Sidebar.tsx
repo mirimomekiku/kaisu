@@ -1,7 +1,7 @@
-import { Download, Film, History as HistoryIcon, Search, Settings as SettingsIcon, type LucideIcon } from "lucide-react";
+import { Download, Film, History as HistoryIcon, Library as LibraryIcon, Search, Settings as SettingsIcon, type LucideIcon } from "lucide-react";
 import Picture from "./Picture";
 
-export type Page = "search" | "downloads" | "history" | "settings";
+export type Page = "search" | "downloads" | "history" | "library" | "settings";
 
 interface Props {
   page: Page;
@@ -10,6 +10,8 @@ interface Props {
   active: number;
   total: number;
   historyCount: number;
+  /** Songs in the music library. */
+  songCount: number;
   /** The video currently open in the inspector, shown as artwork at the bottom. */
   art: { src: string | null; caption: string } | null;
 }
@@ -33,14 +35,16 @@ function Item({ icon: Icon, label, page, current, count, hot, onNavigate }: {
 }
 
 /** The iTunes-style "source list": navigation on top, current artwork at the bottom. */
-export default function Sidebar({ page, onNavigate, active, total, historyCount, art }: Props) {
+export default function Sidebar({ page, onNavigate, active, total, historyCount, songCount, art }: Props) {
   return (
     <aside className="sidebar" aria-label="Sidebar">
       <nav aria-label="Sections">
-        <div className="source-header">Library</div>
+        <div className="source-header">Download</div>
         <Item icon={Search} label="Search" page="search" current={page} onNavigate={onNavigate} />
         <Item icon={Download} label="Downloads" page="downloads" current={page} count={active || total} hot={active > 0} onNavigate={onNavigate} />
         <Item icon={HistoryIcon} label="History" page="history" current={page} count={historyCount} onNavigate={onNavigate} />
+        <div className="source-header">Music</div>
+        <Item icon={LibraryIcon} label="Library" page="library" current={page} count={songCount} onNavigate={onNavigate} />
         <div className="source-header">Kaisu</div>
         <Item icon={SettingsIcon} label="Settings" page="settings" current={page} onNavigate={onNavigate} />
       </nav>

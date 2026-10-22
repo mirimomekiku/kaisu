@@ -5,6 +5,7 @@ mod files;
 mod leftovers;
 mod library;
 mod links;
+mod lyrics;
 mod media;
 mod meta;
 mod net;
@@ -16,6 +17,7 @@ mod secrets;
 mod search;
 mod setup;
 mod subs;
+mod tags;
 mod thumbs;
 mod transfer;
 mod tray;
@@ -106,6 +108,9 @@ pub fn run() {
             library::library_load,
             library::library_scan,
             library::library_cover,
+            lyrics::lyrics_read,
+            tags::library_edit_tags,
+            lyrics::lyrics_find,
             leftovers::remove_leftovers,
             media::play_in_app,
             media::preview_clip,

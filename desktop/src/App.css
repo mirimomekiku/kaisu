@@ -1428,3 +1428,225 @@ html:not([data-accent="blue"]) :is(.itable tbody tr.sel, .row-card.sel, .sidebar
 .queuepanel .qp-len {
   flex: none;
 }
+
+/* ---- the music library page ---- */
+.library {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  font-size: 12px;
+}
+.library .lib-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 6px 10px;
+  background: linear-gradient(#ececec, #dcdcdc);
+  border-bottom: 1px solid #a8a8a8;
+}
+.library .lib-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 7px;
+  border: 1px solid var(--edge);
+  border-radius: 11px;
+  background: #fff;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.2);
+  min-width: 190px;
+}
+.library .lib-search input {
+  border: 0;
+  outline: 0;
+  background: transparent;
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+}
+.library .lib-chip {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 12px;
+  background: #e8eef9;
+  border-bottom: 1px solid #c3cfe6;
+}
+.library .lib-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.library .lib-row {
+  display: grid;
+  grid-template-columns: 38px minmax(120px, 2fr) minmax(90px, 1.2fr) minmax(90px, 1.2fr) 46px 50px minmax(90px, 1fr) 78px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  box-sizing: border-box;
+}
+.library .lib-row.album-track {
+  grid-template-columns: 38px 1fr 56px 40px;
+  height: 28px;
+}
+.library [role="listitem"].lib-row:nth-child(even),
+.library .album-track:nth-child(even) {
+  background: #f6f6f6;
+}
+.library [role="listitem"].lib-row:hover,
+.library .album-track:hover {
+  background: #e4eefb;
+}
+.library .lib-head {
+  flex: none;
+  height: 22px;
+  font-weight: bold;
+  background: linear-gradient(#f4f4f4, #dedede);
+  border-bottom: 1px solid #a8a8a8;
+  color: #333;
+}
+.library .num {
+  text-align: right;
+}
+.library .lib-title {
+  border: 0;
+  background: none;
+  padding: 0;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+.library .lib-actions {
+  display: inline-flex;
+  justify-content: flex-end;
+  opacity: 0.35;
+}
+.library .lib-row:hover .lib-actions,
+.library .lib-row:focus-within .lib-actions {
+  opacity: 1;
+}
+.library .album-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 14px;
+  padding: 14px;
+}
+.library .album-card {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  border: 0;
+  background: none;
+  padding: 0;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+.library .album-title {
+  font-weight: bold;
+}
+.library .album-cover {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.library .album-cover.large {
+  width: 150px;
+  flex: none;
+}
+.library .album-card:hover .album-cover {
+  box-shadow: 0 0 0 3px rgba(87, 156, 255, 0.6);
+}
+.library .album-detail {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.library .album-tracks {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid #c8c8c8;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.library .artist-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.library .artist-row {
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 14px;
+  border: 0;
+  border-bottom: 1px solid #e3e3e3;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+}
+.library .artist-row:hover {
+  background: #e4eefb;
+}
+
+/* ---- the lyrics panel ---- */
+.lyricspanel {
+  flex: none;
+  max-height: 38vh;
+  display: flex;
+  flex-direction: column;
+  background: #f8f8f8;
+  border-top: 1px solid #777;
+  font-size: 12px;
+}
+.lyricspanel .ly-body {
+  overflow: auto;
+  padding: 10px 16px;
+}
+.lyricspanel .ly-plain {
+  margin: 0;
+  white-space: pre-wrap;
+  font: inherit;
+  line-height: 1.6;
+}
+.lyricspanel .ly-lines {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  text-align: center;
+}
+.lyricspanel .ly-lines li {
+  padding: 3px 0;
+  color: #777;
+  font-size: 13px;
+  transition: color 0.2s, font-size 0.2s;
+}
+.lyricspanel .ly-lines li button {
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.lyricspanel .ly-lines li.past {
+  color: #555;
+}
+.lyricspanel .ly-lines li.current {
+  color: #1b4585;
+  font-weight: bold;
+  font-size: 16px;
+}

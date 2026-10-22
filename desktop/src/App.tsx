@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, Loader2 } from "lucide-react";
 import AppBanners from "./components/AppBanners";
+import LibraryPage from "./components/LibraryPage";
 import PlayerBar from "./components/PlayerBar";
 import { useConfirm } from "./components/ConfirmDialog";
 import DownloadsPage from "./components/DownloadsPage";
@@ -23,6 +24,7 @@ import { useBatchFinish, useSessionStats, type WhenDone } from "./hooks/useBatch
 import { useClipboardOffer } from "./hooks/useClipboardOffer";
 import { useDownloadActions } from "./hooks/useDownloadActions";
 import { useLeftovers } from "./hooks/useLeftovers";
+import { useLibrary } from "./hooks/useLibrary";
 import { MediaActionsContext, useMediaDialogs } from "./hooks/useMediaDialogs";
 import { PlayerContext, useCreatePlayer, usePlayerState } from "./hooks/usePlayer";
 import { useDownloads, sameDownload, type DownloadItem } from "./hooks/useDownloads";
@@ -135,6 +137,9 @@ export default function App() {
   });
   const { existing, sizes, recheck, openDownloaded, revealDownloaded, mover, cleaner, deleteDownloaded } = files;
 
+  // The music library: what was found last time, then what has changed since.
+  const library = useLibrary({ ready: files.ready, historyCount: history.length, showFlash });
+
   const copyText = useCallback(
     (text: string, what: string) => {
       navigator.clipboard
@@ -183,6 +188,7 @@ export default function App() {
     announce: setNote,
     openDownloaded,
     player,
+    askLyricsConsent: ensureLyricsConsent,
     onConverted: (from, to) => {
       const original = historyRef.current.find((h) => h.path === from);
       if (original) updateHistory([{ ...original, id: `${original.id}-${Date.now().toString(36)}`, path: to, preset: "audio", timestamp: Date.now(), flag: undefined, transferred: undefined }, ...historyRef.current]);
@@ -387,8 +393,10 @@ export default function App() {
           : ""
       : page === "downloads"
         ? `${items.length} download${items.length === 1 ? "" : "s"}${activeDownloads.length ? `, ${activeDownloads.length} active` : ""}`
-        : page === "history"
-          ? `${historyStats.count === history.length ? history.length : `${historyStats.count} of ${history.length}`} item${history.length === 1 ? "" : "s"}${historyStats.bytes > 0 ? `, ${formatBytes(historyStats.bytes)}` : ""}`
+        : page === "library"
+          ? `${library.tracks.length} song${library.tracks.length === 1 ? "" : "s"}`
+          : page === "history"
+            ? `${historyStats.count === history.length ? history.length : `${historyStats.count} of ${history.length}`} item${history.length === 1 ? "" : "s"}${historyStats.bytes > 0 ? `, ${formatBytes(historyStats.bytes)}` : ""}`
           : "";
 
   const changeSource = (next: SearchSource) => {
@@ -405,7 +413,7 @@ export default function App() {
     <MediaActionsContext.Provider value={mediaDialogs.actions}>
     <div className="app">
       <Toolbar
-        title={page === "settings" ? "Settings" : null}
+        title={page === "settings" ? "Settings" : page === "library" ? "Library" : null}
         view={currentView}
         viewOptions={viewOptions}
         onView={setView(viewKey)}
@@ -493,6 +501,7 @@ export default function App() {
           active={activeDownloads.length}
           total={items.length}
           historyCount={history.length}
+          songCount={library.tracks.length}
           art={{ src: visibleMedia?.thumbnail ?? null, caption: visibleMedia?.title ?? "No video selected" }}
         />
 
@@ -564,6 +573,8 @@ export default function App() {
               onShownChange={(count, bytes) => setHistoryStats((prev) => (prev.count === count && prev.bytes === bytes ? prev : { count, bytes }))}
             />
           )}
+
+          {page === "library" && <LibraryPage tracks={library.tracks} scanning={library.scanning} loaded={library.loaded} onScan={() => void library.scan()} onReveal={revealDownloaded} onEditTags={library.editTags} announce={setNote} flash={showFlash} />}
 
           {page === "settings" && (
             <SettingsPage

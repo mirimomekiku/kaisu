@@ -36,6 +36,7 @@ export const SHORTCUT_GROUPS: Array<{ title: string; items: Array<{ keys: string
       { keys: ["Mod", "2"], action: "Downloads" },
       { keys: ["Mod", "3"], action: "History" },
       { keys: ["Mod", "4"], action: "Settings (also Mod+,)" },
+      { keys: ["Mod", "5"], action: "Music library" },
       { keys: ["F1"], action: "Show this list (also Mod+/)" },
     ],
   },

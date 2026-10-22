@@ -1,4 +1,5 @@
 import { Channel, convertFileSrc, invoke } from "@tauri-apps/api/core";
+import type { TagEditRequest } from "./tagEdit";
 
 export type Preset = "best" | "p1080" | "p720" | "audio";
 export type AudioFormat = "mp3" | "m4a" | "opus" | "flac" | "wav";
@@ -376,8 +377,33 @@ export function libraryScan(onProgress: (done: number, total: number) => void) {
   return invoke<LibTrack[]>("library_scan", { onProgress: channel });
 }
 
+/** How changing the tags of one file went. */
+export interface EditResult {
+  path: string;
+  ok: boolean;
+  error: string | null;
+  /** The file as it reads now, when it worked. */
+  track: LibTrack | null;
+}
+/** Changes tags in these files (all the same way). Each file is rewritten through a checked copy, so a failure leaves it untouched. */
+export const libraryEditTags = (paths: string[], edit: TagEditRequest) => invoke<EditResult[]>("library_edit_tags", { paths, edit });
+
 /** A sound file's picture (its own, or a cover.jpg beside it). Rejects when there is none. */
 export const libraryCover = (path: string) => invoke<ArrayBuffer>("library_cover", { path });
+
+// ---- lyrics ----
+
+export interface SongLyrics {
+  /** Timed lines (`[01:23.45] words`). */
+  synced: string | null;
+  plain: string | null;
+  /** "file", "tags" or "online". */
+  source: "file" | "tags" | "online" | null;
+}
+/** The lyrics a song already has: a .lrc or .txt beside it, or inside its tags. */
+export const lyricsRead = (path: string) => invoke<SongLyrics>("lyrics_read", { path });
+/** Looks the song up on LRCLIB and saves the lyrics beside it. Sends the artist and title to that service, so ask first. */
+export const lyricsFind = (path: string) => invoke<SongLyrics>("lyrics_find", { path, proxy: currentProxy });
 
 // ---- unfinished downloads, playing, previews and converting ----
 

@@ -184,6 +184,49 @@ export async function invoke(cmd: string, args: any = {}): Promise<any> {
       return /--exec|(^|\s)-o\s/.test(args.text) ? "`--exec` isn't allowed because it can run programs on your computer." : null;
     case "allowed_custom_options":
       return [{ names: ["-R", "--retries"], values: 1 }, { names: ["--embed-chapters"], values: 0 }, { names: ["-f", "--format"], values: 1 }];
+    case "lyrics_read":
+      return (w.__mock.lyrics ?? {})[args.path] ?? { synced: null, plain: null, source: null };
+    case "lyrics_find": {
+      await sleep(w.__mock.lyricsDelay ?? 40);
+      if (w.__mock.lyricsFindFail) throw "No lyrics were found for Artist - Song.";
+      const found = w.__mock.lyricsFound ?? { synced: "[00:01.00] Found line one\n[00:02.00] Found line two", plain: null, source: "online" };
+      (w.__mock.lyrics ??= {})[args.path] = found;
+      return found;
+    }
+    case "library_load":
+      return w.__mock.library ?? [];
+    case "library_scan": {
+      const ch: Channel = args.onProgress;
+      const found = w.__mock.library ?? [];
+      (w.__mock.scanning = true);
+      for (let i = 0; i < 3; i++) {
+        ch.onmessage({ done: Math.round((found.length * (i + 1)) / 3), total: found.length });
+        await sleep(w.__mock.scanDelay ?? 20);
+      }
+      w.__mock.scanning = false;
+      return w.__mock.library ?? [];
+    }
+    case "library_edit_tags": {
+      (w.__mock.tagEdits ??= []).push({ paths: args.paths, edit: JSON.parse(JSON.stringify(args.edit)) });
+      await sleep(w.__mock.tagDelay ?? 30);
+      return args.paths.map((path: string) => {
+        if ((w.__mock.tagFail ?? []).includes(path)) return { path, ok: false, error: "Couldn't replace the file (Access is denied). Is it open in another program?", track: null };
+        const lib: any[] = (w.__mock.library ??= []);
+        const at = lib.findIndex((t) => t.path === path);
+        const field: Record<string, string> = { title: "title", artist: "artist", album: "album", album_artist: "album_artist", genre: "genre" };
+        const track = { ...lib[at] };
+        for (const [k, v] of Object.entries(args.edit as Record<string, string>)) {
+          if (field[k]) track[field[k]] = v;
+          else track[k] = v === "" ? null : Number(v);
+        }
+        if (at >= 0) lib[at] = track;
+        return { path, ok: true, error: null, track };
+      });
+    }
+    case "library_cover": {
+      if ((w.__mock.noCover ?? []).includes(args.path) || w.__mock.noCovers) throw "No picture.";
+      return Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="), (c) => c.charCodeAt(0)).buffer;
+    }
     case "find_leftovers":
       return w.__mock.leftovers ?? [];
     case "remove_leftovers":
