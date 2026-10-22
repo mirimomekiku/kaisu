@@ -1,6 +1,6 @@
 [package]
 name = "desktop"
-version = "0.0.1"
+version = "0.0.2"
 description = "Kaisu — a yt-dlp video downloader"
 authors = ["dlord213"]
 edition = "2024"
