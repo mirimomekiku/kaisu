@@ -5,6 +5,7 @@ mod files;
 mod leftovers;
 mod library;
 mod links;
+mod loudness;
 mod lyrics;
 mod media;
 mod meta;
@@ -110,6 +111,7 @@ pub fn run() {
             library::library_cover,
             lyrics::lyrics_read,
             tags::library_edit_tags,
+            loudness::library_analyze,
             lyrics::lyrics_find,
             leftovers::remove_leftovers,
             media::play_in_app,

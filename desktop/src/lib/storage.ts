@@ -62,6 +62,8 @@ export interface Settings {
   // Convenience.
   notifyWhenDone: boolean;
   warnDuplicates: boolean;
+  /** Play loud songs a little quieter so the volume stays even. */
+  levelVolume: boolean;
   watchClipboard: boolean;
   closeMode: CloseMode;
   theme: Theme;
@@ -148,6 +150,7 @@ export const DEFAULT_SETTINGS: Settings = {
   playlistNumbering: true,
   notifyWhenDone: true,
   warnDuplicates: true,
+  levelVolume: false,
   watchClipboard: true,
   closeMode: "downloads",
   theme: "aqua",

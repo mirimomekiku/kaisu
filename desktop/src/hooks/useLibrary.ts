@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { errorText, libraryEditTags, libraryLoad, libraryScan, type EditResult, type LibTrack } from "../lib/api";
+import { errorText, libraryAnalyze, libraryEditTags, libraryLoad, libraryScan, type EditResult, type LibTrack } from "../lib/api";
+import { unmeasured } from "../lib/loudness";
 import type { TagEditRequest } from "../lib/tagEdit";
 
 interface Args {
@@ -70,9 +71,47 @@ export function useLibrary({ ready, historyCount, showFlash }: Args) {
   const editTags = useCallback(async (paths: string[], edit: TagEditRequest): Promise<EditResult[]> => {
     const results = await libraryEditTags(paths, edit);
     const updated = new Map(results.flatMap((r) => (r.ok && r.track ? [[r.path, r.track] as const] : [])));
-    if (updated.size > 0) setTracks((prev) => prev.map((t) => updated.get(t.path) ?? t));
+    // Changing tags doesn't change how loud a song is.
+    if (updated.size > 0) setTracks((prev) => prev.map((t) => { const n = updated.get(t.path); return n ? { ...n, loudness: t.loudness } : t; }));
     return results;
   }, []);
 
-  return { tracks, scanning, loaded, scan, editTags };
+  /** Measures how loud these songs are and shows the result. Songs that can't be measured aren't tried again this session. */
+  const failed = useRef(new Set<string>());
+  const measure = useCallback(async (paths: string[]) => {
+    const wanted = paths.filter((p) => !failed.current.has(p));
+    if (wanted.length === 0) return;
+    const results = await libraryAnalyze(wanted);
+    for (const r of results) if (r.loudness == null) failed.current.add(r.path);
+    const got = new Map(results.flatMap((r) => (r.loudness == null ? [] : [[r.path, r.loudness] as const])));
+    if (got.size > 0) setTracks((prev) => prev.map((t) => (got.has(t.path) ? { ...t, loudness: got.get(t.path)! } : t)));
+  }, []);
+
+  // Measuring the whole library, a few songs at a time, until done or stopped.
+  const [analysing, setAnalysing] = useState<{ done: number; total: number } | null>(null);
+  const stop = useRef(false);
+  const tracksRef = useRef(tracks);
+  tracksRef.current = tracks;
+  const analyse = useCallback(async () => {
+    if (analysing) return;
+    const todo = unmeasured(tracksRef.current).filter((p) => !failed.current.has(p));
+    if (todo.length === 0) return;
+    stop.current = false;
+    setAnalysing({ done: 0, total: todo.length });
+    try {
+      for (let i = 0; i < todo.length && !stop.current; i += 5) {
+        await measure(todo.slice(i, i + 5));
+        setAnalysing({ done: Math.min(todo.length, i + 5), total: todo.length });
+      }
+    } catch (e) {
+      showFlash(errorText(e), true);
+    } finally {
+      setAnalysing(null);
+    }
+  }, [analysing, measure, showFlash]);
+  const stopAnalysing = useCallback(() => {
+    stop.current = true;
+  }, []);
+
+  return { tracks, scanning, loaded, scan, editTags, measure, analysing, analyse, stopAnalysing };
 }

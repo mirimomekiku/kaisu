@@ -26,6 +26,7 @@ import { useDownloadActions } from "./hooks/useDownloadActions";
 import { useLeftovers } from "./hooks/useLeftovers";
 import { useLibrary } from "./hooks/useLibrary";
 import { MediaActionsContext, useMediaDialogs } from "./hooks/useMediaDialogs";
+import { useLoudness } from "./hooks/useLoudness";
 import { PlayerContext, useCreatePlayer, usePlayerState } from "./hooks/usePlayer";
 import { useDownloads, sameDownload, type DownloadItem } from "./hooks/useDownloads";
 import { useDropLinks } from "./hooks/useDropLinks";
@@ -139,6 +140,7 @@ export default function App() {
 
   // The music library: what was found last time, then what has changed since.
   const library = useLibrary({ ready: files.ready, historyCount: history.length, showFlash });
+  useLoudness({ engine: player, enabled: settings.levelVolume, tracks: library.tracks, measure: library.measure });
 
   const copyText = useCallback(
     (text: string, what: string) => {
@@ -574,7 +576,7 @@ export default function App() {
             />
           )}
 
-          {page === "library" && <LibraryPage tracks={library.tracks} scanning={library.scanning} loaded={library.loaded} onScan={() => void library.scan()} onReveal={revealDownloaded} onEditTags={library.editTags} announce={setNote} flash={showFlash} />}
+          {page === "library" && <LibraryPage tracks={library.tracks} scanning={library.scanning} loaded={library.loaded} onScan={() => void library.scan()} onReveal={revealDownloaded} onEditTags={library.editTags} analysing={library.analysing} onAnalyse={() => void library.analyse()} onStopAnalysing={library.stopAnalysing} announce={setNote} flash={showFlash} />}
 
           {page === "settings" && (
             <SettingsPage

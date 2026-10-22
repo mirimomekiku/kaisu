@@ -66,6 +66,32 @@ pub async fn run_capture_proxied(program: &Path, args: &[&str], timeout: Duratio
     }
 }
 
+/// Runs a short command and returns what it printed on stderr (some tools, like ffmpeg's filters, report there), failing on a
+/// non-zero exit or timeout.
+pub async fn run_capture_stderr(program: &Path, args: &[&str], timeout: Duration) -> Result<String, String> {
+    let mut child = command(program).args(args).spawn().map_err(|e| format!("Failed to start {}: {e}", program.display()))?;
+    let mut stdout = child.stdout.take().ok_or("no stdout")?;
+    let mut stderr = child.stderr.take().ok_or("no stderr")?;
+
+    let work = async {
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let (_, _, status) = tokio::join!(stdout.read_to_end(&mut out), stderr.read_to_end(&mut err), child.wait());
+        (err, status)
+    };
+
+    match tokio::time::timeout(timeout, work).await {
+        Ok((err, Ok(status))) if status.success() => Ok(String::from_utf8_lossy(&err).into_owned()),
+        Ok((err, Ok(_))) => Err(clean_stderr(&String::from_utf8_lossy(&err))),
+        Ok((_, Err(e))) => Err(format!("Process error: {e}")),
+        Err(_) => {
+            if let Some(pid) = child.id() {
+                kill_tree(pid);
+            }
+            Err("Timed out".into())
+        }
+    }
+}
+
 /// The last few lines of a program's error output, with any password in a web address hidden.
 pub fn clean_stderr(s: &str) -> String {
     let msg: Vec<&str> = s.lines().map(str::trim).filter(|l| !l.is_empty()).collect();

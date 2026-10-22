@@ -703,6 +703,12 @@ export default function SettingsPage({ settings, effectiveOutDir, engine, engine
         </div>
         <div className="pref-row">
           <label className="flex items-center gap-2">
+            <input type="checkbox" checked={settings.levelVolume} onChange={(e) => onChange({ levelVolume: e.target.checked })} />
+            Keep the music player at an even volume (loud songs are turned down; measured once, in the background)
+          </label>
+        </div>
+        <div className="pref-row">
+          <label className="flex items-center gap-2">
             <input type="checkbox" checked={settings.watchClipboard} onChange={(e) => onChange({ watchClipboard: e.target.checked })} />
             Offer to download video links I copy (only well-known sites; nothing is sent anywhere)
           </label>

@@ -222,7 +222,11 @@ pub async fn library_edit_tags(app: AppHandle, scope: State<'_, Scope>, paths: V
             let mut remembered = library::load_cache(&cache);
             for t in changed {
                 match remembered.iter_mut().find(|c| c.path == t.path) {
-                    Some(slot) => *slot = t,
+                    // The sound didn't change, so what was measured still holds.
+                    Some(slot) => {
+                        let loudness = slot.loudness;
+                        *slot = LibTrack { loudness, ..t };
+                    }
                     None => remembered.push(t),
                 }
             }

@@ -223,6 +223,17 @@ export async function invoke(cmd: string, args: any = {}): Promise<any> {
         return { path, ok: true, error: null, track };
       });
     }
+    case "library_analyze": {
+      (w.__mock.analyzed ??= []).push(args.paths);
+      await sleep(w.__mock.analyzeDelay ?? 20);
+      const out = args.paths.map((path: string) => ({ path, loudness: (w.__mock.analyzeFail ?? []).includes(path) ? null : (w.__mock.loudness?.[path] ?? -20) }));
+      const lib: any[] = (w.__mock.library ??= []);
+      for (const r of out) {
+        const t = lib.find((x) => x.path === r.path);
+        if (t && r.loudness != null) t.loudness = r.loudness;
+      }
+      return out;
+    }
     case "library_cover": {
       if ((w.__mock.noCover ?? []).includes(args.path) || w.__mock.noCovers) throw "No picture.";
       return Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="), (c) => c.charCodeAt(0)).buffer;

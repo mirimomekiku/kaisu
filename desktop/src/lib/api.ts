@@ -388,6 +388,9 @@ export interface EditResult {
 /** Changes tags in these files (all the same way). Each file is rewritten through a checked copy, so a failure leaves it untouched. */
 export const libraryEditTags = (paths: string[], edit: TagEditRequest) => invoke<EditResult[]>("library_edit_tags", { paths, edit });
 
+/** How loud each of these songs is, once measured (LUFS), or null when one couldn't be measured. At most 20 at a time. */
+export const libraryAnalyze = (paths: string[]) => invoke<Array<{ path: string; loudness: number | null }>>("library_analyze", { paths });
+
 /** A sound file's picture (its own, or a cover.jpg beside it). Rejects when there is none. */
 export const libraryCover = (path: string) => invoke<ArrayBuffer>("library_cover", { path });
 

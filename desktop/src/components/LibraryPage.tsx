@@ -8,6 +8,7 @@ import TagEditor from "./TagEditor";
 import PlaylistPicker from "./PlaylistPicker";
 import PlaylistsView from "./PlaylistsView";
 import { usePlaylists } from "../hooks/usePlaylists";
+import { unmeasured } from "../lib/loudness";
 import { formatClock } from "../lib/format";
 import { albumsOf, artistsOf, filterTracks, formatsOf, qualityLabel, sortTracks, toPlayerTrack, totalDuration, type Album, type SortKey } from "../lib/library";
 import { CoverArt } from "./Picture";
@@ -34,6 +35,9 @@ interface Props {
   onScan: () => void;
   onReveal: (path: string) => void;
   /** Changes tags in these files. */
+  analysing: { done: number; total: number } | null;
+  onAnalyse: () => void;
+  onStopAnalysing: () => void;
   onEditTags: (paths: string[], edit: TagEditRequest) => Promise<EditResult[]>;
   announce: (note: { title: string; subtitle?: string }) => void;
   flash: (text: string, error?: boolean) => void;
@@ -45,7 +49,7 @@ const hours = (seconds: number) => {
 };
 
 /** The music library: every sound file found in the download folders, by song, album or artist. */
-export default function LibraryPage({ tracks, scanning, loaded, onScan, onReveal, onEditTags, announce, flash }: Props) {
+export default function LibraryPage({ tracks, scanning, loaded, onScan, onReveal, onEditTags, analysing, onAnalyse, onStopAnalysing, announce, flash }: Props) {
   const player = usePlayerEngine();
   const playlists = usePlaylists();
   const [adding, setAdding] = useState<LibTrack[] | null>(null);
@@ -63,6 +67,7 @@ export default function LibraryPage({ tracks, scanning, loaded, onScan, onReveal
   const albums = useMemo(() => albumsOf(shown), [shown]);
   const artists = useMemo(() => artistsOf(matching), [matching]);
   const byPath = useMemo(() => new Map(tracks.map((t) => [t.path, t])), [tracks]);
+  const unmeasuredCount = useMemo(() => unmeasured(tracks).length, [tracks]);
   const album = openAlbum ? albums.find((a) => a.key === openAlbum) ?? null : null;
 
   const play = (list: LibTrack[], from = 0) => player?.play(list.slice(from, from + QUEUE_FROM_HERE).map(toPlayerTrack), 0);
@@ -135,6 +140,17 @@ export default function LibraryPage({ tracks, scanning, loaded, onScan, onReveal
           {shown.length === tracks.length ? `${tracks.length} songs` : `${shown.length} of ${tracks.length} songs`}
           {shown.length > 0 ? ` · ${hours(totalDuration(shown))}` : ""}
         </span>
+        {analysing ? (
+          <button className="btn small" onClick={onStopAnalysing} title="Stop measuring loudness">
+            <Loader2 className="w-3 h-3 animate-spin" /> Measuring {analysing.done} of {analysing.total} · Stop
+          </button>
+        ) : (
+          unmeasuredCount > 0 && (
+            <button className="btn small" onClick={onAnalyse} title="Measure how loud each song is, so the player can keep the volume even">
+              Measure loudness ({unmeasuredCount})
+            </button>
+          )
+        )}
         <button className="btn small" onClick={onScan} disabled={scanning !== null} title="Look for new and changed files">
           <RefreshCw className={`w-3 h-3 ${scanning ? "animate-spin" : ""}`} /> Rescan
         </button>
