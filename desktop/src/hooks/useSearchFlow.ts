@@ -204,6 +204,9 @@ export function useSearchFlow({ settings, settingsLoaded, settingsRef, engineRea
     if (!settingsLoaded || mode !== "simple" || !engineReady) return;
     if (!LOOKS_LIKE_URL.test(target) || target === lastAutoInspected.current) return;
     const timer = setTimeout(() => {
+      // Enter (or selecting a result) may have handled this link while the debounce was waiting.
+      // Re-fetching would unmount its card and discard clip/tag edits made in the meantime.
+      if (target === lastAutoInspected.current) return;
       setPage("search");
       handleFetchInfo();
     }, AUTO_INSPECT_DELAY_MS);

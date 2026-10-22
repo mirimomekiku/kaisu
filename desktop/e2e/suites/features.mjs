@@ -16,6 +16,8 @@ check("clip: shows the video length", await details(page).locator("text=(video i
 check("clip: valid default → 'Download clip' button", await details(page).getByRole("button", { name: "Download clip" }).count() === 1);
 await details(page).getByLabel("Clip start").fill("abc");
 check("clip: junk is rejected with a hint", await details(page).getByRole("alert").locator("text=Type times like 1:20").count() === 1 && await details(page).getByRole("button", { name: "Download clip" }).isDisabled());
+await page.waitForTimeout(900);
+check("clip: pressing Enter cancels a pending automatic lookup and keeps edits", await details(page).getByLabel("Clip start").count() === 1 && (await calls(page, "get_media_info")).length === 1);
 await details(page).getByLabel("Clip start").fill("2:00");
 await details(page).getByLabel("Clip end").fill("1:00");
 check("clip: end must be after start", await details(page).getByRole("alert").locator("text=The end must come after the start.").count() === 1);
@@ -151,7 +153,7 @@ page = await open();
 await page.keyboard.press("F1");
 await page.getByRole("dialog", { name: "Keyboard shortcuts" }).waitFor();
 const sections = await page.getByRole("dialog", { name: "Keyboard shortcuts" }).locator("section").evaluateAll((els) => els.map((e) => e.getAttribute("aria-label")));
-check("shortcuts: F1 opens the cheat sheet with its groups", JSON.stringify(sections) === JSON.stringify(["Search", "Downloading", "Go to"]));
+check("shortcuts: F1 opens the cheat sheet with its groups", JSON.stringify(sections) === JSON.stringify(["Search", "Downloading", "Music player", "Go to"]));
 check("shortcuts: shows Ctrl (or the Mac key) not 'Mod'", (await page.getByRole("dialog").innerText()).includes("Ctrl") && !(await page.getByRole("dialog").innerText()).includes("Mod"));
 await page.keyboard.press("Control+2");
 check("shortcuts: ignored while a dialog is open", (await current(page)).startsWith("Search"));
