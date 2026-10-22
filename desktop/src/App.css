@@ -1803,4 +1803,69 @@ select.field, select.source-select, .track-rating select {
 .track-rating select { width:49px; min-height:22px; padding:1px 21px 1px 6px; background-position:right 6px center, center; }
 select.field:disabled, select.source-select:disabled { opacity:.6; }
 [data-download-id]:focus-visible, [data-history-id]:focus-visible { outline:2px solid var(--blue-edge); outline-offset:-2px; }
+
+/* Full-screen listening room: a generous album/lyrics layout in brushed silver and Aqua blue. */
+.full-player { position:fixed; inset:0; z-index:800; display:flex; flex-direction:column; min-width:0; color:var(--ink); background:linear-gradient(135deg, var(--window), var(--paper) 70%); }
+.full-header { display:flex; align-items:center; justify-content:space-between; gap:20px; min-height:68px; padding:12px 28px; flex:none; background:linear-gradient(#f7f7f7, #d7d7d7); border-bottom:1px solid var(--edge); box-shadow:inset 0 1px #fff; }
+.full-header .seg > button { display:flex; align-items:center; gap:7px; height:30px; }
+.full-header [role="tab"][aria-selected="true"] { background:linear-gradient(var(--blue-1), var(--blue-2)); box-shadow:inset 0 1px #fff8; }
+.full-heading { display:flex; flex-direction:column; text-align:center; gap:3px; }
+.full-heading span { font-size:10px; text-transform:uppercase; letter-spacing:2px; color:var(--ink-2); }
+.full-heading b { font-size:17px; font-weight:650; text-shadow:0 1px #fff; }
+.full-body { display:grid; grid-template-columns:minmax(230px, .9fr) minmax(0, 1.1fr); flex:1; min-height:0; gap:clamp(24px, 5vw, 80px); padding:clamp(20px, 4vw, 56px); max-width:1500px; width:100%; margin:auto; }
+.full-record { display:flex; flex-direction:column; justify-content:center; align-items:center; gap:24px; min-width:0; min-height:0; }
+.full-cover { width:min(100%, 420px, calc(100dvh - 330px)); aspect-ratio:1; flex:none; display:flex; align-items:center; justify-content:center; padding:7px; border:1px solid var(--edge); border-radius:7px; background:linear-gradient(#fff, #dcdcdc); box-shadow:0 18px 40px #0003, inset 0 1px #fff; }
+.full-cover img { width:100%; height:100%; object-fit:cover; border-radius:2px; }
+.full-cover > svg { width:35%; height:35%; color:var(--ink-3); }
+.full-track { width:min(100%, 420px); text-align:left; min-width:0; }
+.full-kicker { font-size:11px; letter-spacing:1.2px; text-transform:uppercase; color:var(--ink-2); display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.full-track h1 { margin:9px 0; font-size:clamp(24px, 3.4vw, 44px); font-weight:650; line-height:1.12; letter-spacing:-1px; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow-wrap:anywhere; }
+.full-track p { margin:0; color:var(--ink-2); font-size:clamp(15px, 1.6vw, 22px); overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.full-panel { min-height:0; min-width:0; display:flex; overflow:hidden; border-left:1px solid var(--hairline); padding-left:clamp(20px, 3vw, 40px); }
+.full-player .lyricspanel, .full-player .queuepanel { position:static; flex:1; min-height:0; min-width:0; display:flex; flex-direction:column; border:0; margin:0; background:transparent; box-shadow:none; max-height:none; }
+.full-player .ly-body { flex:1; max-height:none; min-height:0; overflow:auto; padding:clamp(12px, 4vh, 40px) 16px 40px 0; }
+.ly-body { position:relative; }
+.full-player .ly-lines { font-size:clamp(21px, 2.5vw, 34px); font-weight:600; line-height:1.55; }
+.full-player .ly-lines li { padding:8px 0; }
+.full-player .ly-lines button { text-align:left; color:var(--ink-3); text-decoration:none; line-height:inherit; }
+.full-player .ly-lines li.current button { color:var(--blue-edge); }
+.full-player .ly-lines li.past button { color:var(--ink-2); }
+.full-player .ly-plain { font-family:var(--font); font-size:clamp(18px, 2vw, 28px); line-height:1.8; white-space:pre-wrap; overflow-wrap:anywhere; }
+.full-player .qp-head { padding:8px 0 14px; background:transparent; flex-wrap:wrap; }
+.full-player .qp-list { max-height:none; flex:1; min-height:0; padding:6px 0; overflow:auto; }
+.full-player .qp-row { min-height:44px; }
+.full-player .qp-title { font-size:14px; }
+.full-transport { flex:none; padding:16px 28px 20px; background:linear-gradient(#e9e9e9, #cfcfcf); border-top:1px solid var(--edge); box-shadow:inset 0 1px #fff; }
+.full-seek { display:flex; align-items:center; gap:14px; max-width:1000px; margin:0 auto 14px; font-size:11px; }
+.full-seek .pb-seek { flex:1; min-width:0; accent-color:var(--blue-3); }
+.full-seek .pb-time { min-width:40px; font-variant-numeric:tabular-nums; text-align:center; }
+.full-controls { display:grid; grid-template-columns:1fr auto 1fr; align-items:center; gap:20px; }
+.full-buttons, .full-volume, .full-options { display:flex; align-items:center; gap:10px; min-width:0; }
+.full-options { justify-content:flex-end; flex-wrap:wrap; }
+.full-options select { width:auto; }
+.full-buttons > .row-btn { width:32px; height:32px; justify-content:center; }
+.full-buttons svg, .full-volume svg { width:18px; height:18px; }
+.full-buttons .full-play { width:50px; height:50px; border-radius:50%; justify-content:center; padding:0; }
+.full-play svg { width:22px; height:22px; }
+.full-buttons [aria-pressed="true"] { color:var(--blue-edge); background:var(--blue-1); border-radius:5px; }
+.full-volume input { width:110px; max-width:100%; min-width:0; accent-color:var(--blue-3); }
+.full-error, .player-window-error { margin:0 0 10px; color:var(--red); font-size:12px; }
+.player-window-error { padding:8px 14px; margin:0; background:var(--paper); }
+@media (max-width:880px), (max-height:600px) {
+  .full-header { min-height:52px; padding:10px 18px; gap:12px; }
+  .full-body { padding:22px; gap:24px; grid-template-columns:minmax(210px, .9fr) minmax(0, 1.1fr); }
+  .full-record { gap:18px; }
+  .full-panel { padding-left:22px; }
+  .full-cover { width:min(100%, 290px, calc(100dvh - 310px)); }
+  .full-track h1 { font-size:27px; }
+  .full-transport { padding:12px 18px; }
+  .full-controls { gap:10px; }
+  .full-buttons { gap:6px; }
+  .full-volume input { width:85px; }
+}
+.full-player .ly-lines { text-align:left; }
+.full-player .lyricspanel .ly-lines li { font-size:inherit; }
+.full-player .ly-lines button { width:100%; }
+.full-cover { width:min(100%, 420px, calc(100dvh - 400px)); }
+@media (max-width:880px), (max-height:600px) { .full-cover { width:min(100%, 290px, calc(100dvh - 340px)); } }
 .statusbar { min-height:36px; height:auto; padding-top:4px; padding-bottom:4px; }

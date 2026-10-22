@@ -94,6 +94,31 @@ try {
   check("Library play starts the persistent music player", () => assert(player.time > .2 && !player.paused && !player.error, JSON.stringify(player)));
   const initialVolume = await session.script("return {before:window.__volumeAtPlay, volume:window.__activeSound.volume, muted:window.__activeSound.muted};");
   check("first Library playback starts at 100% and unmuted without slider input", () => assert.deepEqual(initialVolume, {before:{volume:1, muted:false}, volume:1, muted:false}));
+  await session.click(await session.waitFor('.playerbar button[aria-label="Pause"]'));
+  await session.script("window.__beforeFullAudio = window.__activeSound;");
+  await session.click(await session.waitFor('button[aria-label="Open full-screen player"]'));
+  await session.waitFor('[aria-label="Full-screen player"]');
+  for (let i = 0; i < 30; i++) { if (await call("plugin:window|is_fullscreen", { label: "main" })) break; await sleep(100); }
+  const nativeFull = await call("plugin:window|is_fullscreen", { label: "main" });
+  check("full-screen player enters the native OS fullscreen state", () => assert.equal(nativeFull, true));
+  const sameAudio = await session.script("return window.__activeSound === window.__beforeFullAudio && window.__activeSound.paused;");
+  check("expanding preserves the paused audio element", () => assert(sameAudio));
+  const fits = await session.script("const el = document.querySelector('.full-player'); return el.scrollWidth <= innerWidth && el.scrollHeight <= innerHeight;");
+  check("native full-screen layout fits the monitor", () => assert(fits));
+  await session.click(await session.waitFor('.full-player button[aria-label="Play"]'));
+  for (let i = 0; i < 30; i++) { if (await session.script("return !window.__activeSound.paused;")) break; await sleep(100); }
+  const playingFull = await session.script("return !window.__activeSound.paused && window.__activeSound === window.__beforeFullAudio;");
+  check("full-screen transport controls the original audio element", () => assert(playingFull));
+  await session.press("");
+  for (let i = 0; i < 50; i++) { if (!(await call("plugin:window|is_fullscreen", { label: "main" })) && !(await session.find('.full-player'))) break; await sleep(100); }
+  const restored = !(await call("plugin:window|is_fullscreen", { label: "main" })) && !(await session.find('.full-player'));
+  check("Escape restores the native window and regular player", () => assert(restored));
+  const interactive = await session.script("return !document.querySelector('.app-body').inert && document.activeElement?.getAttribute('aria-label') === 'Open full-screen player';");
+  check("native exit restores app interaction and focus", () => assert(interactive));
+  await session.script("document.querySelectorAll('.sidebar .source')[1].click();");
+  await session.waitFor('select[aria-label="Download status"]');
+  const dropdown = await session.script("const el = document.querySelector('select[aria-label=\"Download status\"]'); const style = getComputedStyle(el); const ctx = document.createElement('canvas').getContext('2d'); ctx.font = style.font; const needed = ctx.measureText(el.selectedOptions[0].textContent).width + parseFloat(style.paddingLeft) + parseFloat(style.paddingRight); return {width:el.clientWidth,needed,height:el.clientHeight,font:parseFloat(style.fontSize)};");
+  check("native download dropdown displays the complete selected label", () => assert(dropdown.width >= dropdown.needed - 1 && dropdown.height >= dropdown.font + 8, JSON.stringify(dropdown)));
 
 } catch (error) {
   console.error(error); process.exitCode = 1;

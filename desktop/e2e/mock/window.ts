@@ -7,7 +7,9 @@ export function getCurrentWindow() {
     minimize: async () => rec("minimize"),
     toggleMaximize: async () => { rec("toggleMaximize"); w.__mock.maximized = !w.__mock.maximized; w.__resized?.(); },
     isMaximized: async () => !!w.__mock?.maximized,
+    isFullscreen: async () => !!w.__mock?.fullscreen,
+    setFullscreen: async (value: boolean) => { if (w.__mock.fullscreenFail) throw new Error("Fullscreen unavailable"); rec(`setFullscreen:${value}`); w.__mock.fullscreen = value; w.__resized?.(); },
     onFocusChanged: async (cb: (e: { payload: boolean }) => void) => { w.__focus = cb; return () => {}; },
-    onResized: async (cb: () => void) => { w.__resized = cb; return () => {}; },
+    onResized: async (cb: () => void) => { const listeners = (w.__resizeListeners ??= new Set()); listeners.add(cb); w.__resized = () => { for (const listener of listeners) listener(); }; return () => listeners.delete(cb); },
   };
 }

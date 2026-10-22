@@ -1,10 +1,12 @@
 import TrackPreferences from "./TrackPreferences";
+import FullScreenPlayer from "./FullScreenPlayer";
+import Seek from "./PlayerSeek";
+import { useFullscreenPlayer } from "../hooks/useFullscreenPlayer";
 import { FilterDropdown } from "./Dropdown";
-import { Captions, ListMusic, Loader2, Music, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward, Volume2, VolumeX, X } from "lucide-react";
+import { Captions, Maximize2, ListMusic, Loader2, Music, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward, Volume2, VolumeX, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import { usePlayerState, usePlayerTime } from "../hooks/usePlayer";
+import { usePlayerState } from "../hooks/usePlayer";
 import { RATES, type PlayerEngine, type RepeatMode, type Sleep } from "../lib/audioEngine";
-import { formatClock } from "../lib/format";
 import { CoverArt } from "./Picture";
 import { covers } from "../lib/covers";
 import LyricsPanel from "./LyricsPanel";
@@ -56,35 +58,10 @@ function SleepPicker({ engine }: { engine: PlayerEngine }) {
   );
 }
 
-function Seek({ engine }: { engine: PlayerEngine }) {
-  const { position, duration } = usePlayerTime(engine);
-  const known = duration > 0 && Number.isFinite(duration);
-  return (
-    <>
-      <span className="pb-time mono" aria-label="Position">
-        {formatClock(position)}
-      </span>
-      <input
-        type="range"
-        className="pb-seek"
-        aria-label="Seek"
-        min={0}
-        max={known ? duration : 0}
-        step={1}
-        value={known ? Math.min(position, duration) : 0}
-        disabled={!known}
-        onChange={(e) => engine.seek(Number(e.target.value))}
-      />
-      <span className="pb-time mono" aria-label="Length">
-        {known ? formatClock(duration) : "--:--"}
-      </span>
-    </>
-  );
-}
-
 /** The player along the bottom of the window: what is playing, and the controls. */
 export default function PlayerBar({ engine, onMini, miniBusy }: { engine: PlayerEngine; onMini?: () => void; miniBusy?: boolean }) {
   const state = usePlayerState(engine);
+  const fullscreen = useFullscreenPlayer();
   const [panel, setPanel] = useState<"queue" | "lyrics" | null>(null);
   const media = useMediaActions();
   const track = state.queue[state.index];
@@ -107,6 +84,7 @@ export default function PlayerBar({ engine, onMini, miniBusy }: { engine: Player
 
   return (
     <>
+    {fullscreen.expanded && <FullScreenPlayer engine={engine} onClose={() => void fullscreen.exit()} />}
     {panel === "queue" && <QueuePanel engine={engine} onClose={() => setPanel(null)} />}
     {panel === "lyrics" && <LyricsPanel engine={engine} track={track} askConsent={media?.lyricsConsent ?? (async () => false)} onClose={() => setPanel(null)} />}
     <section className="playerbar" aria-label="Music player">
@@ -147,6 +125,7 @@ export default function PlayerBar({ engine, onMini, miniBusy }: { engine: Player
       </div>
 
       <div className="pb-extras">
+        <button className="row-btn" aria-label="Open full-screen player" title="Full-screen player" disabled={fullscreen.busy} onClick={(e) => { setPanel(null); void fullscreen.enter(e.currentTarget); }}><Maximize2 className="w-3.5 h-3.5" /></button>
         <button className="row-btn" aria-label="Show the lyrics" aria-expanded={panel === "lyrics"} title="Lyrics" style={panel === "lyrics" ? { background: "rgba(59,130,230,.25)" } : undefined} onClick={() => setPanel((p) => (p === "lyrics" ? null : "lyrics"))}>
           <Captions className="w-3.5 h-3.5" />
         </button>
@@ -175,6 +154,7 @@ export default function PlayerBar({ engine, onMini, miniBusy }: { engine: Player
         </button>
       </div>
     </section>
+    {fullscreen.error && <p className="player-window-error" role="alert">{fullscreen.error}</p>}
     </>
   );
 }
