@@ -8,7 +8,6 @@ import TagEditor from "./TagEditor";
 import PlaylistPicker from "./PlaylistPicker";
 import PlaylistsView from "./PlaylistsView";
 import { usePlaylists } from "../hooks/usePlaylists";
-import { unmeasured } from "../lib/loudness";
 import { formatClock } from "../lib/format";
 import { albumsOf, artistsOf, filterTracks, formatsOf, qualityLabel, sortTracks, toPlayerTrack, totalDuration, type Album, type SortKey } from "../lib/library";
 import { CoverArt } from "./Picture";
@@ -36,6 +35,7 @@ interface Props {
   onReveal: (path: string) => void;
   /** Changes tags in these files. */
   analysing: { done: number; total: number } | null;
+  unmeasuredCount: number;
   onAnalyse: () => void;
   onStopAnalysing: () => void;
   onEditTags: (paths: string[], edit: TagEditRequest) => Promise<EditResult[]>;
@@ -49,7 +49,7 @@ const hours = (seconds: number) => {
 };
 
 /** The music library: every sound file found in the download folders, by song, album or artist. */
-export default function LibraryPage({ tracks, scanning, loaded, onScan, onReveal, onEditTags, analysing, onAnalyse, onStopAnalysing, announce, flash }: Props) {
+export default function LibraryPage({ tracks, scanning, loaded, onScan, onReveal, onEditTags, analysing, unmeasuredCount, onAnalyse, onStopAnalysing, announce, flash }: Props) {
   const player = usePlayerEngine();
   const playlists = usePlaylists();
   const [adding, setAdding] = useState<LibTrack[] | null>(null);
@@ -67,7 +67,6 @@ export default function LibraryPage({ tracks, scanning, loaded, onScan, onReveal
   const albums = useMemo(() => albumsOf(shown), [shown]);
   const artists = useMemo(() => artistsOf(matching), [matching]);
   const byPath = useMemo(() => new Map(tracks.map((t) => [t.path, t])), [tracks]);
-  const unmeasuredCount = useMemo(() => unmeasured(tracks).length, [tracks]);
   const album = openAlbum ? albums.find((a) => a.key === openAlbum) ?? null : null;
 
   const play = (list: LibTrack[], from = 0) => player?.play(list.slice(from, from + QUEUE_FROM_HERE).map(toPlayerTrack), 0);
@@ -102,7 +101,7 @@ export default function LibraryPage({ tracks, scanning, loaded, onScan, onReveal
   return (
     <section className="library" aria-label="Music library">
       <header className="lib-bar">
-        <label className="lib-search">
+        {view !== "playlists" && <label className="lib-search">
           <Search className="w-3.5 h-3.5" aria-hidden="true" />
           <input type="text" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search your music" aria-label="Search the library" spellCheck={false} />
           {query && (
@@ -110,7 +109,7 @@ export default function LibraryPage({ tracks, scanning, loaded, onScan, onReveal
               <X className="w-3 h-3" />
             </button>
           )}
-        </label>
+        </label>}
         <div role="radiogroup" aria-label="Library view" className="seg">
           {(["songs", "albums", "artists", "playlists"] as const).map((v) => (
             <button key={v} type="button" role="radio" aria-checked={view === v} onClick={() => changeView(v)} className="capitalize">
@@ -118,14 +117,14 @@ export default function LibraryPage({ tracks, scanning, loaded, onScan, onReveal
             </button>
           ))}
         </div>
-        <select className="field" aria-label="Format" value={format} onChange={(e) => setFormat(e.target.value)}>
+        {view !== "playlists" && <select className="field" aria-label="Format" value={format} onChange={(e) => setFormat(e.target.value)}>
           <option value="">All formats</option>
           {formats.map((f) => (
             <option key={f} value={f}>
               {f}
             </option>
           ))}
-        </select>
+        </select>}
         {view === "songs" && (
           <select className="field" aria-label="Sort by" value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
             {SORTS.map(([key, label]) => (

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { errorText, libraryAnalyze, libraryEditTags, libraryLoad, libraryScan, type EditResult, type LibTrack } from "../lib/api";
 import { unmeasured } from "../lib/loudness";
 import type { TagEditRequest } from "../lib/tagEdit";
@@ -78,11 +78,14 @@ export function useLibrary({ ready, historyCount, showFlash }: Args) {
 
   /** Measures how loud these songs are and shows the result. Songs that can't be measured aren't tried again this session. */
   const failed = useRef(new Set<string>());
+  const [failedCount, setFailedCount] = useState(0);
+  const unmeasuredCount = useMemo(() => unmeasured(tracks).filter((p) => !failed.current.has(p)).length, [tracks, failedCount]);
   const measure = useCallback(async (paths: string[]) => {
     const wanted = paths.filter((p) => !failed.current.has(p));
     if (wanted.length === 0) return;
     const results = await libraryAnalyze(wanted);
     for (const r of results) if (r.loudness == null) failed.current.add(r.path);
+    setFailedCount(failed.current.size);
     const got = new Map(results.flatMap((r) => (r.loudness == null ? [] : [[r.path, r.loudness] as const])));
     if (got.size > 0) setTracks((prev) => prev.map((t) => (got.has(t.path) ? { ...t, loudness: got.get(t.path)! } : t)));
   }, []);
@@ -113,5 +116,5 @@ export function useLibrary({ ready, historyCount, showFlash }: Args) {
     stop.current = true;
   }, []);
 
-  return { tracks, scanning, loaded, scan, editTags, measure, analysing, analyse, stopAnalysing };
+  return { tracks, scanning, loaded, scan, editTags, measure, analysing, analyse, stopAnalysing, unmeasuredCount };
 }

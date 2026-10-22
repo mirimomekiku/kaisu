@@ -582,7 +582,7 @@ export default function App() {
             />
           )}
 
-          {page === "library" && <LibraryPage tracks={library.tracks} scanning={library.scanning} loaded={library.loaded} onScan={() => void library.scan()} onReveal={revealDownloaded} onEditTags={library.editTags} analysing={library.analysing} onAnalyse={() => void library.analyse()} onStopAnalysing={library.stopAnalysing} announce={setNote} flash={showFlash} />}
+          {page === "library" && <LibraryPage tracks={library.tracks} unmeasuredCount={library.unmeasuredCount} scanning={library.scanning} loaded={library.loaded} onScan={() => void library.scan()} onReveal={revealDownloaded} onEditTags={library.editTags} analysing={library.analysing} onAnalyse={() => void library.analyse()} onStopAnalysing={library.stopAnalysing} announce={setNote} flash={showFlash} />}
 
           {page === "settings" && (
             <SettingsPage

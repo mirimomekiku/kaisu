@@ -80,4 +80,14 @@ await box.check();
 check("setting: it can be turned on", await box.isChecked());
 await page.context().close();
 
+// A failed measurement is not offered repeatedly during the same session.
+page = await open({ mock: { library: [LIB[2]], analyzeFail: [LIB[2].path] } });
+await nav(page, "Library").click();
+await page.getByRole("button", { name: "Measure loudness (1)" }).click();
+await page.getByRole("button", { name: /^Measure loudness/ }).waitFor({ state: "detached" });
+check("measure: an unreadable song leaves the pending count", (await page.evaluate(() => window.__mock.analyzed.flat())).length === 1);
+await library(page).getByRole("radio", { name: "Playlists" }).click();
+check("playlists: unrelated filters are hidden", await library(page).getByLabel("Search the library").count() === 0 && await library(page).getByLabel("Format", { exact: true }).count() === 0);
+await page.context().close();
+
 await done();
