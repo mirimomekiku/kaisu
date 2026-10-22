@@ -177,7 +177,7 @@ pub fn scan(dirs: &[PathBuf], known: &[LibTrack], mut progress: impl FnMut(usize
 
 // ---- the cache file --------------------------------------------------------------------------
 
-fn cache_path(app: &AppHandle) -> Result<PathBuf, String> {
+pub(crate) fn cache_path(app: &AppHandle) -> Result<PathBuf, String> {
     app.path().app_data_dir().map(|d| d.join("library.json")).map_err(|e| format!("Cannot find the app data folder: {e}"))
 }
 

@@ -67,6 +67,16 @@ impl Scope {
     }
 }
 
+/// A path as people write it: Windows' canonical form starts with `\\?\` (`\\?\D:\Music\a.mp3`), which is correct but ugly
+/// and doesn't match the same file spelled normally, so it is dropped before a path is shown or stored.
+pub fn plain_path(path: &Path) -> String {
+    let text = path.display().to_string();
+    match text.strip_prefix(r"\\?\") {
+        Some(rest) if rest.as_bytes().get(1) == Some(&b':') => rest.to_string(),
+        _ => text,
+    }
+}
+
 /// `path` with every symlink resolved, even when its last parts don't exist yet.
 fn lenient_canonical(path: &Path) -> PathBuf {
     let mut tail: Vec<OsString> = Vec::new();
@@ -157,6 +167,15 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn windows_verbatim_prefixes_are_dropped_from_paths_people_see() {
+        assert_eq!(plain_path(Path::new(r"\\?\D:\Music\a.mp3")), r"D:\Music\a.mp3");
+        assert_eq!(plain_path(Path::new(r"D:\Music\a.mp3")), r"D:\Music\a.mp3");
+        assert_eq!(plain_path(Path::new("/home/me/a.mp3")), "/home/me/a.mp3");
+        // A network share keeps its form: only a drive letter is rewritten.
+        assert_eq!(plain_path(Path::new(r"\\?\UNC\server\share\a.mp3")), r"\\?\UNC\server\share\a.mp3");
     }
 
     #[test]

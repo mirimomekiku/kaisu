@@ -197,7 +197,7 @@ pub async fn convert_audio(app: AppHandle, scope: State<'_, Scope>, downloads: S
     let args = convert_args(&input, &output, format);
     let refs: Vec<&str> = args.iter().map(String::as_str).collect();
     match proc::run_capture(&ffmpeg, &refs, CONVERT_TIMEOUT).await {
-        Ok(_) if output.is_file() => Ok(Converted { path: output.display().to_string() }),
+        Ok(_) if output.is_file() => Ok(Converted { path: crate::scope::plain_path(&output) }),
         Ok(_) => Err("The conversion didn't produce a file.".into()),
         Err(e) => {
             let _ = fs::remove_file(&output);
