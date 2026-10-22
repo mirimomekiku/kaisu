@@ -10,10 +10,10 @@ Kaisu is a desktop downloader for videos and music (Tauri v2: Rust backend in `d
 
 ## 1. Current state in one paragraph
 
-Everything from the audit and the two improvement rounds is done, tested and pushed, and so is the audio roadmap except the last
-item: the **music player** (steps 1-2), the **library page** (3), **lyrics, tag editor and playlists** (4) and **volume leveling** (first
-half of 5) are on `main`. **Podcast subscriptions (second half of step 5) are started but uncommitted and do not compile yet**: see
-section 5. Nothing has been run in the real app (see section 6).
+The music player, library, lyrics, tag editor, playlists and volume leveling are committed on `main`. The podcast work started by
+CLAUDE has now been completed in the working tree: RSS parsing, subscriptions, manual/automatic downloads, persistence, a Podcasts
+page and Ctrl+6 navigation. The two small library polish items are also fixed. These changes are committed on `main` in separate feature commits (section 5).
+Native-app behavior has still not been verified in this environment; see section 6.
 
 ---
 
@@ -76,6 +76,7 @@ npm run test:ui -- round8           # one or more suites by file name (without .
 | `leftovers.rs` | Finds/removes leftover `.part` files in the download folder. |
 | `media.rs` | `play_in_app` (asset-protocol access for one file), 20-second `preview_clip`, `convert_audio` (ffmpeg, never overwrites). |
 | `library.rs` | Scans sound files with `lofty` 0.25, reads tags/properties, caches to `app_data/library.json`, serves covers. |
+| `podcast.rs` | RSS 2.0/iTunes feed parsing and fetching through the thumbnail public-host/proxy rules; 5 MB and 500 episode caps. |
 | `lyrics.rs`, `tags.rs`, `loudness.rs` | Lyrics lookup/reading, safe tag writing, loudness measuring (all path-checked with `Scope::media_file`). |
 | `tray.rs` | Tray icon/menu. Music playing counts as "busy" (closing the window keeps Kaisu alive); tray has play/pause/next/previous items. |
 
@@ -84,10 +85,10 @@ npm run test:ui -- round8           # one or more suites by file name (without .
   `useDownloadActions`, `useFinishedFiles`, `useLeftovers`, `useMediaDialogs`, `usePlayer`, `useDownloads`, ...) and pure code in `lib/`
   (`extra.ts` builds request options, `siteRules.ts`, `queueOrder.ts`, `library.ts`, `audioEngine.ts`, ...).
 - `lib/api.ts` is the **only** place that calls `invoke(...)`; keep all command wrappers there.
-- **Pages:** Search, Downloads, History, Library (Songs/Albums/Artists/Playlists), Settings. Podcasts is next.
+- **Pages:** Search, Downloads, History, Library (Songs/Albums/Artists/Playlists), Settings and Podcasts.
 - **Test mock of the backend:** `e2e/mock/core.ts` (commands, `convertFileSrc` returning a real silent WAV, `__mock` switches).
   Every new Rust command needs a case there or UI tests throw `unmocked command`.
-- Persistent data goes through `lib/storage.ts` (plugin-store file `kaisu.json`): settings, history, queue, `player`, `positions`.
+- Persistent data goes through `lib/storage.ts` (plugin-store file `kaisu.json`): settings, history, queue, `player`, `positions`, `playlists` and `podcasts`.
 
 ---
 
@@ -116,48 +117,43 @@ npm run test:ui -- round8           # one or more suites by file name (without .
 
 ## 5. What to do next (in this order)
 
-### Finish step 5: podcasts (started, UNCOMMITTED, does not compile yet)
-Uncommitted working-tree changes: `Cargo.toml`/`Cargo.lock` (adds `quick-xml = "0.42"`), `src/lib.rs` (registers `mod podcast;` and
-`podcast::podcast_fetch`), `src/thumbs.rs` (`check_url` and `build_client` made `pub(crate)`: reused for the public-hosts-only HTTP
-rules), and the new `src/podcast.rs`.
+### Step 5: podcasts (implemented and committed)
+- Kept `quick-xml = "0.42"`; adapted attributes and text/CDATA to its actual API. Parser rejects incomplete/non-RSS documents,
+  skips non-audio MIME types and private URLs, unescapes enclosure attributes and deduplicates GUIDs. Seven Rust parser tests.
+- `lib/podcasts.ts`: URL normalization, subscription sanitization (max 50), seen IDs (max 500), episode dates and safe show folders.
+- `lib/storage.ts`: `podcasts` key. `hooks/usePodcasts.ts` lives in App so checks continue away from the Podcasts page. Subscribe
+  records current episodes without downloading them; automation defaults off. Startup and six-hour refreshes never overlap.
+  Failed feed requests keep subscriptions; refused queue submissions remain eligible for retry. Unsubscribe during an in-flight
+  request cannot recreate the subscription. Unsubscribing does not delete downloaded files.
+- `components/PodcastsPage.tsx`, Sidebar entry under Music, toolbar title and Ctrl+6. UI explains website contact and polling.
+- Episode downloads use `submitDownloads`, `preset: "best"`, original audio and `<download folder>/Podcasts/<safe show title>`.
+  `DownloadReq.applySiteRules = false` prevents site rules from changing the preset or redirecting a podcast outside that folder.
+- `api.ts` contains the `podcast_fetch` wrapper and types; `e2e/mock/core.ts` adds feeds/feedFail/feedDelay controls.
+- `round12` has 27 browser checks; six new pure frontend tests cover feed URLs, seen IDs, dates, folders and sanitization.
+- Library polish: hide search/format controls in Playlists, and exclude failed loudness measurements from the pending button count.
+  `round11` now has 12 checks.
 
-**`podcast.rs` state:** has `Feed`/`Episode` types, `parse_duration`, `parse_feed(xml)` (a quick-xml event loop with an element stack),
-the `podcast_fetch(url, proxy)` command (5 MB cap, 25 s timeout, public hosts only, enclosure and image URLs filtered with `check_url`,
-max 500 episodes) and 5 tests. It was last compiled against **quick-xml 0.42, whose API differs from older docs**, and the last
-`cargo test --lib podcast` still had compile errors:
-- `Attribute::normalized_value()` takes an `XmlVersion` argument (the old `unescape_value()` is deprecated); find the right way to get
-  the attribute text (look at `~/.cargo/registry/src/*/quick-xml-0.42.0/src/events/attributes.rs`).
-- `BytesText` has no `.decode()`: text must be unescaped another way (check `events/mod.rs`; entity references arrive as separate
-  `Event::GeneralRef` events, which the code already handles for `&amp;`, `&#169;` etc.). Check `BytesCData` the same way.
-- Element and attribute names are `&str` in 0.42 (already adapted with sed). If the API is too awkward, `roxmltree` is a fine
-  alternative (read-only DOM, no entity expansion problems): swap it in and keep the tests.
-The tests in the file define the expected behaviour (entities, CDATA, iTunes image preferred over `<image><url>`, items without audio or
-with private addresses skipped, guid fallback to the file URL, 500 cap, duration formats). Make them pass, then `cargo clippy`.
+### Verification and next action
+Verification is complete (2026-10-22): production frontend build and unit checks pass. All browser suites were run sequentially;
+only the four previously documented Edge keyboard-menu checks remain red. See section 6 for counts and limitations.
+The completed work is split into these commits, authored and committed only by mirimomekiku:
+- `3948d17`: podcast subscriptions and episode downloads.
+- `2aeb287`: playlist controls and loudness measurement counts.
+- `61d7f94`: preserve clip/tag edits after manual lookup, with regression coverage.
 
-**Still to build:**
-1. `lib/api.ts`: `podcastFetch(url)` wrapper (`invoke("podcast_fetch", { url, proxy: currentProxy })`, like `lyricsFind`) and types.
-2. `lib/podcasts.ts` (+ vitest): subscription type `{ id, url, title, image?, auto: boolean, seen: string[] (episode ids, cap ~500), checked: number }`,
-   `sanitize`, `newEpisodes(feed, seen)`, folder name for a show (safe file name, reuse the idea of `m3uFileName` in `lib/playlists.ts`),
-   parse the feed's `published` text with `Date.parse`.
-3. Persistence in `lib/storage.ts` (`loadPodcasts` / `savePodcasts`, store key `podcasts`; copy the playlists pattern) and a
-   `hooks/usePodcasts.ts` (copy `usePlaylists.ts`): subscribe (fetch, then mark all current episodes as seen so nothing floods the
-   queue), unsubscribe, toggle auto-download, check all on start and every ~6 hours, never overlapping.
-4. Downloading episodes: use `submitDownloads` from `useDownloadActions` (see `DownloadReq`): `preset: "best"` (**not** `"audio"`: that
-   re-encodes), `outDir = <download folder>/Podcasts/<show>` (inside the registered folder so move/delete/library scan still work),
-   `title` = episode title, `thumbnail` = feed image. The library then picks the files up on its normal rescan after a download.
-5. `components/PodcastsPage.tsx` + Sidebar item "Podcasts" under the "Music" header (`Page` type in `Sidebar.tsx`, `App.tsx`, toolbar
-   title, `lib/shortcuts.ts` / `useShortcuts` if you want Ctrl+6): add-feed box with Subscribe, list of shows, a show view listing
-   episodes (title, date, length, Download button, "new" badge), Unsubscribe, "Download new episodes automatically" checkbox.
-   Say plainly in the UI that adding a feed contacts that website (and that auto-download checks it every few hours).
-6. Tests: a `podcast_fetch` case in `e2e/mock/core.ts` (e.g. `__mock.feeds[url]`, `feedFail`), suite `e2e/suites/round12.mjs`
-   (subscribe, episodes listed, download queues with the right folder/preset, seen episodes not repeated, auto-download of a new
-   episode, unsubscribe, bad feed message). Follow `round10.mjs` for helpers (`open`, `nav`, `check`, `calls`, `waitCalls`).
+The user authorized pulling and pushing these commits directly to `main`. The remaining work is the separate audit findings below.
 
-### Then
-- Update this file, run the full verification (section 2 commands; run UI suites one at a time), commit by feature (author only the
-  user, no co-author lines) and push to `main` when asked.
-- Small polish noted on the way: the Library bar's search/format/sort controls still show on the Playlists view (they do nothing there);
-  a song that can't be measured stays "unmeasured" and the "Measure loudness (N)" button keeps counting it (it is not retried this session).
+The full run exposed an older search race: pressing Enter did not cancel the already-scheduled simple-mode automatic lookup.
+It could run again after 700 ms, unmounting the media card and discarding clip/tag edits. `useSearchFlow.ts` now rechecks
+`lastAutoInspected` when the debounce fires. The features suite explicitly waits past that delay and verifies edits survive.
+The features suite's stale three-group shortcut assertion also now includes the existing Music player group.
+
+### Findings from the read-only audit that remain separate work
+- Queue persistence stores `extra.proxy` unchanged, so proxy credentials can still land in `kaisu.json` despite settings using
+  the credential store. Strip credentials from saved queue entries and restore the current proxy at download time.
+- Site-rule folders outside the two registered roots do not participate in library scanning or scoped media actions.
+- Library automatic rescans are driven by history count, so repeated downloads or file moves can leave stale entries.
+- Keep-both transfer naming chooses media and companion names independently, which can detach subtitles/lyrics from a renamed song.
 
 ### Other open items from earlier suggestions
 Pin tool hashes for yt-dlp/ffmpeg/Deno instead of trusting the same-release checksum file; sign the Windows exe; CI for Windows + Linux
@@ -168,12 +164,20 @@ screen readers); subscriptions for channels; auto-update of Kaisu itself.
 
 ## 6. Honest status and risks
 
-- **Last verified:** `tsc` clean, vitest 244 tests pass, `cargo test --lib` 156 pass (before `podcast.rs`), UI suites `round9` (45),
-  `round10` (49), `round11` (10) pass. The older suites (`round3`..`round8`, `flow`, `features`, `queue`, ...) passed at earlier points
-  but were **not all re-run after the library/lyrics/tags/playlists/loudness work**, and `cargo clippy` was not re-run. Do a full pass.
+- **Last verified (2026-10-22):** `npm run build` (TypeScript + Vite) passes; vitest **250 passed in 29 files**;
+  `cargo test --lib --offline`: **163 passed, 1 ignored**; `cargo clippy --all-targets --offline` completes with only the five
+  existing warnings listed in section 2. Vite reports a non-failing chunk-size warning (main JS approximately 520 kB).
+- **Browser verification:** full sequential run, then affected suites rerun after the lookup fix and podcast edge-case tests.
+  Final passing counts by suite: `chrome` 73 (plus the four known Edge failures), `features` 70, `flow` 92, `queue` 43,
+  `round3` 92, `round4` 77, `round5` 56, `round6` 39, `round7` 65, `round8` 56, `round9` 45, `round10` 49,
+  `round11` 12, `round12` 27, `safety` 56. **852 passing checks across these suites; only the four known Edge menu checks fail.**
+  The initial full run's clip/tags failures were fixed, and the stale shortcuts assertion was updated; `features`, `flow`,
+  `round4`, `round7` and `round12` were rerun. The earlier audit's round10 initial page-load timeouts did not recur in the full run.
+- **Visual check:** inspected a rendered Podcasts page at 1060 x 800 with subscribed-show navigation, episodes, dates, lengths,
+  a New badge and download controls. Browser tests use the scripted backend and do not prove native/network integration.
 - **Never run for real:** the actual window, ffmpeg conversion and loudness measuring, the preview download, `.part` resume, the credential
   store off Windows, Media Session with real hardware keys, tray music items, `lofty` on real MP3/M4A/FLAC (tests use generated WAV files),
-  LRCLIB lookups, tag writing on real files (the temp-copy + verify + rename path is unit-tested only), `loudnorm` output parsing on real ffmpeg.
+  LRCLIB lookups, real podcast RSS/enclosure downloads, tag writing on real files (the temp-copy + verify + rename path is unit-tested only), `loudnorm` output parsing on real ffmpeg.
 - **Format support:** the Windows web view plays MP3, M4A/AAC, Opus, OGG, FLAC, WAV, not every container (MKV is unreliable); the player shows an
   error and offers "Open in your player" for video files only.
 - **Design decisions worth keeping:** queue resume threshold is 10 minutes (`REMEMBER_FROM_SECONDS`); the saved queue strips temporary

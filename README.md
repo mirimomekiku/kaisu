@@ -41,6 +41,14 @@ works behind a proxy, and can check again if you installed the tools yourself. A
 - **History** shows everything you have downloaded with its size and channel. Sort and filter it, open files,
   download again, clean up entries for files that were deleted, and export the list as CSV or JSON.
 
+**Music and podcasts**
+- Browse downloaded music by song, album or artist, edit tags, and make playlists you can export as `.m3u8`.
+- Play music in Kaisu with a queue, shuffle, repeat, playback speed and a sleep timer. Long tracks remember your place.
+- Read saved lyrics or choose to look them up online. Measure loudness to make loud songs quieter during playback.
+- Subscribe to a podcast's RSS feed and download individual episodes, or turn on automatic downloads for new episodes.
+  Existing episodes are not downloaded when you subscribe. Feeds are checked at startup and every six hours while Kaisu is open.
+  Episodes keep their original audio format and save under `Podcasts/<show>` in your download folder. Press Ctrl+6 to open Podcasts.
+
 **Stay in control**
 - Run in the background from the tray icon, get a notification when downloads finish, or have Kaisu open the folder,
   quit, sleep or shut down the computer when it is done.
@@ -74,6 +82,7 @@ the first time. Type words to search, or paste a link, then choose video or audi
   spells them (Settings shows the list). Anything that runs programs or reads or writes files at a path you give is refused.
 - Looking up lyrics is off until you agree: it sends the song's artist and title to the free LRCLIB service (lrclib.net).
 - Thumbnails are fetched by Kaisu itself, through your proxy if you set one.
+- Subscribing to a podcast contacts that feed website through your proxy. Unsubscribing stops checks and keeps downloaded episodes.
 - The Windows app is not code-signed yet, so Windows may warn you the first time you run it.
 - Kaisu is for downloading content you have the right to save. You are responsible for following the terms of the
   sites you use and the laws where you live.
