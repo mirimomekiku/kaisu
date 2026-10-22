@@ -56,6 +56,7 @@ export interface AudioLike {
   preload?: string;
   load?: () => void;
   volume: number;
+  muted: boolean;
   playbackRate: number;
   play(): Promise<void>;
   pause(): void;
@@ -138,15 +139,17 @@ export class PlayerEngine {
     this.handlers = [
       ["loadedmetadata", () => this.onMetadata()],
       ["durationchange", () => this.onMetadata()],
-      ["playing", () => { this.set({ playing: true, loading: false, error: null }); this.listenLast = this.listeningPoint(); if (this.tail?.audio.paused) { this.tail.lastAt = this.now(); this.tail.lastPosition = this.tail.audio.currentTime; void this.tail.audio.play().catch(() => this.finishTail(false)); } }],
+      ["playing", () => { this.applyVolume(); this.set({ playing: true, loading: false, error: null }); this.listenLast = this.listeningPoint(); if (this.tail?.audio.paused) { this.tail.lastAt = this.now(); this.tail.lastPosition = this.tail.audio.currentTime; void this.tail.audio.play().catch(() => this.finishTail(false)); } }],
       ["pause", () => this.onPause()],
       ["waiting", () => { this.sampleListening(true); this.listenLast = null; this.sampleTail(true); this.tail?.audio.pause(); this.set({ loading: true }); }],
       ["canplay", () => this.set({ loading: false })],
+      ["volumechange", () => this.applyVolume()],
       ["timeupdate", () => this.onTime()],
       ["ended", () => this.onEnded()],
       ["error", () => this.onError()],
     ];
     this.bindAudio(this.audio);
+    this.applyVolume();
   }
 
   dispose() {
@@ -347,8 +350,15 @@ export class PlayerEngine {
   }
 
   private applyVolume() {
-    this.audio.volume = clamp(this.state.volume * this.levelFactor * this.activeGain, 0, 1);
-    if (this.tail) this.tail.audio.volume = clamp(this.state.volume * this.tail.level * this.tail.gain, 0, 1);
+    // WebKit can report an initial native volume of zero after creating its
+    // output. Keep it in sync with the player's default or saved volume.
+    const volume = clamp(this.state.volume * this.levelFactor * this.activeGain, 0, 1);
+    if (this.audio.muted) this.audio.muted = false;
+    if (this.audio.volume !== volume) this.audio.volume = volume;
+    if (this.tail) {
+      const tailVolume = clamp(this.state.volume * this.tail.level * this.tail.gain, 0, 1);
+      if (this.tail.audio.volume !== tailVolume) this.tail.audio.volume = tailVolume;
+    }
   }
 
   setRepeat(repeat: RepeatMode) {
@@ -621,6 +631,7 @@ export class PlayerEngine {
         if (type === "ended") this.finishTail(true);
         else if (type === "error" || type === "waiting") this.finishTail(false);
         else if (type === "timeupdate") this.sampleTail();
+        else if (type === "volumechange") this.applyVolume();
       } else if (this.prepared?.audio === audio) {
         if (type === "canplay") this.prepared.ready = true;
         else if (type === "error") this.prepared.ready = false;
@@ -659,7 +670,7 @@ export class PlayerEngine {
     if (!track || this.editingFiles.has(track.path)) { this.cancelPreload(); return; }
     if (this.prepared?.index === index && this.prepared.path === track.path) return;
     this.cancelPreload(); const token = this.preloadToken;
-    const audio = this.deps.createAudio(); audio.preload = "auto"; audio.volume = 0; audio.playbackRate = this.state.rate;
+    const audio = this.deps.createAudio(); audio.preload = "auto"; audio.volume = 0; audio.muted = false; audio.playbackRate = this.state.rate;
     const start = resumeAt(this.deps.getPositions(), track.path);
     const prepared = { audio, index, path: track.path, token, ready: false, start }; this.prepared = prepared; this.bindAudio(audio);
     try {

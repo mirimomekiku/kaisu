@@ -8,6 +8,7 @@ class FakeAudio implements AudioLike {
   duration = NaN;
   paused = true;
   volume = 1;
+  muted = false;
   playbackRate = 1;
   playCalls = 0;
   private listeners = new Map<string, Set<() => void>>();
@@ -308,6 +309,44 @@ describe("moving around", () => {
 });
 
 describe("speed, volume and levelling", () => {
+  it("initializes the audio element at 100% and unmuted", () => {
+    const audio = new FakeAudio();
+    audio.volume = 0;
+    audio.muted = true;
+    const engine = new PlayerEngine({ audio, resolve: async () => "audio", getPositions: () => ({}), setPositions: () => {} });
+    expect(engine.getState().volume).toBe(1);
+    expect(audio.volume).toBe(1);
+    expect(audio.muted).toBe(false);
+    engine.dispose();
+  });
+
+  it.each([1, 0.4, 0])("synchronizes a newly started output at volume %s without touching the slider", async (volume) => {
+    const { audio, engine } = make();
+    engine.applySettings({ volume, rate: 1, repeat: "off", shuffle: false });
+    engine.setLevelGain(-6.0206);
+    const originalPlay = audio.play.bind(audio);
+    audio.play = async () => { audio.volume = 0; audio.muted = true; await originalPlay(); };
+    engine.play([A, B]);
+    await flush();
+    expect(audio.volume).toBeCloseTo(volume / 2, 5);
+    expect(audio.muted).toBe(false);
+    expect(engine.getState().volume).toBe(volume);
+    // Native output initialization can also report zero after "playing".
+    audio.volume = 0;
+    audio.muted = true;
+    audio.fire("volumechange");
+    expect(audio.volume).toBeCloseTo(volume / 2, 5);
+    expect(audio.muted).toBe(false);
+    engine.toggle();
+    engine.toggle();
+    await flush();
+    expect(audio.volume).toBeCloseTo(volume / 2, 5);
+    engine.next();
+    await flush();
+    expect(audio.volume).toBeCloseTo(volume / 2, 5);
+    engine.dispose();
+  });
+
   it("sets the speed within limits, and keeps it for the next track", async () => {
     const { audio, engine } = make();
     engine.play([A, B]);

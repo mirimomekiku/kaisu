@@ -92,6 +92,8 @@ try {
   for (let i = 0; i < 100; i++) { if (await session.script("return window.__activeSound?.currentTime > .2;")) break; await sleep(100); }
   const player = await session.script("return {time:window.__activeSound?.currentTime, error:document.querySelector('.pb-sub[role=alert]')?.textContent, paused:window.__activeSound?.paused};");
   check("Library play starts the persistent music player", () => assert(player.time > .2 && !player.paused && !player.error, JSON.stringify(player)));
+  const initialVolume = await session.script("return {before:window.__volumeAtPlay, volume:window.__activeSound.volume, muted:window.__activeSound.muted};");
+  check("first Library playback starts at 100% and unmuted without slider input", () => assert.deepEqual(initialVolume, {before:{volume:1, muted:false}, volume:1, muted:false}));
 
 } catch (error) {
   console.error(error); process.exitCode = 1;

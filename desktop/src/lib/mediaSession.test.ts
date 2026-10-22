@@ -8,6 +8,7 @@ class FakeAudio implements AudioLike {
   duration = NaN;
   paused = true;
   volume = 1;
+  muted = false;
   playbackRate = 1;
   private l = new Map<string, Set<() => void>>();
   async play() {
