@@ -13,7 +13,7 @@ use std::{
 };
 
 use serde::Serialize;
-use tauri::State;
+use tauri::{AppHandle, State};
 
 #[derive(Default, Clone)]
 enum Slot {
@@ -33,6 +33,8 @@ struct Folders {
 pub struct Scope {
     inner: Mutex<Folders>,
     library: Mutex<Vec<PathBuf>>,
+    destinations: Mutex<Vec<PathBuf>>,
+    configured: Mutex<Vec<PathBuf>>,
 }
 
 impl Scope {
@@ -71,6 +73,7 @@ impl Scope {
     pub fn library_dirs(&self) -> Vec<PathBuf> {
         let mut dirs: Vec<PathBuf> = [self.download(), self.moved()].into_iter().flatten().collect();
         if let Ok(imports) = self.library.lock() { dirs.extend(imports.iter().cloned()); }
+        dirs.extend(self.destination_dirs());
         dirs.sort();
         dirs.dedup();
         dirs
@@ -82,6 +85,24 @@ impl Scope {
 
     pub fn set_library_dirs(&self, dirs: Vec<PathBuf>) -> Result<(), String> {
         *self.library.lock().map_err(|_| "Music folders are unavailable.")? = dirs;
+        Ok(())
+    }
+
+    pub fn destination_dirs(&self) -> Vec<PathBuf> {
+        self.destinations.lock().map(|d| d.clone()).unwrap_or_default()
+    }
+
+    pub fn set_destination_dirs(&self, dirs: Vec<PathBuf>) -> Result<(), String> {
+        *self.destinations.lock().map_err(|_| "Download folders are unavailable.")? = dirs;
+        Ok(())
+    }
+
+    pub fn configured_dirs(&self) -> Vec<PathBuf> {
+        self.configured.lock().map(|d| d.clone()).unwrap_or_default()
+    }
+
+    fn configure_destinations(&self, dirs: Vec<PathBuf>) -> Result<(), String> {
+        *self.configured.lock().map_err(|_| "Download folders are unavailable.")? = dirs;
         Ok(())
     }
 }
@@ -175,14 +196,17 @@ pub struct ScopeStatus {
 
 /// Tells Kaisu which folders it may move files out of, move them into, and delete from.
 #[tauri::command]
-pub fn set_managed_folders(scope: State<'_, Scope>, download: String, moved: String) -> ScopeStatus {
+pub fn set_managed_folders(app: AppHandle, scope: State<'_, Scope>, download: String, moved: String, site_folders: Option<Vec<String>>) -> Result<ScopeStatus, String> {
+    let site_folders = site_folders.unwrap_or_default();
+    crate::library_folders::register_destinations(&app, &scope, &site_folders)?;
+    scope.configure_destinations(site_folders.into_iter().map(PathBuf::from).map(|p| PathBuf::from(plain_path(&p))).collect())?;
     let (home, system) = (home_folder(), system_folders());
     let (download, moved) = (judge("download folder", &download, home.as_deref(), &system), judge("folder for moved downloads", &moved, home.as_deref(), &system));
     let problem = [&download, &moved].into_iter().find_map(|slot| if let Slot::Refused(why) = slot { Some(why.clone()) } else { None });
     if let Ok(mut folders) = scope.inner.lock() {
         *folders = Folders { download, moved };
     }
-    ScopeStatus { problem }
+    Ok(ScopeStatus { problem })
 }
 
 #[cfg(test)]
@@ -268,6 +292,22 @@ mod tests {
         scope.set_library_dirs(vec![]).unwrap();
         assert!(scope.media_file(&music.display().to_string()).is_err());
         assert!(music.exists(), "removing a root leaves music on disk");
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn site_destinations_grant_media_actions_but_not_automatic_cleanup_or_transfer() {
+        let dir = scratch("site-destination");
+        let music = dir.join("song.mp3");
+        std::fs::write(&music, b"audio").unwrap();
+        let scope = Scope::default();
+        scope.set_destination_dirs(vec![dir.clone(), dir.clone()]).unwrap();
+        assert_eq!(scope.library_dirs(), vec![dir.clone()]);
+        assert!(scope.media_file(&music.display().to_string()).is_ok());
+        assert!(scope.download().is_err() && scope.moved().is_err());
+        scope.set_destination_dirs(vec![]).unwrap();
+        assert!(scope.media_file(&music.display().to_string()).is_err());
+        assert!(music.exists());
         std::fs::remove_dir_all(dir).ok();
     }
 

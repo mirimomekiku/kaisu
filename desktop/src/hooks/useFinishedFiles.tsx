@@ -6,6 +6,7 @@ import type { HistoryItem, Settings } from "../lib/storage";
 import { useAutoDelete } from "./useAutoDelete";
 import { useAutoMove } from "./useAutoMove";
 import { useDownloadedFiles } from "./useDownloadedFiles";
+import { validateSiteRule } from "../lib/siteRules";
 
 interface Args {
   settings: Settings;
@@ -13,6 +14,9 @@ interface Args {
   outDir: string;
   settingsLoaded: boolean;
   queueLoaded: boolean;
+  relocationReady: boolean;
+  onRelocated: (from: string, to: string) => void;
+  prepareMove: (paths: string[]) => () => void;
   page: Page;
   history: HistoryItem[];
   historyRef: React.MutableRefObject<HistoryItem[]>;
@@ -27,23 +31,27 @@ interface Args {
  * cleaning up old ones and deleting one on request. Kaisu only moves and deletes inside the two folders it has been told
  * about, so they are registered first.
  */
-export function useFinishedFiles({ settings, outDir, settingsLoaded, queueLoaded, page, history, historyRef, updateHistory, confirm, showFlash, announce }: Args) {
+export function useFinishedFiles({ settings, outDir, settingsLoaded, queueLoaded, relocationReady, onRelocated, prepareMove, page, history, historyRef, updateHistory, confirm, showFlash, announce }: Args) {
   const files = useDownloadedFiles(history, page, showFlash);
   const { existing, sizes, recheck } = files;
 
-  const folderKey = `${outDir}\n${settings.moveDir}`;
+  const siteFoldersKey = JSON.stringify([...new Set(settings.siteRules.filter((rule) => validateSiteRule(rule) === null).map((rule) => rule.folder.trim()).filter(Boolean))].sort());
+  const folderKey = JSON.stringify([outDir, settings.moveDir, siteFoldersKey]);
   const [registeredFolders, setRegisteredFolders] = useState("");
   const lastFolderProblem = useRef("");
   useEffect(() => {
     if (!settingsLoaded || outDir === "") return;
-    setManagedFolders(outDir, settings.moveDir)
+    let stale = false;
+    setManagedFolders(outDir, settings.moveDir, JSON.parse(siteFoldersKey))
       .then(({ problem }) => {
+        if (stale) return;
         if (problem && problem !== lastFolderProblem.current) showFlash(problem, true);
         lastFolderProblem.current = problem ?? "";
+        setRegisteredFolders(folderKey);
       })
-      .catch((e) => showFlash(errorText(e), true))
-      .finally(() => setRegisteredFolders(folderKey));
-  }, [settingsLoaded, outDir, settings.moveDir, folderKey, showFlash]);
+      .catch((e) => { if (!stale) showFlash(errorText(e), true); });
+    return () => { stale = true; };
+  }, [settingsLoaded, outDir, settings.moveDir, siteFoldersKey, folderKey, showFlash]);
   const ready = settingsLoaded && queueLoaded && registeredFolders === folderKey;
 
   const mover = useAutoMove({
@@ -55,7 +63,9 @@ export function useFinishedFiles({ settings, outDir, settingsLoaded, queueLoaded
     updateHistory,
     announce,
     showFlash,
-    ready,
+    ready: ready && relocationReady,
+    onRelocated,
+    prepareMove,
   });
   const cleaner = useAutoDelete({ settings, outDir, history, existing, sizes, announce, showFlash, onDeleted: recheck, ready });
 
@@ -79,7 +89,7 @@ export function useFinishedFiles({ settings, outDir, settingsLoaded, queueLoaded
       });
       if (answer !== "delete" && answer !== "trash") return;
       try {
-        const [result] = await deleteFiles([path], true, answer === "delete");
+        const [result] = await deleteFiles([path], true, answer === "delete", true);
         if (!result?.ok) {
           showFlash(result?.error ?? "Couldn't delete the file.", true);
           return;

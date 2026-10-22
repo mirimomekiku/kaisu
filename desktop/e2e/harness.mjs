@@ -15,15 +15,15 @@ export const tally = { passed: 0, failed: 0 };
 export const check = (name, ok, extra = "") => { ok ? tally.passed++ : tally.failed++; if (!ok) console.log("FAIL", name, extra); };
 export const now = Date.now();
 
-export async function open({ mock = {}, store = {}, history = [], queue = [], ready = true, focus = true, clock = false } = {}) {
+export async function open({ mock = {}, store = {}, data = {}, history = [], queue = [], ready = true, focus = true, clock = false } = {}) {
   const ctx = await browser.newContext({ viewport: { width: 1060, height: 800 } });
   const page = await ctx.newPage();
   page.on("pageerror", (e) => errors.push(e.message));
-  await page.addInitScript(([r, mk, st, h, q, f]) => {
+  await page.addInitScript(([r, mk, st, h, q, f, d]) => {
     window.__mock = { ready: r, calls: [], dlDelay: 80, missing: [], setupDelay: 50, notifications: [], ...mk };
     if (!f) document.hasFocus = () => false;
-    if (!localStorage.getItem("__store")) localStorage.setItem("__store", JSON.stringify({ settings: { mode: "simple", tourSeen: true, ...st }, history: h, queue: q }));
-  }, [ready, mock, store, history, queue, focus]);
+    if (!localStorage.getItem("__store")) localStorage.setItem("__store", JSON.stringify({ settings: { mode: "simple", tourSeen: true, ...st }, history: h, queue: q, ...d }));
+  }, [ready, mock, store, history, queue, focus, data]);
   if (clock) await page.clock.install();
   await page.goto(BASE_URL);
   await page.waitForSelector("input[type=text]");

@@ -10,7 +10,7 @@ import type { TagEditRequest } from "../lib/tagEdit";
 import TagEditor from "./TagEditor";
 import PlaylistPicker from "./PlaylistPicker";
 import PlaylistsView from "./PlaylistsView";
-import { usePlaylists } from "../hooks/usePlaylists";
+import type { PlaylistsApi } from "../hooks/usePlaylists";
 import { formatClock } from "../lib/format";
 import { albumsOf, artistsOf, filterTracks, formatsOf, qualityLabel, sortTracks, toPlayerTrack, totalDuration, type Album, type SortKey } from "../lib/library";
 import { CoverArt } from "./Picture";
@@ -35,6 +35,7 @@ const SORTS: Array<[SortKey, string]> = [
 ];
 
 interface Props {
+  playlists: PlaylistsApi;
   management: LibraryManagement;
   listening: Listening;
   onRelocated: (from: string, to: string) => void;
@@ -59,12 +60,11 @@ const hours = (seconds: number) => {
 };
 
 /** The music library: every sound file found in the download folders, by song, album or artist. */
-export default function LibraryPage({ tracks, management, listening, onRelocated, scanning, loaded, onScan, onReveal, onEditTags, analysing, unmeasuredCount, onAnalyse, onStopAnalysing, announce, flash }: Props) {
+export default function LibraryPage({ playlists, tracks, management, listening, onRelocated, scanning, loaded, onScan, onReveal, onEditTags, analysing, unmeasuredCount, onAnalyse, onStopAnalysing, announce, flash }: Props) {
   const preferences = useMusicPreferences()?.preferences;
   const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [minimumRating, setMinimumRating] = useState(0);
   const player = usePlayerEngine();
-  const playlists = usePlaylists();
   const [adding, setAdding] = useState<LibTrack[] | null>(null);
   const [view, setView] = useState<View>("songs");
   const [query, setQuery] = useState("");
@@ -117,7 +117,7 @@ export default function LibraryPage({ tracks, management, listening, onRelocated
   const locate = async (path: string) => {
     try {
       const found = await management.locate(path);
-      if (found) { playlists.relocate(found.from, found.track.path); onRelocated(found.from, found.track.path); announce({ title: "Moved file located", subtitle: found.track.title }); }
+      if (found) { onRelocated(found.from, found.track.path); announce({ title: "Moved file located", subtitle: found.track.title }); }
     } catch (e) { flash(e instanceof Error ? e.message : String(e), true); }
   };
 

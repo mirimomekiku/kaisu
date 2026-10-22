@@ -4,7 +4,9 @@
 //! subtitle and lyrics companions, so a damaged history entry can't point them at anything else. A move is a copy
 //! that is checked before the original is removed: a drive that disappears halfway loses nothing.
 
-use std::fs;
+use std::{fs, sync::Mutex};
+
+static TRANSFER: Mutex<()> = Mutex::new(());
 use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -114,38 +116,78 @@ fn sidecars_of(media: &Path) -> Vec<PathBuf> {
     entries
         .flatten()
         .map(|e| e.path())
-        .filter(|p| p != media && is_sidecar(p) && p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with(&prefix)))
+        .filter(|p| p != media && fs::symlink_metadata(p).is_ok_and(|m| m.file_type().is_file()) && is_sidecar(p) && p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with(&prefix)))
         .collect()
 }
 
 /// Copies, checks the size, and only then puts the file under its real name.
 fn copy_checked(from: &Path, to: &Path) -> Result<(), String> {
     let part = to.with_file_name(format!("{}.kaisu-part", to.file_name().and_then(|n| n.to_str()).unwrap_or("file")));
+    // Reserve before copying. An existing staging file is never overwritten or cleaned up by us.
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    { use std::os::unix::fs::OpenOptionsExt; options.mode(0o600); }
+    let mut output = options.open(&part)
+        .map_err(|e| format!("Couldn't reserve a working copy: {e}"))?;
     let result = (|| {
-        let copied = fs::copy(from, &part).map_err(|e| format!("Couldn't copy the file: {e}"))?;
-        let expected = fs::metadata(from).map_err(|e| e.to_string())?.len();
-        if copied != expected || fs::metadata(&part).map(|m| m.len()).unwrap_or(0) != expected {
-            return Err("The copy came out the wrong size, so the original was kept.".to_string());
+        let mut input = fs::File::open(from).map_err(|e| format!("Couldn't read the file: {e}"))?;
+        let before = input.metadata().map_err(|e| e.to_string())?;
+        let copied = std::io::copy(&mut input, &mut output).map_err(|e| format!("Couldn't copy the file: {e}"))?;
+        output.sync_all().map_err(|e| format!("Couldn't finish writing the copy: {e}"))?;
+        let after = input.metadata().map_err(|e| e.to_string())?;
+        if copied != before.len() || after.len() != before.len() || before.modified().ok() != after.modified().ok()
+            || output.metadata().map(|m| m.len()).unwrap_or(0) != before.len() {
+            return Err("The file changed or the copy came out the wrong size, so the original was kept.".to_string());
         }
+        output.set_permissions(before.permissions()).map_err(|e| format!("Couldn't preserve the file permissions: {e}"))?;
+        drop(output);
         fs::rename(&part, to).map_err(|e| format!("Couldn't finish the copy: {e}"))
     })();
     if result.is_err() {
+        #[cfg(windows)]
+        if let Ok(metadata) = fs::metadata(&part) {
+            let mut permissions = metadata.permissions();
+            permissions.set_readonly(false);
+            let _ = fs::set_permissions(&part, permissions);
+        }
         let _ = fs::remove_file(&part);
     }
     result
 }
 
+/// Preserve the complete suffix: song.en.srt follows song (2).mp3 as song (2).en.srt.
+fn companion_target(source: &Path, target: &Path, companion: &Path) -> Result<PathBuf, String> {
+    let stem = source.file_stem().and_then(|s| s.to_str()).ok_or("Invalid media filename.")?;
+    let suffix = companion.file_name().and_then(|s| s.to_str()).and_then(|s| s.strip_prefix(stem)).ok_or("Invalid companion filename.")?;
+    let new_stem = target.file_stem().and_then(|s| s.to_str()).ok_or("Invalid destination filename.")?;
+    Ok(target.with_file_name(format!("{new_stem}{suffix}")))
+}
+
+fn occupied(path: &Path) -> bool { fs::symlink_metadata(path).is_ok() }
+
+/// Pick a name for the whole group, including companion-only collisions.
+fn group_target(source: &Path, requested: &Path, companions: &[PathBuf]) -> Result<PathBuf, String> {
+    let stem = requested.file_stem().and_then(|s| s.to_str()).ok_or("Invalid destination filename.")?;
+    let ext = requested.extension().and_then(|s| s.to_str()).map(|s| format!(".{s}")).unwrap_or_default();
+    for n in 1..10_000 {
+        let target = if n == 1 { requested.to_path_buf() } else { requested.with_file_name(format!("{stem} ({n}){ext}")) };
+        if !occupied(&target) && sidecars_of(&target).is_empty()
+            && companions.iter().all(|side| companion_target(source, &target, side).is_ok_and(|p| !occupied(&p))) {
+            return Ok(target);
+        }
+    }
+    Err("Couldn't find a free name for the media and its companion files.".into())
+}
+
 /// Moves or copies one file. Returns where it ended up (None when it was skipped).
 fn transfer_one(src: &Path, base: &Path, dest_root: &Path, mode: MoveMode, conflict: Conflict, keep_layout: bool) -> Result<Option<Moved>, String> {
-    let target = destination_for(src, base, dest_root, keep_layout).ok_or("Couldn't work out where this file goes.")?;
-    let target = if target.exists() {
-        match conflict {
-            Conflict::Skip => return Ok(None),
-            Conflict::Replace => target,
-            Conflict::KeepBoth => unique_name(&target),
-        }
-    } else {
-        target
+    let requested = destination_for(src, base, dest_root, keep_layout).ok_or("Couldn't work out where this file goes.")?;
+    let sides = sidecars_of(src);
+    let target = match conflict {
+        Conflict::KeepBoth => group_target(src, &requested, &sides)?,
+        Conflict::Skip if requested.exists() => return Ok(None),
+        _ => requested,
     };
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("Couldn't create the folder {}: {e}", parent.display()))?;
@@ -167,13 +209,9 @@ fn transfer_one(src: &Path, base: &Path, dest_root: &Path, mode: MoveMode, confl
     }
     // Companions go along. Losing one doesn't fail the song, but it is reported.
     let mut failed: Vec<String> = Vec::new();
-    for side in sidecars_of(src) {
-        let Some(t) = destination_for(&side, base, dest_root, keep_layout) else { continue };
-        let t = match (t.exists(), conflict) {
-            (true, Conflict::Skip) => continue,
-            (true, Conflict::KeepBoth) => unique_name(&t),
-            _ => t,
-        };
+    for side in sides {
+        let t = companion_target(src, &target, &side)?;
+        if t.exists() && conflict == Conflict::Skip { continue; }
         let done = match mode {
             MoveMode::Move if fs::rename(&side, &t).is_ok() => Ok(()),
             MoveMode::Move => copy_checked(&side, &t).and_then(|_| fs::remove_file(&side).map_err(|e| format!("Copied, but couldn't remove the original: {e}"))),
@@ -218,13 +256,33 @@ pub fn check_destination(path: String) -> Result<DestinationCheck, String> {
 /// Moves or copies finished downloads from the download folder to the folder for moved downloads.
 /// Both folders come from `Scope`, never from the caller.
 #[tauri::command]
-pub async fn transfer_files(scope: State<'_, Scope>, items: Vec<MoveItem>, mode: Option<MoveMode>, conflict: Option<Conflict>, keep_layout: Option<bool>) -> Result<Vec<MoveResult>, String> {
+pub async fn transfer_files(app: tauri::AppHandle, scope: State<'_, Scope>, items: Vec<MoveItem>, mode: Option<MoveMode>, conflict: Option<Conflict>, keep_layout: Option<bool>) -> Result<Vec<MoveResult>, String> {
     let (base, dest) = (scope.download()?, scope.moved()?);
-    run_transfer(items, base.display().to_string(), dest.display().to_string(), mode, conflict, keep_layout).await
+    let sources: std::collections::HashMap<_, _> = items.iter().map(|i| (i.id.clone(), i.path.clone())).collect();
+    let mut results = run_transfer(items, base.display().to_string(), dest.display().to_string(), mode, conflict, keep_layout).await?;
+    if mode.unwrap_or_default() == MoveMode::Move {
+        let mappings: Vec<_> = results.iter().filter(|r| r.ok && !r.skipped).filter_map(|r| Some((sources.get(&r.id)?.clone(), crate::scope::plain_path(Path::new(r.new_path.as_ref()?))))).collect();
+        let updated = (|| {
+            let _lock = crate::library::CACHE_EDIT.lock().map_err(|_| "Library is unavailable.".to_string())?;
+            let cache = crate::library::cache_path(&app)?;
+            let mut tracks = crate::library::load_cache(&cache);
+            crate::library::relocate_cached_tracks(&mut tracks, &mappings);
+            crate::library::save_cache(&cache, &tracks)
+        })();
+        if let Err(why) = updated {
+            // The files have moved; return their successful mappings even if cache persistence fails.
+            for result in results.iter_mut().filter(|r| r.ok && !r.skipped) {
+                let note = format!("The file moved, but its library cache could not be updated: {why}");
+                result.warning = Some(result.warning.take().map(|w| format!("{w}; {note}")).unwrap_or(note));
+            }
+        }
+    }
+    Ok(results)
 }
 
 async fn run_transfer(items: Vec<MoveItem>, base_dir: String, dest_dir: String, mode: Option<MoveMode>, conflict: Option<Conflict>, keep_layout: Option<bool>) -> Result<Vec<MoveResult>, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        let _lock = TRANSFER.lock().map_err(|_| "File transfer is unavailable.")?;
         let (mode, conflict, keep_layout) = (mode.unwrap_or_default(), conflict.unwrap_or_default(), keep_layout.unwrap_or(true));
         check_destination_sync(&dest_dir)?;
         let base = PathBuf::from(&base_dir);
@@ -239,7 +297,7 @@ async fn run_transfer(items: Vec<MoveItem>, base_dir: String, dest_dir: String, 
             .map(|item| {
                 let done = checked_source(&item.path, &real_base).and_then(|src| transfer_one(&src, &real_base, &dest, mode, conflict, keep_layout));
                 match done {
-                    Ok(Some(m)) => MoveResult { id: item.id, ok: true, new_path: Some(m.path.display().to_string()), warning: m.warning, ..Default::default() },
+                    Ok(Some(m)) => MoveResult { id: item.id, ok: true, new_path: Some(crate::scope::plain_path(&m.path)), warning: m.warning, ..Default::default() },
                     Ok(None) => MoveResult { id: item.id, ok: true, skipped: true, ..Default::default() },
                     Err(e) => MoveResult { id: item.id, error: Some(e), ..Default::default() },
                 }
@@ -260,12 +318,15 @@ pub struct DeleteResult {
 }
 
 /// Deletes downloaded files (and their subtitle and lyrics files) from the download folder, and from the folder for
-/// moved downloads when `include_moved` is set. The folders come from `Scope`, never from the caller.
+/// moved downloads when `include_moved` is set. Explicit file actions may opt into library roots with `include_library`;
+/// automatic cleanup never sets that flag. The folders come from `Scope`, never from the caller.
 #[tauri::command]
-pub async fn delete_files(scope: State<'_, Scope>, paths: Vec<String>, include_moved: Option<bool>, permanent: Option<bool>) -> Result<Vec<DeleteResult>, String> {
+pub async fn delete_files(scope: State<'_, Scope>, paths: Vec<String>, include_moved: Option<bool>, permanent: Option<bool>, include_library: Option<bool>) -> Result<Vec<DeleteResult>, String> {
     let download = scope.download();
     let moved = if include_moved.unwrap_or(false) { scope.moved().ok() } else { None };
-    let allowed: Vec<String> = download.iter().chain(moved.iter()).map(|p| p.display().to_string()).collect();
+    let allowed: Vec<String> = if include_library.unwrap_or(false) {
+        scope.library_dirs().iter().map(|p| p.display().to_string()).collect()
+    } else { download.iter().chain(moved.iter()).map(|p| p.display().to_string()).collect() };
     if let (Err(why), true) = (&download, allowed.is_empty()) {
         return Err(why.clone());
     }
@@ -436,6 +497,75 @@ mod tests {
         assert!(check_destination_sync(&file.display().to_string()).is_err());
         assert!(!dir.join("not-plugged-in").exists(), "checking never creates the destination");
         fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn keep_both_names_the_media_and_all_companions_as_one_group() {
+        for mode in [MoveMode::Move, MoveMode::Copy] {
+            for collision in ["song.mp3", "song.en.srt", "song.lrc"] {
+                let base = scratch(&format!("group-source-{mode:?}-{collision}"));
+                let dest = scratch(&format!("group-dest-{mode:?}-{collision}"));
+                for name in ["song.mp3", "song.en.srt", "song.ja.vtt", "song.lrc"] { write(&base.join(name), name.as_bytes()); }
+                write(&dest.join(collision), b"existing");
+                write(&dest.join("song (2).lrc"), b"existing numbered lyrics");
+                let moved = transfer_one(&base.join("song.mp3"), &base, &dest, mode, Conflict::KeepBoth, false).unwrap().unwrap();
+                assert_eq!(moved.path, dest.join("song (3).mp3"));
+                assert!(moved.warning.is_none());
+                for suffix in [".mp3", ".en.srt", ".ja.vtt", ".lrc"] {
+                    assert_eq!(fs::read(dest.join(format!("song (3){suffix}"))).unwrap(), format!("song{suffix}").as_bytes());
+                    assert_eq!(base.join(format!("song{suffix}")).exists(), mode == MoveMode::Copy);
+                }
+                assert_eq!(fs::read(dest.join(collision)).unwrap(), b"existing");
+                fs::remove_dir_all(base).ok(); fs::remove_dir_all(dest).ok();
+            }
+        }
+    }
+
+    #[test]
+    fn an_existing_staging_file_is_never_overwritten_or_removed() {
+        let dir = scratch("staging-collision");
+        let (source, target, part) = (dir.join("original.mp3"), dir.join("copy.mp3"), dir.join("copy.mp3.kaisu-part"));
+        write(&source, b"source"); write(&part, b"other operation");
+        assert!(copy_checked(&source, &target).is_err());
+        assert_eq!(fs::read(&part).unwrap(), b"other operation");
+        assert_eq!(fs::read(&source).unwrap(), b"source");
+        assert!(!target.exists());
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn keep_both_does_not_attach_existing_unrelated_lyrics_or_subtitles() {
+        let base = scratch("orphan-source");
+        let dest = scratch("orphan-dest");
+        write(&base.join("song.mp3"), b"audio without sidecars");
+        write(&dest.join("song.ja.srt"), b"unrelated subtitles");
+        let moved = transfer_one(&base.join("song.mp3"), &base, &dest, MoveMode::Copy, Conflict::KeepBoth, true).unwrap().unwrap();
+        assert_eq!(moved.path, dest.join("song (2).mp3"));
+        assert_eq!(fs::read(dest.join("song.ja.srt")).unwrap(), b"unrelated subtitles");
+        assert!(sidecars_of(&moved.path).is_empty());
+        fs::remove_dir_all(base).ok(); fs::remove_dir_all(dest).ok();
+    }
+
+    #[test]
+    fn failed_copy_cleans_only_its_own_staging_file() {
+        let dir = scratch("staging-failure");
+        let target = dir.join("copy.mp3");
+        assert!(copy_checked(&dir.join("missing.mp3"), &target).is_err());
+        assert!(!dir.join("copy.mp3.kaisu-part").exists() && !target.exists());
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn checked_copies_preserve_private_file_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = scratch("copy-permissions");
+        let (source, target) = (dir.join("source.mp3"), dir.join("copy.mp3"));
+        write(&source, b"private audio");
+        fs::set_permissions(&source, fs::Permissions::from_mode(0o600)).unwrap();
+        copy_checked(&source, &target).unwrap();
+        assert_eq!(fs::metadata(&target).unwrap().permissions().mode() & 0o777, 0o600);
+        fs::remove_dir_all(dir).ok();
     }
 
     #[tokio::test]

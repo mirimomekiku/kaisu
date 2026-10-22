@@ -2,6 +2,7 @@ import type { Track } from "../lib/audioEngine";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { loadListening, saveListening } from "../lib/storage";
 import { mergeListening, recordListeningTime, recordPlayed, type Listening } from "../lib/listening";
+import { relocateListening } from "../lib/relocation";
 
 export function useListening() {
   const [stats, setStats] = useState<Listening>({});
@@ -24,8 +25,7 @@ export function useListening() {
   const recordTime = useCallback((track: Track, seconds: number) => { latest.current = recordListeningTime(latest.current, track, seconds); setStats(latest.current); }, []);
   const relocate = useCallback((from: string, to: string) => {
     if (from === to) return;
-    const next = { ...latest.current };
-    if (next[from]) { next[to] = mergeListening(next[to], next[from]); delete next[from]; }
+    const next = relocateListening(latest.current, from, to);
     latest.current = next; setStats(next);
   }, []);
   return { stats, loaded, record, recordTime, relocate };

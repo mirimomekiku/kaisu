@@ -66,6 +66,17 @@ const thumb = (hue: number) =>
   "data:image/svg+xml;utf8," + encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' width='480' height='270'><rect width='480' height='270' fill='hsl(${hue},45%,35%)'/><circle cx='240' cy='135' r='34' fill='white' opacity='.8'/></svg>`);
 const idOf = (i: number) => `vid${String(i).padStart(8, "0")}`; // 11 chars
 
+const destinationFolders = (): string[] => JSON.parse(localStorage.getItem("__downloadFolders") ?? "[]");
+function musicFolders() {
+  const folders = structuredClone(w.__mock.musicFolders ?? []);
+  for (const path of destinationFolders()) {
+    const existing = folders.find((f: any) => f.path === path);
+    const info = { path, available: !(w.__mock.badFolders ?? []).includes(path), download_destination: true, configured: (w.__mock.folders?.siteFolders ?? []).includes(path) };
+    if (existing) Object.assign(existing, info); else folders.push(info);
+  }
+  return folders;
+}
+
 export async function invoke(cmd: string, args: any = {}): Promise<any> {
   w.__mock.calls.push({ cmd, args: JSON.parse(JSON.stringify(args, (k, v) => (k === "onEvent" ? "[channel]" : v))) });
   switch (cmd) {
@@ -144,9 +155,13 @@ export async function invoke(cmd: string, args: any = {}): Promise<any> {
     case "check_destination":
       if (w.__mock.destMissing) throw "That drive or folder isn't connected right now.";
       return { free: w.__mock.destFree ?? 200 * 1024 ** 3 };
-    case "set_managed_folders":
-      w.__mock.folders = { download: String(args.download).trim(), moved: String(args.moved).trim() };
+    case "set_managed_folders": {
+      const siteFolders: string[] = args.siteFolders ?? [];
+      if (siteFolders.some((p) => !p.startsWith("/") || ["/", "/home/u", "/etc", "/usr"].includes(p))) throw "Choose a more specific site-rule folder.";
+      localStorage.setItem("__downloadFolders", JSON.stringify([...new Set([...destinationFolders(), ...siteFolders])]));
+      w.__mock.folders = { download: String(args.download).trim(), moved: String(args.moved).trim(), siteFolders };
       return { problem: w.__mock.folderProblem ?? null };
+    }
     case "transfer_files": {
       // Like the real command, the folders come from what was registered, never from the call.
       const f = w.__mock.folders;
@@ -160,13 +175,15 @@ export async function invoke(cmd: string, args: any = {}): Promise<any> {
         if (w.__mock.transferSkip) return { id: i.id, ok: true, skipped: true, new_path: null, error: null, warning: null };
         const rel = args.keepLayout ? i.path.slice(base.length + 1) : i.path.split("/").pop();
         const warning = (w.__mock.transferWarn ?? []).includes(i.path) ? "The file was moved but not everything that goes with it: song.lrc (Couldn't copy the file: access is denied)" : null;
-        return { id: i.id, ok: true, skipped: false, new_path: `${f.moved.replace(/\/+$/, "")}/${rel}`, error: null, warning };
+        const new_path = `${f.moved.replace(/\/+$/, "")}/${rel}`;
+        if (args.mode === "move") w.__mock.library = (w.__mock.library ?? []).map((t: any) => t.path === i.path ? { ...t, path: new_path, missing: false } : t);
+        return { id: i.id, ok: true, skipped: false, new_path, error: null, warning };
       });
     }
     case "delete_files": {
       const f = w.__mock.folders;
       if (!f?.download) throw "Choose a download folder first.";
-      const allowed = [f.download, ...(args.includeMoved && f.moved ? [f.moved] : [])];
+      const allowed = [f.download, ...(args.includeMoved && f.moved ? [f.moved] : []), ...(args.includeLibrary ? musicFolders().map((folder: any) => folder.path) : [])];
       (w.__mock.deleteCalls ??= []).push({ ...JSON.parse(JSON.stringify(args)), allowed });
       return args.paths.map((p: string) => {
         if (w.__mock.recycleFail && !args.permanent) return { path: p, ok: false, error: "Couldn't move the file to the Recycle Bin. The file was not permanently deleted." };
@@ -199,7 +216,7 @@ export async function invoke(cmd: string, args: any = {}): Promise<any> {
       return found;
     }
     case "library_folders":
-      return structuredClone(w.__mock.musicFolders ?? []);
+      return musicFolders();
     case "library_add_folder": {
       if (w.__mock.folderFail) throw "Couldn't open that folder.";
       const path = w.__mock.importFolder;
@@ -208,12 +225,14 @@ export async function invoke(cmd: string, args: any = {}): Promise<any> {
         folders.push({ path, available: true });
         w.__mock.library = [...(w.__mock.library ?? []), ...(w.__mock.importTracks ?? [])];
       }
-      return structuredClone(folders);
+      return musicFolders();
     }
     case "library_remove_folder":
+      if ((w.__mock.folders?.siteFolders ?? []).includes(args.path)) throw "Remove this folder from your site rules first.";
+      localStorage.setItem("__downloadFolders", JSON.stringify(destinationFolders().filter((path) => path !== args.path)));
       w.__mock.musicFolders = (w.__mock.musicFolders ?? []).filter((f: any) => f.path !== args.path);
       w.__mock.library = (w.__mock.library ?? []).filter((t: any) => !t.path.startsWith(args.path + "/"));
-      return structuredClone(w.__mock.musicFolders);
+      return musicFolders();
     case "library_locate": {
       const track = w.__mock.relocations?.[args.path];
       if (!track) return null;

@@ -443,7 +443,17 @@ export async function savePositions(positions: Positions) {
 
 export async function loadQueue(): Promise<SavedDownload[]> {
   try {
-    return (await (await getStore()).get<SavedDownload[]>("queue")) ?? [];
+    const store = await getStore();
+    const saved = (await store.get<SavedDownload[]>("queue")) ?? [];
+    const queue = queueWithoutProxy(saved);
+    if (saved.some((item) => item.extra?.proxy != null)) {
+      try {
+        await store.set("queue", queue);
+        // Finish the migration before returning: old credentials must not remain on disk.
+        await store.save();
+      } catch (e) { console.warn("Could not remove saved queue credentials", e); }
+    }
+    return queue;
   } catch (e) {
     console.warn("Could not read the saved queue", e);
     return [];
@@ -452,10 +462,15 @@ export async function loadQueue(): Promise<SavedDownload[]> {
 
 export async function saveQueue(queue: SavedDownload[]) {
   try {
-    await (await getStore()).set("queue", queue);
+    await (await getStore()).set("queue", queueWithoutProxy(queue));
   } catch (e) {
     console.warn("Could not save the queue", e);
   }
+}
+
+/** Network credentials belong to current settings, never to a saved download. */
+export function queueWithoutProxy(queue: SavedDownload[]): SavedDownload[] {
+  return queue.map((item) => ({ ...item, extra: { ...item.extra, proxy: null } }));
 }
 
 export async function loadMusicPreferences(): Promise<MusicPreferences> {

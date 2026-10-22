@@ -1,5 +1,6 @@
 import { insertAfter, moveItem, removeAt, shuffleAround, unshuffle } from "./playQueue";
 import { forget, remember, resumeAt, type Positions } from "./positions";
+import { relocatePositions } from "./relocation";
 
 // The music player's brain: a queue, the audio element, and everything that happens around them (resuming a long file where
 // it stopped, speed, a sleep timer, repeat and shuffle). It knows nothing about the page, so it can be tested with a fake
@@ -570,16 +571,15 @@ export class PlayerEngine {
 
   /** Keep queued tracks usable after the user locates a moved file. */
   replacePath(from: string, to: string) {
+    const retryLoading = this.current?.path === from && this.state.loading;
     this.saveNow(); this.cancelPreload(); this.finishTail(false); this.listenLast = null;
     const positions = this.deps.getPositions();
-    if (from !== to && positions[from]) {
-      const next = { ...positions, [to]: positions[from] };
-      delete next[from];
-      this.deps.setPositions(next);
-    }
+    const next = relocatePositions(positions, from, to);
+    if (next !== positions) this.deps.setPositions(next);
     const swap = (queue: Track[]) => queue.map((t) => t.path === from ? { ...t, path: to, cover: undefined } : t);
     if (this.original) this.original = swap(this.original);
     this.set({ queue: swap(this.state.queue) });
+    if (retryLoading) void this.load(this.state.index, true, { save: false });
   }
   setTransitions(gapless: boolean, seconds: number) {
     const fade = gapless && Number.isFinite(seconds) ? clamp(seconds, 0, 12) : 0;

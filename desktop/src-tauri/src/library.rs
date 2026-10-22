@@ -226,6 +226,19 @@ pub fn save_cache(path: &Path, tracks: &[LibTrack]) -> Result<(), String> {
     fs::rename(&tmp, path).map_err(|e| format!("Cannot save the library: {e}"))
 }
 
+/// A verified move preserves import dates and measured loudness, and does not leave a false missing entry.
+pub(crate) fn relocate_cached_tracks(tracks: &mut Vec<LibTrack>, mappings: &[(String, String)]) {
+    for (from, to) in mappings {
+        if from == to { continue; }
+        if let Some(mut track) = tracks.iter().find(|t| t.path == *from).cloned() {
+            track.path = to.clone();
+            track.missing = false;
+            tracks.retain(|t| t.path != *from && t.path != *to);
+            tracks.push(track);
+        }
+    }
+}
+
 // ---- commands --------------------------------------------------------------------------------
 
 /// What was remembered from the last scan, instantly.

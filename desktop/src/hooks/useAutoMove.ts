@@ -19,6 +19,8 @@ interface Args {
   announce: (note: { title: string; subtitle: string }) => void;
   showFlash: (text: string, error?: boolean) => void;
   ready: boolean;
+  onRelocated: (from: string, to: string) => void;
+  prepareMove: (paths: string[]) => () => void;
 }
 
 /**
@@ -63,6 +65,7 @@ export function useAutoMove(a: Args) {
     if (busy.current || items.length === 0) return;
     busy.current = true;
     setMoving(true);
+    const release = s.moveMode === "move" ? argsRef.current.prepareMove(items.flatMap((item) => item.path ? [item.path] : [])) : () => {};
     try {
       // The folders come from what Kaisu was told with `setManagedFolders`, not from here.
       const results = await transferFiles(
@@ -89,6 +92,12 @@ export function useAutoMove(a: Args) {
         return { ...h, path: r.new_path ?? h.path };
       });
       updateHistory(next);
+      if (s.moveMode === "move") {
+        for (const item of items) {
+          const result = byId.get(item.id);
+          if (result?.ok && !result.skipped && result.new_path && item.path) argsRef.current.onRelocated(item.path, result.new_path);
+        }
+      }
       if (done > 0) announce({ title: `${s.moveMode === "copy" ? "Copied" : "Moved"} ${done} download${done === 1 ? "" : "s"}`, subtitle: s.moveDir });
       if (firstError && firstError !== lastError.current) {
         lastError.current = firstError;
@@ -104,6 +113,7 @@ export function useAutoMove(a: Args) {
         showFlash(message, true);
       }
     } finally {
+      release();
       busy.current = false;
       setMoving(false);
     }

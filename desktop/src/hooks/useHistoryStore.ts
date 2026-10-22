@@ -8,6 +8,7 @@ export function useHistoryStore() {
   historyRef.current = history;
 
   const updateHistory = useCallback((next: HistoryItem[]) => {
+    historyRef.current = next;
     setHistory(next);
     saveHistory(next);
   }, []);

@@ -483,9 +483,13 @@ pub async fn start_download(
     app: AppHandle,
     engine: State<'_, Engine>,
     downloads: State<'_, Downloads>,
+    scope: State<'_, crate::scope::Scope>,
     req: DownloadRequest,
     on_event: Channel<DownloadEvent>,
 ) -> Result<(), String> {
+    if !scope.library_dirs().iter().any(|root| req.out_dir.starts_with(root)) {
+        crate::library_folders::register_destinations(&app, &scope, &[req.out_dir.display().to_string()])?;
+    }
     let result = run_download(&app, &engine, &downloads, &req, &on_event).await;
     if let Err(message) = &result {
         let _ = on_event.send(DownloadEvent::Error { message: message.clone() });

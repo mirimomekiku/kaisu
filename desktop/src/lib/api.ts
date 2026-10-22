@@ -254,7 +254,12 @@ export interface MoveResult {
 /** Is the place for moved downloads there (a plugged-in drive) and writable? Rejects with the reason. */
 export const checkDestination = (path: string) => invoke<{ free: number }>("check_destination", { path });
 /** Tells Kaisu which folders it may move files out of, move them into, and delete from. Moving and deleting only ever work inside these. */
-export const setManagedFolders = (download: string, moved: string) => invoke<{ problem: string | null }>("set_managed_folders", { download, moved });
+let folderRegistration: Promise<unknown> = Promise.resolve();
+export function setManagedFolders(download: string, moved: string, siteFolders: string[] = []) {
+  const result = folderRegistration.then(() => invoke<{ problem: string | null }>("set_managed_folders", { download, moved, siteFolders }));
+  folderRegistration = result.catch(() => {});
+  return result;
+}
 /** Moves or copies finished downloads from the download folder to the folder for moved downloads (both set with `setManagedFolders`). */
 export const transferFiles = (items: Array<{ id: string; path: string }>, mode: MoveMode, conflict: MoveConflict, keepLayout: boolean) =>
   invoke<MoveResult[]>("transfer_files", { items, mode, conflict, keepLayout });
@@ -265,7 +270,7 @@ export interface DeleteResult {
   warning?: string | null;
 }
 /** Deletes downloaded files (and their subtitle/lyrics files) from the download folder, and from the moved-to folder when `includeMoved` is set. */
-export const deleteFiles = (paths: string[], includeMoved: boolean, permanent = false) => invoke<DeleteResult[]>("delete_files", { paths, includeMoved, permanent });
+export const deleteFiles = (paths: string[], includeMoved: boolean, permanent = false, includeLibrary = false) => invoke<DeleteResult[]>("delete_files", { paths, includeMoved, permanent, includeLibrary });
 export const openFile = (path: string) => invoke<void>("open_file", { path });
 export const revealFile = (path: string) => invoke<void>("reveal_file", { path });
 export const openUrl = (url: string) => invoke<void>("open_url", { url });
@@ -326,7 +331,7 @@ export function startDownload(req: DownloadRequest, onEvent: (e: DownloadEvent) 
   channel.onmessage = onEvent;
   // A queued download, a saved preset or a restored session may still ask for lyrics; without consent they are dropped here.
   const allowed: DownloadRequest = !lyricsConsent && req.extra.lyrics && req.extra.lyrics !== "off" ? { ...req, extra: { ...req.extra, lyrics: "off" } } : req;
-  return invoke<void>("start_download", { req: allowed, onEvent: channel });
+  return invoke<void>("start_download", { req: { ...allowed, extra: { ...allowed.extra, proxy: currentProxy } }, onEvent: channel });
 }
 
 /** A thumbnail's bytes, fetched by Kaisu (through the proxy) because the page may not load pictures from the internet itself. */
@@ -373,7 +378,7 @@ export interface LibTrack {
 /** What was found by the last scan, at once. */
 export const libraryLoad = () => invoke<LibTrack[]>("library_load");
 
-export interface MusicFolder { path: string; available: boolean }
+export interface MusicFolder { path: string; available: boolean; download_destination?: boolean; configured?: boolean }
 export const libraryFolders = () => invoke<MusicFolder[]>("library_folders");
 export const libraryAddFolder = () => invoke<MusicFolder[]>("library_add_folder");
 export const libraryRemoveFolder = (path: string) => invoke<MusicFolder[]>("library_remove_folder", { path });

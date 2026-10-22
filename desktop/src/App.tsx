@@ -55,6 +55,8 @@ import { validateRule } from "./lib/schedule";
 import { knownSource, sourceLabel } from "./lib/sources";
 import { loadHistory, loadQueue, loadSettings, type HistoryItem, type ViewMode } from "./lib/storage";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { usePlaylists } from "./hooks/usePlaylists";
+import { relocateTrack } from "./lib/relocation";
 
 const isFinishedStatus = (status: string) => status === "completed" || status === "error" || status === "cancelled";
 
@@ -62,7 +64,9 @@ export default function App() {
   const confirm = useConfirm();
   const musicPreferences = useCreateMusicPreferences();
   const listening = useListening();
-  const player = useCreatePlayer(listening.record, listening.recordTime);
+  const playlists = usePlaylists();
+  const [playerLoaded, setPlayerLoaded] = useState(false);
+  const player = useCreatePlayer(listening.record, listening.recordTime, () => setPlayerLoaded(true));
   const playerState = usePlayerState(player);
   const [page, setPage] = useState<Page>("search");
   const [defaultDir, setDefaultDir] = useState("");
@@ -84,6 +88,10 @@ export default function App() {
   const { settings, settingsRef, settingsLoaded, changeSettings, changeSettingsGuarded, ensureLyricsConsent, applyLoaded } = useAppSettings(confirm);
   useEffect(() => { if (settingsLoaded) player.setTransitions(settings.gaplessPlayback, settings.crossfadeSeconds); }, [player, settingsLoaded, settings.gaplessPlayback, settings.crossfadeSeconds]);
   const { history, historyRef, setHistory, updateHistory } = useHistoryStore();
+  const onRelocated = (from: string, to: string) => relocateTrack({
+    player, listening, preferences: musicPreferences, playlists,
+    history: (oldPath, newPath) => updateHistory(historyRef.current.map((h) => h.path === oldPath ? { ...h, path: newPath } : h)),
+  }, from, to);
   const setup = useEngine({ settingsLoaded, settingsRef, changeSettings });
   const { engine } = setup;
 
@@ -139,6 +147,9 @@ export default function App() {
     outDir: effectiveOutDir,
     settingsLoaded,
     queueLoaded,
+    relocationReady: playerLoaded && playlists.loaded && musicPreferences.loaded && listening.loaded,
+    onRelocated,
+    prepareMove: (paths) => player.releaseFiles(paths),
     page,
     history,
     historyRef,
@@ -593,7 +604,7 @@ export default function App() {
             />
           )}
 
-          {page === "library" && <LibraryPage tracks={library.tracks} management={library.management} listening={listening.stats} onRelocated={(from, to) => { listening.relocate(from, to); musicPreferences.relocate(from, to); player.replacePath(from, to); updateHistory(historyRef.current.map((h) => h.path === from ? { ...h, path: to } : h)); }} unmeasuredCount={library.unmeasuredCount} scanning={library.scanning} loaded={library.loaded} onScan={() => void library.scan()} onReveal={revealDownloaded} onEditTags={async (paths, edit) => { const release = player.releaseFiles(paths); try { const results = await library.editTags(paths, edit); if (edit.artwork) player.invalidateCovers(results.filter((r) => r.ok).map((r) => r.path)); return results; } finally { release(); } }} analysing={library.analysing} onAnalyse={() => void library.analyse()} onStopAnalysing={library.stopAnalysing} announce={setNote} flash={showFlash} />}
+          {page === "library" && <LibraryPage tracks={library.tracks} management={library.management} listening={listening.stats} playlists={playlists} onRelocated={onRelocated} unmeasuredCount={library.unmeasuredCount} scanning={library.scanning} loaded={library.loaded} onScan={() => void library.scan()} onReveal={revealDownloaded} onEditTags={async (paths, edit) => { const release = player.releaseFiles(paths); try { const results = await library.editTags(paths, edit); if (edit.artwork) player.invalidateCovers(results.filter((r) => r.ok).map((r) => r.path)); return results; } finally { release(); } }} analysing={library.analysing} onAnalyse={() => void library.analyse()} onStopAnalysing={library.stopAnalysing} announce={setNote} flash={showFlash} />}
 
           {page === "settings" && (
             <SettingsPage

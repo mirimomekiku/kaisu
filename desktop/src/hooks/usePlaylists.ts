@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { addPaths, checkName, createPlaylist, MAX_PLAYLISTS, moveTrack, removeAt, type Playlist } from "../lib/playlists";
 import { loadPlaylists, savePlaylists } from "../lib/storage";
 import { smartProblem, type SmartRules } from "../lib/smartPlaylists";
+import { relocatePlaylists } from "../lib/relocation";
 
 /** The user's playlists, kept between sessions. Every change is saved at once. */
 export function usePlaylists() {
@@ -77,7 +78,7 @@ export function usePlaylists() {
     return null;
   }, [change]);
   const relocate = useCallback((from: string, to: string) => {
-    commit(latest.current.map((p) => p.smart ? p : { ...p, paths: [...new Set(p.paths.map((path) => path === from ? to : path))] }));
+    commit(relocatePlaylists(latest.current, from, to));
   }, [commit]);
 
   return { playlists, loaded, create, rename, remove, add, removeTrack, move, editSmart, relocate };

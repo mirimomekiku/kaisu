@@ -28,13 +28,14 @@ export const trackFor = (path: string, title: string, extra: Partial<Track> = {}
  * Creates the player once, connects it to the system's media keys, puts back what was queued last time (paused) and keeps
  * saving the queue and the positions in long files.
  */
-export function useCreatePlayer(onPlayed?: (track: Track) => void, onListen?: (track: Track, seconds: number) => void): PlayerEngine {
+export function useCreatePlayer(onPlayed?: (track: Track) => void, onListen?: (track: Track, seconds: number) => void, onRestored?: () => void): PlayerEngine {
+  const restoredRef = useRef(onRestored);
+  restoredRef.current = onRestored;
   const listenedRef = useRef(onListen);
   listenedRef.current = onListen;
   const playedRef = useRef(onPlayed);
   playedRef.current = onPlayed;
   const positions = useRef<Positions>({});
-  const positionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const engineRef = useRef<PlayerEngine | null>(null);
 
   if (engineRef.current === null) {
@@ -52,12 +53,7 @@ export function useCreatePlayer(onPlayed?: (track: Track) => void, onListen?: (t
       getPositions: () => positions.current,
       setPositions: (next) => {
         positions.current = next;
-        if (positionTimer.current === null) {
-          positionTimer.current = setTimeout(() => {
-            positionTimer.current = null;
-            void savePositions(positions.current);
-          }, SAVE_DELAY_MS);
-        }
+        void savePositions(next);
       },
     });
   }
@@ -90,7 +86,14 @@ export function useCreatePlayer(onPlayed?: (track: Track) => void, onListen?: (t
         engine.applySettings(saved);
         engine.restore(saved.queue, saved.index, saved.position);
       }
-      offs.push(engine.subscribe(soon));
+      let paths = engine.getState().queue.map((t) => t.path);
+      offs.push(engine.subscribe(() => {
+        const next = engine.getState().queue.map((t) => t.path);
+        const changed = next.length !== paths.length || next.some((p, i) => p !== paths[i]);
+        paths = next;
+        if (changed) snapshot();
+        else soon();
+      }));
       offs.push(
         engine.subscribeTime(() => {
           const now = Date.now();
@@ -100,6 +103,7 @@ export function useCreatePlayer(onPlayed?: (track: Track) => void, onListen?: (t
           }
         }),
       );
+      restoredRef.current?.();
     })();
 
     return () => {
