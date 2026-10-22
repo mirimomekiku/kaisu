@@ -1,11 +1,13 @@
-import { ListMusic, Loader2, Music, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward, Volume2, VolumeX, X } from "lucide-react";
+import { Captions, ListMusic, Loader2, Music, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward, Volume2, VolumeX, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { usePlayerState, usePlayerTime } from "../hooks/usePlayer";
 import { RATES, type PlayerEngine, type RepeatMode, type Sleep } from "../lib/audioEngine";
 import { formatClock } from "../lib/format";
 import { CoverArt } from "./Picture";
 import { covers } from "../lib/covers";
+import LyricsPanel from "./LyricsPanel";
 import QueuePanel from "./QueuePanel";
+import { useMediaActions } from "../hooks/useMediaDialogs";
 
 const NEXT_REPEAT: Record<RepeatMode, RepeatMode> = { off: "all", all: "one", one: "off" };
 const REPEAT_LABEL: Record<RepeatMode, string> = { off: "Repeat: off", all: "Repeat: the whole queue", one: "Repeat: this track" };
@@ -81,7 +83,8 @@ function Seek({ engine }: { engine: PlayerEngine }) {
 /** The player along the bottom of the window: what is playing, and the controls. */
 export default function PlayerBar({ engine }: { engine: PlayerEngine }) {
   const state = usePlayerState(engine);
-  const [queueOpen, setQueueOpen] = useState(false);
+  const [panel, setPanel] = useState<"queue" | "lyrics" | null>(null);
+  const media = useMediaActions();
   const track = state.queue[state.index];
   const path = track?.path;
   const hasCover = !!track?.cover;
@@ -102,7 +105,8 @@ export default function PlayerBar({ engine }: { engine: PlayerEngine }) {
 
   return (
     <>
-    {queueOpen && <QueuePanel engine={engine} onClose={() => setQueueOpen(false)} />}
+    {panel === "queue" && <QueuePanel engine={engine} onClose={() => setPanel(null)} />}
+    {panel === "lyrics" && <LyricsPanel engine={engine} track={track} askConsent={media?.lyricsConsent ?? (async () => false)} onClose={() => setPanel(null)} />}
     <section className="playerbar" aria-label="Music player">
       <div className="pb-now">
         <div className="thumb pb-art">
@@ -141,7 +145,10 @@ export default function PlayerBar({ engine }: { engine: PlayerEngine }) {
       </div>
 
       <div className="pb-extras">
-        <button className="row-btn" aria-label="Show the queue" aria-expanded={queueOpen} title={`Play queue (${state.queue.length})`} style={queueOpen ? { background: "rgba(59,130,230,.25)" } : undefined} onClick={() => setQueueOpen((v) => !v)}>
+        <button className="row-btn" aria-label="Show the lyrics" aria-expanded={panel === "lyrics"} title="Lyrics" style={panel === "lyrics" ? { background: "rgba(59,130,230,.25)" } : undefined} onClick={() => setPanel((p) => (p === "lyrics" ? null : "lyrics"))}>
+          <Captions className="w-3.5 h-3.5" />
+        </button>
+        <button className="row-btn" aria-label="Show the queue" aria-expanded={panel === "queue"} title={`Play queue (${state.queue.length})`} style={panel === "queue" ? { background: "rgba(59,130,230,.25)" } : undefined} onClick={() => setPanel((p) => (p === "queue" ? null : "queue"))}>
           <ListMusic className="w-3.5 h-3.5" /> {state.queue.length}
         </button>
         <select className="field" aria-label="Playback speed" title="Playback speed" value={state.rate} onChange={(e) => engine.setRate(Number(e.target.value))}>

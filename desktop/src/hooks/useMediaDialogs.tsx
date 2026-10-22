@@ -13,6 +13,8 @@ export interface MediaActions {
   preview: (url: string, title: string) => void;
   /** Make an audio copy of a downloaded file. */
   convert: (path: string, title?: string) => void;
+  /** Asks before lyrics are looked up online (resolves to whether the user agreed). */
+  lyricsConsent: () => Promise<boolean>;
   /** Queue sound files: play them now (replacing the queue), after the current track, or at the end. */
   queue: (items: Array<{ path: string; title?: string }>, mode: "play" | "next" | "add") => void;
 }
@@ -40,10 +42,12 @@ interface Args {
   onConverted: (fromPath: string, newPath: string) => void;
   /** The music player: sound files play there, so they carry on while you browse. */
   player: PlayerEngine;
+  /** The lyrics consent dialog. */
+  askLyricsConsent: () => Promise<boolean>;
 }
 
 /** The player and the converter: their state, their dialogs, and the actions that open them. */
-export function useMediaDialogs({ showFlash, announce, openDownloaded, onConverted, player }: Args) {
+export function useMediaDialogs({ showFlash, announce, openDownloaded, onConverted, player, askLyricsConsent }: Args) {
   const [viewer, setViewer] = useState<Viewer | null>(null);
   const [converting, setConverting] = useState<{ path: string; title: string } | null>(null);
   /** The preview being fetched or shown, so closing early (or asking again) cleans up the right one. */
@@ -145,6 +149,6 @@ export function useMediaDialogs({ showFlash, announce, openDownloaded, onConvert
     </>
   );
 
-  const actions = useMemo<MediaActions>(() => ({ play, preview, convert, queue }), [play, preview, convert, queue]);
+  const actions = useMemo<MediaActions>(() => ({ play, preview, convert, queue, lyricsConsent: askLyricsConsent }), [play, preview, convert, queue, askLyricsConsent]);
   return { actions, dialogs };
 }
