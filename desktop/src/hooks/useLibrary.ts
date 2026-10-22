@@ -1,13 +1,17 @@
+import { covers } from "../lib/covers";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { errorText, libraryAnalyze, libraryEditTags, libraryLoad, libraryScan, type EditResult, type LibTrack } from "../lib/api";
 import { unmeasured } from "../lib/loudness";
 import type { TagEditRequest } from "../lib/tagEdit";
+import { libraryAddFolder, libraryFolders, libraryLocate, libraryRemoveFolder, type MusicFolder } from "../lib/api";
+import { loadLibraryWatch, saveLibraryWatch } from "../lib/storage";
 
 interface Args {
   /** The folders are registered with the backend, so they can be looked through. */
   ready: boolean;
   /** How many downloads are in History: when it grows, something new finished and the library is looked at again. */
   historyCount: number;
+  historyKey?: string;
   showFlash: (text: string, error?: boolean) => void;
 }
 
@@ -17,26 +21,36 @@ const RESCAN_AFTER_DOWNLOAD_MS = 2000;
  * The music library: what was found last time (instantly), then a scan that reads only what is new or changed. It looks again a
  * moment after each download finishes.
  */
-export function useLibrary({ ready, historyCount, showFlash }: Args) {
+export function useLibrary({ ready, historyCount, historyKey, showFlash }: Args) {
   const [tracks, setTracks] = useState<LibTrack[]>([]);
   const [scanning, setScanning] = useState<{ done: number; total: number } | null>(null);
   const [loaded, setLoaded] = useState(false);
   const busy = useRef(false);
   const scanned = useRef(false);
+  const pending = useRef(false);
+  const readyRef = useRef(ready);
+  readyRef.current = ready;
+  const [folders, setFolders] = useState<MusicFolder[]>([]);
+  const [watching, setWatchingState] = useState(true);
+  const [watchLoaded, setWatchLoaded] = useState(false);
+  useEffect(() => { let stale = false; void loadLibraryWatch().then((watch) => { if (!stale) { setWatchingState(watch); setWatchLoaded(true); } }); return () => { stale = true; }; }, []);
 
-  const scan = useCallback(async () => {
-    if (busy.current) return;
+  const scan = useCallback(async (quiet = false): Promise<void> => {
+    if (busy.current) { pending.current = true; return; }
     busy.current = true;
     setScanning({ done: 0, total: 0 });
     try {
-      setTracks(await libraryScan((done, total) => setScanning({ done, total })));
+      const tracks = await libraryScan((done, total) => setScanning({ done, total }));
+      setTracks((old) => old.length === tracks.length && tracks.every((t, i) => JSON.stringify(t) === JSON.stringify(old[i])) ? old : tracks);
+      setFolders(await libraryFolders());
       scanned.current = true;
     } catch (e) {
-      showFlash(errorText(e), true);
+      if (!quiet) showFlash(errorText(e), true);
     } finally {
       busy.current = false;
       setScanning(null);
       setLoaded(true);
+      if (pending.current && readyRef.current) { pending.current = false; queueMicrotask(() => void scan(true)); }
     }
   }, [showFlash]);
 
@@ -58,21 +72,40 @@ export function useLibrary({ ready, historyCount, showFlash }: Args) {
     };
   }, [ready, scan]);
 
-  const lastCount = useRef(historyCount);
+  const revision = historyKey ?? String(historyCount);
+  const lastCount = useRef(revision);
   useEffect(() => {
-    const grew = historyCount > lastCount.current;
-    lastCount.current = historyCount;
+    const grew = revision !== lastCount.current;
+    lastCount.current = revision;
     if (!grew || !scanned.current) return;
     const timer = setTimeout(() => void scan(), RESCAN_AFTER_DOWNLOAD_MS);
     return () => clearTimeout(timer);
-  }, [historyCount, scan]);
+  }, [revision, scan]);
+
+  useEffect(() => {
+    if (!ready || !watchLoaded || !watching) return;
+    const timer = setInterval(() => void scan(true), 15_000);
+    const focused = () => void scan(true);
+    window.addEventListener("focus", focused);
+    return () => { clearInterval(timer); window.removeEventListener("focus", focused); };
+  }, [ready, watchLoaded, watching, scan]);
+
+  const setWatching = useCallback((watch: boolean) => { setWatchingState(watch); void saveLibraryWatch(watch); }, []);
+  const addFolder = useCallback(async () => { try { setFolders(await libraryAddFolder()); await scan(); } catch (e) { showFlash(errorText(e), true); } }, [scan, showFlash]);
+  const removeFolder = useCallback(async (path: string) => { try { setFolders(await libraryRemoveFolder(path)); await scan(); } catch (e) { showFlash(errorText(e), true); } }, [scan, showFlash]);
+  const locate = useCallback(async (path: string) => {
+    const found = await libraryLocate(path);
+    if (found) setTracks((prev) => [...prev.filter((t) => t.path !== path && t.path !== found.track.path), found.track]);
+    return found;
+  }, []);
 
   /** Changes the tags of some files, and shows the new tags at once. */
   const editTags = useCallback(async (paths: string[], edit: TagEditRequest): Promise<EditResult[]> => {
     const results = await libraryEditTags(paths, edit);
     const updated = new Map(results.flatMap((r) => (r.ok && r.track ? [[r.path, r.track] as const] : [])));
+    if (edit.artwork) covers.invalidate?.([...updated.keys()]);
     // Changing tags doesn't change how loud a song is.
-    if (updated.size > 0) setTracks((prev) => prev.map((t) => { const n = updated.get(t.path); return n ? { ...n, loudness: t.loudness } : t; }));
+    if (updated.size > 0) setTracks((prev) => prev.map((t) => { const n = updated.get(t.path); return n ? { ...n, added: t.added || t.modified, loudness: t.loudness } : t; }));
     return results;
   }, []);
 
@@ -116,5 +149,8 @@ export function useLibrary({ ready, historyCount, showFlash }: Args) {
     stop.current = true;
   }, []);
 
-  return { tracks, scanning, loaded, scan, editTags, measure, analysing, analyse, stopAnalysing, unmeasuredCount };
+  return { tracks, scanning, loaded, scan, editTags, measure, analysing, analyse, stopAnalysing, unmeasuredCount,
+    management: { folders, watching, setWatching, addFolder, removeFolder, locate } };
 }
+
+export type LibraryManagement = ReturnType<typeof useLibrary>["management"];

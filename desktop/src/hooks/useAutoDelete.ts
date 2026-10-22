@@ -39,14 +39,16 @@ export function useAutoDelete(a: Args) {
     setRunning(true);
     try {
       // Kaisu deletes only inside the folders it was told about (see `setManagedFolders`), never from a list given here.
-      const results = await deleteFiles(items.map((h) => h.path as string), argsRef.current.settings.autoDeleteMoved);
+      const results = await deleteFiles(items.map((h) => h.path as string), argsRef.current.settings.autoDeleteMoved, argsRef.current.settings.cleanupPermanent);
       const removed = results.filter((r) => r.ok).length;
       const failed = results.find((r) => !r.ok)?.error;
       if (removed > 0) {
         onDeleted();
-        announce({ title: `Deleted ${removed} old download${removed === 1 ? "" : "s"}`, subtitle: "Cleaned up" });
+        announce({ title: `${argsRef.current.settings.cleanupPermanent ? "Deleted" : "Recycled"} ${removed} old download${removed === 1 ? "" : "s"}`, subtitle: "Cleaned up" });
       }
       if (failed && !quiet) showFlash(failed, true);
+      const warning = results.find((r) => r.warning)?.warning;
+      if (warning && !quiet) showFlash(warning, true);
     } catch (e) {
       if (!quiet) showFlash(errorText(e), true);
     } finally {

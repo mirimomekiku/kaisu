@@ -115,7 +115,7 @@ const clean = () => page.locator("section[aria-label='Clean up']");
 check("clean up: off by default", await clean().getByLabel("Delete downloads older than").inputValue() === "0");
 await clean().getByLabel("Delete downloads older than").selectOption("30");
 await page.getByRole("alertdialog").waitFor();
-check("clean up: turning it on asks first, plainly", await page.getByRole("alertdialog").locator("text=can't be undone").count() === 1);
+check("clean up: turning it on asks first, plainly", await page.getByRole("alertdialog").locator("text=where you can restore them").count() === 1);
 await page.getByRole("alertdialog").getByRole("button", { name: "Cancel" }).click();
 check("clean up: cancel keeps it off", (await settingsOf(page)).autoDeleteDays === 0 && await clean().getByLabel("Delete downloads older than").inputValue() === "0");
 await clean().getByLabel("Delete downloads older than").selectOption("30");
@@ -161,7 +161,7 @@ await page.getByRole("status").filter({ hasText: "File location copied" }).waitF
 check("quick: copy the file's location", (await page.evaluate(() => navigator.clipboard.readText())) === `${DL}/Quick.mp4`);
 await row().getByRole("button", { name: "Delete file" }).click();
 await page.getByRole("alertdialog").waitFor();
-check("quick: deleting asks first", await page.getByRole("alertdialog").locator("text=can't be undone").count() === 1);
+check("quick: deleting asks first", await page.getByRole("alertdialog").locator("text=restored there").count() === 1);
 await page.getByRole("alertdialog").getByRole("button", { name: "Cancel" }).click();
 check("quick: cancel deletes nothing", (await deletes(page)).length === 0 && (await historyOf(page)).length === 1);
 await row().getByRole("button", { name: "Delete file" }).click();

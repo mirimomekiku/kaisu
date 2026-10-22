@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { addPaths, checkName, createPlaylist, MAX_PLAYLISTS, moveTrack, removeAt, type Playlist } from "../lib/playlists";
 import { loadPlaylists, savePlaylists } from "../lib/storage";
+import { smartProblem, type SmartRules } from "../lib/smartPlaylists";
 
 /** The user's playlists, kept between sessions. Every change is saved at once. */
 export function usePlaylists() {
@@ -31,10 +32,11 @@ export function usePlaylists() {
 
   /** Makes a playlist; returns it, or why not. */
   const create = useCallback(
-    (name: string, paths: string[] = []): { playlist: Playlist } | { problem: string } => {
+    (name: string, paths: string[] = [], smart?: SmartRules): { playlist: Playlist } | { problem: string } => {
       const problem = checkName(name, latest.current) ?? (latest.current.length >= MAX_PLAYLISTS ? "That's the most playlists there can be." : null);
       if (problem) return { problem };
-      const playlist = createPlaylist(name, paths);
+      if (smart && smartProblem(smart)) return { problem: smartProblem(smart)! };
+      const playlist = createPlaylist(name, paths, Date.now(), smart);
       commit([playlist, ...latest.current]);
       return { playlist };
     },
@@ -68,7 +70,17 @@ export function usePlaylists() {
   const removeTrack = useCallback((id: string, index: number) => change(id, (p) => removeAt(p, index)), [change]);
   const move = useCallback((id: string, from: number, to: number) => change(id, (p) => moveTrack(p, from, to)), [change]);
 
-  return { playlists, loaded, create, rename, remove, add, removeTrack, move };
+  const editSmart = useCallback((id: string, smart: SmartRules): string | null => {
+    const problem = smartProblem(smart);
+    if (problem) return problem;
+    change(id, (p) => ({ ...p, smart, paths: [], updated: Date.now() }));
+    return null;
+  }, [change]);
+  const relocate = useCallback((from: string, to: string) => {
+    commit(latest.current.map((p) => p.smart ? p : { ...p, paths: [...new Set(p.paths.map((path) => path === from ? to : path))] }));
+  }, [commit]);
+
+  return { playlists, loaded, create, rename, remove, add, removeTrack, move, editSmart, relocate };
 }
 
 export type PlaylistsApi = ReturnType<typeof usePlaylists>;

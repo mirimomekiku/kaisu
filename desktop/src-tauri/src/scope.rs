@@ -32,6 +32,7 @@ struct Folders {
 #[derive(Default)]
 pub struct Scope {
     inner: Mutex<Folders>,
+    library: Mutex<Vec<PathBuf>>,
 }
 
 impl Scope {
@@ -49,10 +50,10 @@ impl Scope {
         self.get(|f| f.download.clone(), "Choose a download folder first.")
     }
 
-    /// A media file inside the download folder or the folder for moved downloads, as its real path. Anything else is refused.
+    /// A media file within a registered download, moved, or imported library root.
     pub fn media_file(&self, path: &str) -> Result<PathBuf, String> {
         let mut refusal = "That file isn't in a download folder.".to_string();
-        for base in [self.download(), self.moved()].into_iter().flatten() {
+        for base in self.library_dirs() {
             match crate::transfer::checked_source(path, &base) {
                 Ok(real) => return Ok(real),
                 Err(why) => refusal = why,
@@ -64,6 +65,32 @@ impl Scope {
     /// The folder finished downloads are moved to.
     pub fn moved(&self) -> Result<PathBuf, String> {
         self.get(|f| f.moved.clone(), "Choose a folder for moved downloads first.")
+    }
+
+    /// Imported roots allow library actions, but are never used by automatic download cleanup.
+    pub fn library_dirs(&self) -> Vec<PathBuf> {
+        let mut dirs: Vec<PathBuf> = [self.download(), self.moved()].into_iter().flatten().collect();
+        if let Ok(imports) = self.library.lock() { dirs.extend(imports.iter().cloned()); }
+        dirs.sort();
+        dirs.dedup();
+        dirs
+    }
+
+    pub fn imported_dirs(&self) -> Vec<PathBuf> {
+        self.library.lock().map(|d| d.clone()).unwrap_or_default()
+    }
+
+    pub fn set_library_dirs(&self, dirs: Vec<PathBuf>) -> Result<(), String> {
+        *self.library.lock().map_err(|_| "Music folders are unavailable.")? = dirs;
+        Ok(())
+    }
+}
+
+pub(crate) fn validate_library_folder(path: &Path) -> Result<PathBuf, String> {
+    match judge("music folder", &path.display().to_string(), home_folder().as_deref(), &system_folders()) {
+        Slot::Ok(p) => Ok(p),
+        Slot::Refused(why) => Err(why),
+        Slot::Unset => Err("Choose a music folder.".into()),
     }
 }
 
@@ -229,4 +256,19 @@ mod tests {
         assert_eq!(scope.moved().unwrap_err(), "no");
         std::fs::remove_dir_all(&dir).ok();
     }
+    #[test]
+    fn imports_grant_library_access_without_granting_automatic_cleanup() {
+        let dir = scratch("import");
+        let music = dir.join("song.mp3");
+        std::fs::write(&music, b"audio").unwrap();
+        let scope = Scope::default();
+        scope.set_library_dirs(vec![dir.clone()]).unwrap();
+        assert!(scope.media_file(&music.display().to_string()).is_ok());
+        assert!(scope.download().is_err() && scope.moved().is_err());
+        scope.set_library_dirs(vec![]).unwrap();
+        assert!(scope.media_file(&music.display().to_string()).is_err());
+        assert!(music.exists(), "removing a root leaves music on disk");
+        std::fs::remove_dir_all(dir).ok();
+    }
+
 }

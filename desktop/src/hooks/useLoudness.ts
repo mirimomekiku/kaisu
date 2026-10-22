@@ -23,6 +23,8 @@ export function useLoudness({ engine, enabled, tracks, measure }: Args) {
   const known = path ? byPath.get(path) : undefined;
   const loudness = known?.loudness ?? null;
 
+  useEffect(() => { engine.setLevelMap(new Map(tracks.map((t) => [t.path, levelGain(t.loudness, enabled)]))); }, [engine, tracks, enabled]);
+
   useEffect(() => {
     engine.setLevelGain(levelGain(loudness, enabled));
   }, [engine, enabled, loudness, path]);

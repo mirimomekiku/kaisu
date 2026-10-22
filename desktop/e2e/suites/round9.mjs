@@ -60,7 +60,7 @@ await library(page).getByRole("button", { name: "Play Da Funk", exact: true }).c
 await bar(page).waitFor();
 check("library: playing a song plays it", (await bar(page).locator(".pb-title").innerText()) === "Da Funk");
 check("library: …and queues the rest of the list after it", (await bar(page).getByRole("button", { name: "Show the queue" }).innerText()).includes("5"));
-check("library: the file is made available first", (await calls(page, "play_in_app")).at(-1).args.path === LIB[0].path);
+check("library: the file is made available first", (await calls(page, "play_in_app"))[0].args.path === LIB[0].path);
 await library(page).getByRole("button", { name: "Add Loose Single to the queue" }).click();
 check("library: a song can be added to the queue", (await bar(page).getByRole("button", { name: "Show the queue" }).innerText()).includes("6"));
 await library(page).getByRole("button", { name: "Play Formation next" }).click();

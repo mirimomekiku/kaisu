@@ -12,6 +12,6 @@ export function levelGain(lufs: number | null | undefined, enabled: boolean): nu
 }
 
 /** Songs in `tracks` that haven't been measured yet. */
-export function unmeasured<T extends { path: string; loudness: number | null }>(tracks: T[]): string[] {
-  return tracks.filter((t) => t.loudness == null).map((t) => t.path);
+export function unmeasured<T extends { path: string; loudness: number | null; missing?: boolean }>(tracks: T[]): string[] {
+  return tracks.filter((t) => !t.missing && t.loudness == null).map((t) => t.path);
 }

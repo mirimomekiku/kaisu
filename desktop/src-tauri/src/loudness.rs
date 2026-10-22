@@ -63,6 +63,7 @@ pub async fn library_analyze(app: AppHandle, scope: State<'_, Scope>, paths: Vec
     let found: Vec<(String, f64)> = results.iter().filter_map(|r| r.loudness.map(|l| (r.path.clone(), l))).collect();
     if !found.is_empty() {
         tauri::async_runtime::spawn_blocking(move || {
+            let _lock = library::CACHE_EDIT.lock().map_err(|_| "Library is unavailable.")?;
             let mut remembered = library::load_cache(&cache);
             for (path, lufs) in found {
                 if let Some(t) = remembered.iter_mut().find(|t| t.path == path) {
@@ -70,9 +71,10 @@ pub async fn library_analyze(app: AppHandle, scope: State<'_, Scope>, paths: Vec
                 }
             }
             let _ = library::save_cache(&cache, &remembered);
+            Ok::<(), String>(())
         })
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())??;
     }
     Ok(results)
 }

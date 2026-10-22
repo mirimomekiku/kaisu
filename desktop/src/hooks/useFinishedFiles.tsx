@@ -67,25 +67,27 @@ export function useFinishedFiles({ settings, outDir, settingsLoaded, queueLoaded
         title: "Delete this file?",
         body: (
           <p className="m-0">
-            <b>{title}</b> will be deleted from your computer. This can't be undone.
+            <b>{title}</b> can be moved to the Recycle Bin or Trash and restored there. Permanent deletion cannot be undone. Subtitle and lyrics files follow the same choice.
           </p>
         ),
         buttons: [
           { id: "cancel", label: "Cancel", primary: true },
-          { id: "delete", label: "Delete file" },
+          { id: "trash", label: "Move to Recycle Bin" },
+          { id: "delete", label: "Delete file permanently" },
         ],
         cancelId: "cancel",
       });
-      if (answer !== "delete") return;
+      if (answer !== "delete" && answer !== "trash") return;
       try {
-        const [result] = await deleteFiles([path], true);
+        const [result] = await deleteFiles([path], true, answer === "delete");
         if (!result?.ok) {
           showFlash(result?.error ?? "Couldn't delete the file.", true);
           return;
         }
         updateHistory(historyRef.current.filter((h) => h.path !== path));
         recheck();
-        announce({ title: "File deleted", subtitle: title });
+        announce({ title: answer === "delete" ? "File deleted permanently" : "File moved to Recycle Bin or Trash", subtitle: title });
+        if (result.warning) showFlash(result.warning, true);
       } catch (e) {
         showFlash(errorText(e), true);
       }

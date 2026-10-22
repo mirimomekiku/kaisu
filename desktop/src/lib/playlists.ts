@@ -1,4 +1,5 @@
 import { moveItem } from "./playQueue";
+import { sanitizeSmart, type SmartRules } from "./smartPlaylists";
 
 // Playlists: named lists of files. They hold paths only; what to show for each song is looked up in the library.
 
@@ -9,6 +10,7 @@ export interface Playlist {
   paths: string[];
   /** When it last changed (ms since 1970). */
   updated: number;
+  smart?: SmartRules;
 }
 
 export const MAX_PLAYLISTS = 200;
@@ -27,22 +29,25 @@ export function checkName(name: string, others: Playlist[], except?: string): st
   return null;
 }
 
-export function createPlaylist(name: string, paths: string[] = [], now = Date.now()): Playlist {
-  return { id: newId(), name: name.trim(), paths: [...new Set(paths)].slice(0, MAX_TRACKS), updated: now };
+export function createPlaylist(name: string, paths: string[] = [], now = Date.now(), smart?: SmartRules): Playlist {
+  return { id: newId(), name: name.trim(), paths: smart ? [] : [...new Set(paths)].slice(0, MAX_TRACKS), updated: now, ...(smart ? { smart } : {}) };
 }
 
 /** Adds files that aren't there yet, at the end. */
 export function addPaths(p: Playlist, paths: string[], now = Date.now()): { playlist: Playlist; added: number } {
+  if (p.smart) return { playlist: p, added: 0 };
   const have = new Set(p.paths);
   const fresh = [...new Set(paths)].filter((x) => !have.has(x)).slice(0, Math.max(0, MAX_TRACKS - p.paths.length));
   return fresh.length === 0 ? { playlist: p, added: 0 } : { playlist: { ...p, paths: [...p.paths, ...fresh], updated: now }, added: fresh.length };
 }
 
 export function removeAt(p: Playlist, index: number, now = Date.now()): Playlist {
+  if (p.smart) return p;
   return index < 0 || index >= p.paths.length ? p : { ...p, paths: p.paths.filter((_, i) => i !== index), updated: now };
 }
 
 export function moveTrack(p: Playlist, from: number, to: number, now = Date.now()): Playlist {
+  if (p.smart) return p;
   const moved = moveItem(p.paths, -1, from, to).queue;
   return moved === p.paths ? p : { ...p, paths: moved, updated: now };
 }
@@ -55,6 +60,8 @@ export function sanitizePlaylists(raw: unknown): Playlist[] {
   for (const r of raw.slice(0, MAX_PLAYLISTS)) {
     const p = r as Partial<Playlist> | null;
     if (!p || typeof p.name !== "string" || !p.name.trim() || !Array.isArray(p.paths)) continue;
+    const smart = sanitizeSmart(p.smart);
+    if (p.smart !== undefined && !smart) continue;
     const id = typeof p.id === "string" && p.id && !seen.has(p.id) ? p.id : newId();
     seen.add(id);
     out.push({
@@ -62,6 +69,7 @@ export function sanitizePlaylists(raw: unknown): Playlist[] {
       name: p.name.trim().slice(0, MAX_NAME_CHARS),
       paths: p.paths.filter((x): x is string => typeof x === "string" && x !== "").slice(0, MAX_TRACKS),
       updated: typeof p.updated === "number" && Number.isFinite(p.updated) ? p.updated : 0,
+      ...(smart ? { smart } : {}),
     });
   }
   return out;

@@ -1,4 +1,4 @@
-//! The music library: the sound files in the download folder (and the folder for moved downloads), with their tags and
+//! The music library: sound files in download, moved, and imported folders, with their tags and
 //! properties, read once and remembered.
 //!
 //! Only the folders Kaisu was told about are looked at (see `scope.rs`). The result is kept in a file in the app's data folder,
@@ -9,6 +9,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     time::UNIX_EPOCH,
+    sync::Mutex,
 };
 
 use lofty::{
@@ -27,6 +28,7 @@ const MAX_TRACKS: usize = 100_000;
 const MAX_COVER_BYTES: usize = 8 * 1024 * 1024;
 const COVER_NAMES: &[&str] = &["cover", "folder", "front", "albumart", "album"];
 const COVER_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp"];
+pub(crate) static CACHE_EDIT: Mutex<()> = Mutex::new(());
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
 pub struct LibTrack {
@@ -55,6 +57,10 @@ pub struct LibTrack {
     pub has_cover: bool,
     /// How loud it is, in LUFS, once measured.
     pub loudness: Option<f64>,
+    #[serde(default)]
+    pub added: u64,
+    #[serde(default)]
+    pub missing: bool,
 }
 
 pub fn is_audio(path: &Path) -> bool {
@@ -100,6 +106,7 @@ pub fn read_track(path: &Path) -> LibTrack {
         format: ext.to_ascii_uppercase(),
         size,
         modified,
+        added: std::time::SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0),
         ..Default::default()
     };
     let Ok(tagged) = lofty::read_from_path(path) else { return track };
@@ -143,21 +150,36 @@ fn list_audio(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
             if depth < MAX_DEPTH {
                 list_audio(&path, depth + 1, out);
             }
-        } else if kind.is_file() && is_audio(&path) {
+        } else if kind.is_file() && is_audio(&path) && !path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.contains(".kaisu-tag-tmp.")) {
             out.push(path);
         }
     }
 }
 
-/// Reads the library: files whose size and date are unchanged are taken from `known`, the rest are read. Files that are
-/// gone are left out. `progress(done, total)` is told how far along it is.
-pub fn scan(dirs: &[PathBuf], known: &[LibTrack], mut progress: impl FnMut(usize, usize)) -> Vec<LibTrack> {
+/// Enumerates registered roots without following directory symlinks.
+pub(crate) fn audio_files(dirs: &[PathBuf]) -> Vec<PathBuf> {
     let mut files = Vec::new();
     for dir in dirs {
         list_audio(dir, 0, &mut files);
     }
+    let mut files: Vec<PathBuf> = files.into_iter().map(|p| PathBuf::from(crate::scope::plain_path(&p))).collect();
     files.sort();
     files.dedup();
+    files
+}
+
+fn under(path: &str, root: &Path) -> bool {
+    let normalize = |s: String| {
+        let s = s.replace('\\', "/").trim_end_matches('/').to_string();
+        if cfg!(windows) { s.to_lowercase() } else { s }
+    };
+    let (p, r) = (normalize(path.to_string()), normalize(crate::scope::plain_path(root)));
+    p == r || p.starts_with(&format!("{r}/"))
+}
+
+/// Reuses unchanged tags and retains missing entries within registered roots for relocation.
+pub fn scan(dirs: &[PathBuf], known: &[LibTrack], mut progress: impl FnMut(usize, usize)) -> Vec<LibTrack> {
+    let files = audio_files(dirs);
     let cache: HashMap<&str, &LibTrack> = known.iter().map(|t| (t.path.as_str(), t)).collect();
     let total = files.len();
     let mut out = Vec::with_capacity(total);
@@ -165,13 +187,22 @@ pub fn scan(dirs: &[PathBuf], known: &[LibTrack], mut progress: impl FnMut(usize
         let key = path.display().to_string();
         let now = stat(path);
         match (cache.get(key.as_str()), now) {
-            (Some(old), Some((size, modified))) if old.size == size && old.modified == modified => out.push((*old).clone()),
-            _ => out.push(read_track(path)),
+            (Some(old), Some((size, modified))) if old.size == size && old.modified == modified => out.push(LibTrack { added: if old.added > 0 { old.added } else { old.modified }, missing: false, ..(*old).clone() }),
+            (old, _) => {
+                let mut track = read_track(path);
+                if let Some(old) = old { track.added = if old.added > 0 { old.added } else { old.modified }; }
+                out.push(track);
+            }
         }
         if i % 25 == 0 || i + 1 == total {
             progress(i + 1, total);
         }
     }
+    let present: std::collections::HashSet<&str> = out.iter().map(|t| t.path.as_str()).collect();
+    let missing: Vec<LibTrack> = known.iter().filter(|t| !present.contains(t.path.as_str()) && dirs.iter().any(|d| under(&t.path, d)))
+        .take(MAX_TRACKS.saturating_sub(out.len())).map(|t| LibTrack { missing: true, ..t.clone() }).collect();
+    out.extend(missing);
+    progress(total, total);
     out
 }
 
@@ -210,20 +241,21 @@ pub struct ScanProgress {
     pub total: usize,
 }
 
-/// Looks through the download folder and the folder for moved downloads, reading what is new or changed.
+/// Looks through all registered music roots, reading what is new or changed.
 #[tauri::command]
 pub async fn library_scan(app: AppHandle, scope: State<'_, Scope>, on_progress: Channel<ScanProgress>) -> Result<Vec<LibTrack>, String> {
-    let dirs: Vec<PathBuf> = [scope.download(), scope.moved()].into_iter().flatten().collect();
+    let dirs = scope.library_dirs();
     if dirs.is_empty() {
         return Err(scope.download().err().unwrap_or_else(|| "Choose a download folder first.".into()));
     }
     let cache = cache_path(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
+        let _lock = CACHE_EDIT.lock().map_err(|_| "Library is unavailable.")?;
         let known = load_cache(&cache);
         let tracks = scan(&dirs, &known, |done, total| {
             let _ = on_progress.send(ScanProgress { done, total });
         });
-        save_cache(&cache, &tracks)?;
+        if tracks != known { save_cache(&cache, &tracks)?; }
         Ok(tracks)
     })
     .await
@@ -234,7 +266,7 @@ pub async fn library_scan(app: AppHandle, scope: State<'_, Scope>, on_progress: 
 pub fn cover_bytes(path: &Path) -> Option<Vec<u8>> {
     if let Ok(tagged) = lofty::read_from_path(path)
         && let Some(tag) = tagged.primary_tag().or_else(|| tagged.first_tag())
-        && let Some(picture) = tag.pictures().first()
+        && let Some(picture) = tag.pictures().iter().find(|p| p.pic_type() == lofty::picture::PictureType::CoverFront).or_else(|| tag.pictures().first())
         && !picture.data().is_empty()
     {
         return Some(picture.data().to_vec());
@@ -383,12 +415,24 @@ pub(crate) mod tests {
         known[0].title = "Remembered".into();
         let second = scan(std::slice::from_ref(&dir), &known, |_, _| {});
         assert_eq!(second[0].title, "Remembered");
-        // A changed file is read again, and a deleted one is gone.
+        let mut legacy = known.clone();
+        legacy[0].added = 0;
+        let upgraded = scan(std::slice::from_ref(&dir), &legacy, |_, _| {});
+        assert_eq!(upgraded[0].added, first[0].modified, "legacy import time is fixed before tag edits change the modification date");
+        // A changed file is read again; missing entries retain their identity for relocation.
         fs::write(&a, wav(3)).unwrap();
         fs::remove_file(&b).unwrap();
         let third = scan(std::slice::from_ref(&dir), &known, |_, _| {});
-        assert_eq!(third.len(), 1);
-        assert_ne!(third[0].title, "Remembered");
+        assert_eq!(third.len(), 2);
+        let available = third.iter().find(|t| !t.missing).unwrap();
+        assert_ne!(available.title, "Remembered");
+        assert_eq!(available.added, first[0].added);
+        assert!(third.iter().find(|t| t.title == "B").unwrap().missing);
+        fs::write(&b, wav(1)).unwrap();
+        let restored = scan(std::slice::from_ref(&dir), &third, |_, _| {});
+        assert_eq!(restored.len(), 2);
+        assert!(restored.iter().all(|t| !t.missing));
+        assert!(scan(&[], &restored, |_, _| {}).is_empty(), "removing a root drops its cached entries");
         fs::remove_dir_all(&dir).ok();
     }
 

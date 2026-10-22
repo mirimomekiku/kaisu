@@ -71,7 +71,7 @@ export function sortTracks(tracks: LibTrack[], key: SortKey, desc = false): LibT
       case "duration":
         return t.duration;
       case "added":
-        return t.modified;
+        return t.added || t.modified;
     }
   };
   const out = tracks.slice().sort((a, b) => {

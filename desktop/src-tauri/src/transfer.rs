@@ -255,22 +255,24 @@ pub struct DeleteResult {
     pub path: String,
     pub ok: bool,
     pub error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
 }
 
 /// Deletes downloaded files (and their subtitle and lyrics files) from the download folder, and from the folder for
 /// moved downloads when `include_moved` is set. The folders come from `Scope`, never from the caller.
 #[tauri::command]
-pub async fn delete_files(scope: State<'_, Scope>, paths: Vec<String>, include_moved: Option<bool>) -> Result<Vec<DeleteResult>, String> {
+pub async fn delete_files(scope: State<'_, Scope>, paths: Vec<String>, include_moved: Option<bool>, permanent: Option<bool>) -> Result<Vec<DeleteResult>, String> {
     let download = scope.download();
     let moved = if include_moved.unwrap_or(false) { scope.moved().ok() } else { None };
     let allowed: Vec<String> = download.iter().chain(moved.iter()).map(|p| p.display().to_string()).collect();
     if let (Err(why), true) = (&download, allowed.is_empty()) {
         return Err(why.clone());
     }
-    run_delete(paths, allowed).await
+    run_delete(paths, allowed, permanent.unwrap_or(false)).await
 }
 
-async fn run_delete(paths: Vec<String>, allowed: Vec<String>) -> Result<Vec<DeleteResult>, String> {
+async fn run_delete(paths: Vec<String>, allowed: Vec<String>, permanent: bool) -> Result<Vec<DeleteResult>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let bases: Vec<PathBuf> = allowed.iter().filter_map(|a| fs::canonicalize(a).ok()).collect();
         if bases.is_empty() {
@@ -285,15 +287,18 @@ async fn run_delete(paths: Vec<String>, allowed: Vec<String>) -> Result<Vec<Dele
                     .ok_or_else(|| "That file isn't somewhere Kaisu may delete from.".to_string())
                     .and_then(|real| {
                         let sides = sidecars_of(&real);
-                        fs::remove_file(&real).map_err(|e| format!("Couldn't delete it: {e}"))?;
+                        crate::removal::remove(&real, permanent)?;
+                        let mut warnings = Vec::new();
                         for s in sides {
-                            let _ = fs::remove_file(s);
+                            if let Err(why) = crate::removal::remove(&s, permanent) {
+                                warnings.push(format!("{}: {why}", s.display()));
+                            }
                         }
-                        Ok(())
+                        Ok(warnings)
                     });
                 match outcome {
-                    Ok(()) => DeleteResult { path, ok: true, error: None },
-                    Err(e) => DeleteResult { path, ok: false, error: Some(e) },
+                    Ok(warnings) => DeleteResult { path, ok: true, error: None, warning: (!warnings.is_empty()).then(|| format!("The media file was removed, but some companion files remain: {}", warnings.join("; "))) },
+                    Err(e) => DeleteResult { path, ok: false, error: Some(e), warning: None },
                 }
             })
             .collect())
@@ -455,11 +460,11 @@ mod tests {
         write(&base.join("a/keep.mp3"), b"x");
         write(&other.join("mine.mp3"), b"x");
         let paths = vec![base.join("a/old.mp3").display().to_string(), other.join("mine.mp3").display().to_string(), base.join("a/missing.mp3").display().to_string()];
-        let res = run_delete(paths, vec![base.display().to_string()]).await.unwrap();
+        let res = run_delete(paths, vec![base.display().to_string()], true).await.unwrap();
         assert!(res[0].ok && !res[1].ok && !res[2].ok, "{res:?}");
         assert!(!base.join("a/old.mp3").exists() && !base.join("a/old.srt").exists(), "the companion goes too");
         assert!(base.join("a/keep.mp3").exists() && other.join("mine.mp3").exists());
-        assert!(run_delete(vec![], vec![]).await.is_err());
+        assert!(run_delete(vec![], vec![], true).await.is_err());
         fs::remove_dir_all(&base).ok();
         fs::remove_dir_all(&other).ok();
     }
