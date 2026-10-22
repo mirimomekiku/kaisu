@@ -28,7 +28,11 @@ export const trackFor = (path: string, title: string, extra: Partial<Track> = {}
  * Creates the player once, connects it to the system's media keys, puts back what was queued last time (paused) and keeps
  * saving the queue and the positions in long files.
  */
-export function useCreatePlayer(): PlayerEngine {
+export function useCreatePlayer(onPlayed?: (track: Track) => void, onListen?: (track: Track, seconds: number) => void): PlayerEngine {
+  const listenedRef = useRef(onListen);
+  listenedRef.current = onListen;
+  const playedRef = useRef(onPlayed);
+  playedRef.current = onPlayed;
   const positions = useRef<Positions>({});
   const positionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const engineRef = useRef<PlayerEngine | null>(null);
@@ -38,6 +42,9 @@ export function useCreatePlayer(): PlayerEngine {
     audio.preload = "metadata";
     engineRef.current = new PlayerEngine({
       audio,
+      createAudio: () => { const next = new Audio(); next.preload = "auto"; return next; },
+      onPlayed: (track) => playedRef.current?.(track),
+      onListen: (track, seconds) => listenedRef.current?.(track, seconds),
       resolve: async (track) => {
         await playInApp(track.path);
         return fileUrl(track.path);

@@ -1,3 +1,4 @@
+import TrackPreferences from "./TrackPreferences";
 import { Captions, ListMusic, Loader2, Music, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward, Volume2, VolumeX, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { usePlayerState, usePlayerTime } from "../hooks/usePlayer";
@@ -81,7 +82,7 @@ function Seek({ engine }: { engine: PlayerEngine }) {
 }
 
 /** The player along the bottom of the window: what is playing, and the controls. */
-export default function PlayerBar({ engine }: { engine: PlayerEngine }) {
+export default function PlayerBar({ engine, onMini, miniBusy }: { engine: PlayerEngine; onMini?: () => void; miniBusy?: boolean }) {
   const state = usePlayerState(engine);
   const [panel, setPanel] = useState<"queue" | "lyrics" | null>(null);
   const media = useMediaActions();
@@ -99,7 +100,7 @@ export default function PlayerBar({ engine }: { engine: PlayerEngine }) {
       stale = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [engine, path, hasCover]);
+  }, [engine, path, hasCover, track?.coverRevision]);
   if (!track) return null;
   const last = state.index >= state.queue.length - 1;
 
@@ -145,6 +146,8 @@ export default function PlayerBar({ engine }: { engine: PlayerEngine }) {
       </div>
 
       <div className="pb-extras">
+        <TrackPreferences path={track.path} title={track.title} compact />
+        {onMini && <button className="btn small" disabled={miniBusy} aria-label="Open mini-player" title="Compact, always-on-top player" onClick={onMini}>Mini</button>}
         <button className="row-btn" aria-label="Show the lyrics" aria-expanded={panel === "lyrics"} title="Lyrics" style={panel === "lyrics" ? { background: "rgba(59,130,230,.25)" } : undefined} onClick={() => setPanel((p) => (p === "lyrics" ? null : "lyrics"))}>
           <Captions className="w-3.5 h-3.5" />
         </button>

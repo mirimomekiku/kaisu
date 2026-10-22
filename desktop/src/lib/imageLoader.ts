@@ -6,6 +6,8 @@ export interface ImageLoader {
   peek(key: string): string | null | undefined;
   /** The picture for `key` as something an `<img>` can show, or null if it can't be loaded. */
   load(key: string): Promise<string | null>;
+  invalidate?: (keys: string[]) => void;
+  subscribe?: (listener: () => void) => () => void;
 }
 
 interface Options {
@@ -29,6 +31,8 @@ export function createImageLoader(fetchBytes: (key: string) => Promise<ArrayBuff
   const inflight = new Map<string, Promise<string | null>>();
   const waiting: Array<() => void> = [];
   let running = 0;
+  const versions = new Map<string, number>();
+  const listeners = new Set<() => void>();
 
   const peek = (key: string): string | null | undefined => {
     if (isLocal(key)) return key;
@@ -72,23 +76,29 @@ export function createImageLoader(fetchBytes: (key: string) => Promise<ArrayBuff
     const pending = inflight.get(key);
     if (pending) return pending;
 
+    const version = versions.get(key) ?? 0;
     const job = (async () => {
       await acquire();
       try {
         const src = URL.createObjectURL(new Blob([await fetchBytes(key)]));
+        if ((versions.get(key) ?? 0) !== version) { URL.revokeObjectURL(src); return null; }
         remember(key, src);
         return src;
       } catch {
-        remember(key, null);
+        if ((versions.get(key) ?? 0) === version) remember(key, null);
         return null;
       } finally {
         release();
-        inflight.delete(key);
+        if ((versions.get(key) ?? 0) === version) inflight.delete(key);
       }
     })();
     inflight.set(key, job);
     return job;
   };
 
-  return { peek, load };
+  const invalidate = (keys: string[]) => {
+    for (const key of keys) { const old = cache.get(key); if (old?.src) URL.revokeObjectURL(old.src); cache.delete(key); inflight.delete(key); versions.set(key, (versions.get(key) ?? 0) + 1); }
+    listeners.forEach((fn) => fn());
+  };
+  return { peek, load, invalidate, subscribe: (fn) => { listeners.add(fn); return () => { listeners.delete(fn); }; } };
 }

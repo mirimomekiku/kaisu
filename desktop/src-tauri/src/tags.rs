@@ -14,6 +14,7 @@ use lofty::{
     file::{AudioFile, TaggedFileExt},
     prelude::*,
     tag::{ItemKey, Tag},
+    picture::{Picture, PictureType},
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
@@ -36,6 +37,7 @@ pub struct TagEdit {
     pub track: Option<String>,
     pub disc: Option<String>,
     pub year: Option<String>,
+    pub artwork: Option<crate::artwork::ArtworkEdit>,
 }
 
 /// An edit with every field checked and cleaned. `Some(None)` means remove.
@@ -154,9 +156,15 @@ fn matches(c: &Checked, t: &LibTrack) -> bool {
 }
 
 /// Edits one file and returns how it reads afterwards.
+#[cfg(test)]
 pub fn edit_file(path: &Path, edit: &TagEdit) -> Result<LibTrack, String> {
+    if matches!(edit.artwork, Some(crate::artwork::ArtworkEdit::Replace { .. })) { return Err("Choose artwork through the editor before replacing it.".into()); }
+    edit_file_with_artwork(path, edit, None)
+}
+
+fn edit_file_with_artwork(path: &Path, edit: &TagEdit, replacement: Option<&[u8]>) -> Result<LibTrack, String> {
     let checked = check(edit)?;
-    if checked.is_empty() {
+    if checked.is_empty() && edit.artwork.is_none() {
         return Ok(library::read_track(path));
     }
     let before = library::read_track(path);
@@ -166,6 +174,7 @@ pub fn edit_file(path: &Path, edit: &TagEdit) -> Result<LibTrack, String> {
         let _ = fs::remove_file(&tmp);
         why
     };
+    fs::OpenOptions::new().write(true).create_new(true).open(&tmp).map_err(|e| format!("Couldn't reserve a working copy (another edit may be running): {e}"))?;
     fs::copy(path, &tmp).map_err(|e| cleanup(format!("Couldn't make a working copy: {e}")))?;
 
     let mut tagged = lofty::read_from_path(&tmp).map_err(|e| cleanup(format!("This file's tags can't be read: {e}")))?;
@@ -175,8 +184,29 @@ pub fn edit_file(path: &Path, edit: &TagEdit) -> Result<LibTrack, String> {
     }
     let Some(tag) = tagged.primary_tag_mut() else { return Err(cleanup("This kind of file can't hold tags.".into())) };
     apply(tag, &checked);
+    if let Some(art) = &edit.artwork {
+        match art {
+            crate::artwork::ArtworkEdit::Remove => { while !tag.pictures().is_empty() { tag.remove_picture(0); } }
+            crate::artwork::ArtworkEdit::Replace { .. } => {
+                let bytes = replacement.ok_or_else(|| cleanup("Choose the artwork again.".into()))?;
+                let mut picture = Picture::from_reader(&mut std::io::Cursor::new(bytes)).map_err(|e| cleanup(e.to_string()))?;
+                picture.set_pic_type(PictureType::CoverFront);
+                tag.remove_picture_type(PictureType::CoverFront);
+                tag.push_picture(picture);
+            }
+        }
+    }
     tagged.save_to_path(&tmp, WriteOptions::default()).map_err(|e| cleanup(format!("Couldn't write the tags: {e}")))?;
 
+    if let Some(art) = &edit.artwork {
+        let reread = lofty::read_from_path(&tmp).map_err(|e| cleanup(e.to_string()))?;
+        let pictures = reread.primary_tag().map(|t| t.pictures()).unwrap_or(&[]);
+        let verified = match art {
+            crate::artwork::ArtworkEdit::Remove => pictures.is_empty(),
+            crate::artwork::ArtworkEdit::Replace { .. } => pictures.iter().any(|p| p.pic_type() == PictureType::CoverFront && Some(p.data()) == replacement),
+        };
+        if !verified { return Err(cleanup("The artwork did not round-trip correctly; the original file was kept.".into())); }
+    }
     // Read the copy back before trusting it: the tags must say what was asked, and the sound must be as long as before.
     let after = library::read_track(&tmp);
     if !matches(&checked, &after) {
@@ -200,15 +230,17 @@ pub struct EditResult {
 
 /// Edits the tags of these files (all alike), and keeps the remembered library in step.
 #[tauri::command]
-pub async fn library_edit_tags(app: AppHandle, scope: State<'_, Scope>, paths: Vec<String>, edit: TagEdit) -> Result<Vec<EditResult>, String> {
+pub async fn library_edit_tags(app: AppHandle, scope: State<'_, Scope>, artwork: State<'_, crate::artwork::ArtworkStore>, paths: Vec<String>, edit: TagEdit) -> Result<Vec<EditResult>, String> {
     check(&edit)?;
+    if paths.is_empty() || paths.len() > 500 { return Err("Edit between 1 and 500 songs at once.".into()); }
+    let replacement = match &edit.artwork { Some(crate::artwork::ArtworkEdit::Replace { token }) => Some(artwork.get(token)?), _ => None };
     let cache = library::cache_path(&app)?;
     let files: Vec<(String, Result<PathBuf, String>)> = paths.into_iter().map(|p| (scope.media_file(&p), p)).map(|(real, p)| (p, real)).collect();
     tauri::async_runtime::spawn_blocking(move || {
         let mut results = Vec::new();
         let mut changed: Vec<LibTrack> = Vec::new();
         for (path, real) in files {
-            match real.and_then(|r| edit_file(&r, &edit)) {
+            match real.and_then(|r| edit_file_with_artwork(&r, &edit, replacement.as_ref().map(|b| b.as_slice()))) {
                 Ok(mut track) => {
                     // Keep the path the page knows the file by (a checked path can be spelled differently on Windows).
                     track.path = path.clone();
@@ -219,13 +251,14 @@ pub async fn library_edit_tags(app: AppHandle, scope: State<'_, Scope>, paths: V
             }
         }
         if !changed.is_empty() {
+            let _lock = library::CACHE_EDIT.lock().map_err(|_| "Library is unavailable.")?;
             let mut remembered = library::load_cache(&cache);
             for t in changed {
                 match remembered.iter_mut().find(|c| c.path == t.path) {
                     // The sound didn't change, so what was measured still holds.
                     Some(slot) => {
                         let loudness = slot.loudness;
-                        *slot = LibTrack { loudness, ..t };
+                        *slot = LibTrack { loudness, added: if slot.added > 0 { slot.added } else { slot.modified }, ..t };
                     }
                     None => remembered.push(t),
                 }
@@ -347,4 +380,34 @@ mod tests {
  lines	tab  ".into()))).unwrap();
         assert_eq!(c.title, Some(Some("two lines tab".into())));
     }
+    #[test]
+    fn artwork_is_verified_before_replacement_and_removal_preserves_audio() {
+        use crate::artwork::ArtworkEdit;
+        let dir = scratch("artwork-edit"); let path = dir.join("song.wav");
+        tagged_wav(&path, 2, "Title", "Artist", "Album", 1, 2000);
+        let png = crate::artwork::tests::png();
+        let replace = TagEdit { artwork: Some(ArtworkEdit::Replace { token: "test".into() }), ..Default::default() };
+        let changed = edit_file_with_artwork(&path, &replace, Some(&png)).unwrap();
+        assert!(changed.has_cover); assert_eq!(library::cover_bytes(&path), Some(png));
+        assert!((changed.duration - 2.0).abs() < 0.1);
+        let original = fs::read(&path).unwrap();
+        assert!(edit_file_with_artwork(&path, &replace, Some(b"broken")).is_err());
+        assert_eq!(fs::read(&path).unwrap(), original);
+        let removed = edit_file(&path, &TagEdit { artwork: Some(ArtworkEdit::Remove), ..Default::default() }).unwrap();
+        assert!(!removed.has_cover); assert_eq!(removed.title, "Title");
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 1, "working copies were cleaned up");
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn an_existing_working_copy_is_never_overwritten_or_removed() {
+        let dir = scratch("working-copy-collision"); let path = dir.join("song.wav");
+        tagged_wav(&path, 1, "Original", "Artist", "Album", 1, 2000);
+        let original = fs::read(&path).unwrap(); let tmp = path.with_extension("kaisu-tag-tmp.wav");
+        fs::write(&tmp, b"existing file").unwrap();
+        assert!(edit_file(&path, &edit(|e| e.title = Some("Changed".into()))).is_err());
+        assert_eq!(fs::read(&path).unwrap(), original); assert_eq!(fs::read(&tmp).unwrap(), b"existing file");
+        fs::remove_dir_all(dir).ok();
+    }
+
 }

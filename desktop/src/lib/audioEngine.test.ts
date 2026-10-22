@@ -50,13 +50,15 @@ const B = track("b");
 const C = track("c");
 const flush = () => new Promise<void>((r) => setTimeout(r, 0));
 
-function make(initial: Positions = {}, resolve?: (t: Track) => Promise<string>) {
+function make(initial: Positions = {}, resolve?: (t: Track) => Promise<string>, onPlayed?: (t: Track) => void, onListen?: (t: Track, seconds: number) => void) {
   const audio = new FakeAudio();
   let positions = initial;
   let clock = 1_000_000;
   const resolved: string[] = [];
   const engine = new PlayerEngine({
     audio,
+    onPlayed,
+    onListen,
     resolve: resolve ?? (async (t) => (resolved.push(t.path), `asset://${t.path}`)),
     getPositions: () => positions,
     setPositions: (p) => (positions = p),
@@ -518,4 +520,183 @@ describe("listening for changes", () => {
     expect(stateChanges).toBe(0);
     expect(engine.getTime()).toEqual({ position: 6, duration: 100 });
   });
+});
+
+describe("listening and relocation", () => {
+  it("records completion, including repeat, without counting pauses or skips", async () => {
+    const played = vi.fn();
+    const { engine, audio } = make({}, undefined, played);
+    engine.play([A, B]); await flush();
+    engine.toggle(); engine.toggle();
+    expect(played).not.toHaveBeenCalled();
+    engine.next(); await flush();
+    expect(played).not.toHaveBeenCalled();
+    engine.setRepeat("one");
+    audio.finish(); audio.finish();
+    expect(played.mock.calls.map(([t]) => t.path)).toEqual([B.path, B.path]);
+  });
+  it("updates queued paths and resume positions without restarting audio", async () => {
+    const initial = { [B.path]: { t: 50, d: LONG, at: 123 } };
+    const { engine, audio, positions } = make(initial);
+    engine.play([A, B]); await flush();
+    const count = audio.playCalls;
+    engine.replacePath(B.path, "/new/b.mp3");
+    expect(audio.playCalls).toBe(count);
+    expect(engine.getState().queue[1].path).toBe("/new/b.mp3");
+    expect(positions()).toEqual({ "/new/b.mp3": initial[B.path] });
+    engine.next(); await flush();
+    expect(audio.src).toContain("/new/b.mp3");
+  });
+});
+
+describe("measured listening time", () => {
+  it("counts real playback and flushes partial plays on pause, without counting seeks or paused time", async () => {
+    const listened = vi.fn();
+    const { engine, audio, advance } = make({}, undefined, undefined, listened);
+    engine.play([A, B]); await flush(); audio.loaded(300);
+    advance(2000); audio.currentTime = 2; audio.fire("timeupdate");
+    engine.pause();
+    expect(listened.mock.calls.map(([, seconds]) => seconds)).toEqual([2]);
+    advance(10000); audio.fire("timeupdate");
+    engine.seek(100); engine.resume();
+    advance(3000); audio.currentTime = 103; audio.fire("timeupdate"); engine.pause();
+    expect(listened.mock.calls.map(([, seconds]) => seconds)).toEqual([2, 3]);
+  });
+  it("excludes buffering and suspended clock gaps and handles playback speed", async () => {
+    const listened = vi.fn();
+    const { engine, audio, advance } = make({}, undefined, undefined, listened);
+    engine.play([A]); await flush(); audio.loaded(300);
+    engine.setRate(2); advance(2000); audio.currentTime = 4; audio.fire("timeupdate");
+    audio.fire("waiting");
+    advance(10000); audio.fire("timeupdate"); audio.fire("playing");
+    advance(2000); audio.currentTime = 8; audio.fire("timeupdate");
+    advance(60000); audio.currentTime = 128; audio.fire("timeupdate"); engine.pause();
+    expect(listened.mock.calls.reduce((sum, [, seconds]) => sum + seconds, 0)).toBe(4);
+  });
+  it("attributes time to the previous track before switching or clearing", async () => {
+    const listened = vi.fn();
+    const { engine, audio, advance } = make({}, undefined, undefined, listened);
+    engine.play([A, B]); await flush();
+    advance(1000); audio.currentTime = 1; engine.next(); await flush();
+    audio.currentTime = 0; audio.fire("playing");
+    advance(2000); audio.currentTime = 2; engine.clear();
+    expect(listened.mock.calls.map(([t, seconds]) => [t.path, seconds])).toEqual([[A.path, 1], [B.path, 2]]);
+  });
+});
+
+const settleTransitions = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
+function seamless(seconds = 0) {
+  const audios: FakeAudio[] = [new FakeAudio()];
+  let clock = 10000;
+  let positions: Positions = {};
+  const resolved: string[] = [];
+  const played = vi.fn(); const listened = vi.fn();
+  const engine = new PlayerEngine({ audio: audios[0], createAudio: () => { const a = new FakeAudio(); audios.push(a); return a; }, resolve: async (t) => { resolved.push(t.path); return t.path; }, getPositions: () => positions, setPositions: (p) => { positions = p; }, now: () => clock, onPlayed: played, onListen: listened });
+  engine.setTransitions(true, seconds);
+  return { engine, audios, resolved, played, listened, advance: (ms: number) => { clock += ms; }, ready: (a: FakeAudio, duration = 10) => { a.loaded(duration); a.fire("canplay"); } };
+}
+describe("preloaded transitions", () => {
+  it("prepares without playing and advances without resolving the next source twice", async () => {
+    const { engine, audios, ready, resolved, played } = seamless();
+    engine.play([A, B]); await settleTransitions(); ready(audios[0]); ready(audios[1]);
+    expect(audios[1].playCalls).toBe(0); expect(audios[1].volume).toBe(0);
+    expect(engine.getState().index).toBe(0);
+    audios[0].finish(); await settleTransitions();
+    expect(engine.getState()).toMatchObject({ index: 1, playing: true });
+    expect(audios[1].playCalls).toBe(1); expect(resolved.filter((p) => p === B.path)).toHaveLength(1);
+    expect(played.mock.calls.map(([t]) => t.path)).toEqual([A.path]);
+    expect(audios[0].src).toBe(""); engine.dispose();
+  });
+  it("crossfades with complementary gains, pauses both decks and counts an outgoing completion once", async () => {
+    vi.useFakeTimers();
+    const { engine, audios, ready, played, advance, listened } = seamless(3);
+    engine.play([A, B]); await settleTransitions(); ready(audios[0]); ready(audios[1]);
+    advance(7000); audios[0].currentTime = 7; audios[0].fire("timeupdate"); await settleTransitions();
+    expect(engine.getState().index).toBe(1); expect(played).not.toHaveBeenCalled();
+    expect(audios[0].volume).toBe(1); expect(audios[1].volume).toBe(0);
+    advance(1500); audios[0].currentTime = 8.5; audios[1].currentTime = 1.5; vi.advanceTimersByTime(40);
+    expect(audios[0].volume).toBeCloseTo(0.5); expect(audios[1].volume).toBeCloseTo(0.5);
+    engine.pause(); expect(audios.every((a) => a.paused)).toBe(true);
+    engine.resume(); await settleTransitions(); expect(audios[0].paused).toBe(false); expect(audios[1].paused).toBe(false);
+    advance(1500); audios[0].currentTime = 10; audios[1].currentTime = 3; vi.advanceTimersByTime(40); audios[0].finish();
+    expect(audios[1].volume).toBe(1); expect(played.mock.calls.map(([t]) => t.path)).toEqual([A.path]);
+    engine.pause();
+    expect(listened.mock.calls.reduce((sum, [, n]) => sum + n, 0)).toBeCloseTo(10, 1);
+    engine.dispose();
+  });
+  it("uses each track's loudness gain during a fade and honors global volume", async () => {
+    vi.useFakeTimers();
+    const { engine, audios, ready, advance } = seamless(2);
+    engine.setLevelMap(new Map([[B.path, -12]])); engine.setLevelGain(-6); engine.setVolume(0.5);
+    engine.play([A, B]); await settleTransitions(); ready(audios[0]); ready(audios[1]);
+    audios[0].currentTime = 8; audios[0].fire("timeupdate"); await settleTransitions();
+    advance(1000); audios[0].currentTime = 9; audios[1].currentTime = 1; vi.advanceTimersByTime(40);
+    expect(audios[0].volume).toBeCloseTo(0.25 * Math.pow(10, -6 / 20));
+    expect(audios[1].volume).toBeCloseTo(0.25 * Math.pow(10, -12 / 20));
+    engine.setVolume(0); expect(audios[0].volume + audios[1].volume).toBe(0); engine.dispose();
+  });
+  it("discards stale preloads when play-next changes the successor", async () => {
+    const { engine, audios, ready } = seamless();
+    engine.play([A, B]); await settleTransitions(); ready(audios[0]); ready(audios[1]);
+    const stale = audios[1]; engine.playNext([C]); await settleTransitions(); ready(audios[2]);
+    expect(stale.src).toBe(""); stale.fire("canplay"); stale.finish();
+    expect(engine.getState().index).toBe(0);
+    audios[0].finish(); await settleTransitions(); expect(engine.current?.path).toBe(C.path); engine.dispose();
+  });
+  it("does not overlap sleep-after-track or repeat-one", async () => {
+    const { engine, audios, ready, played } = seamless(3);
+    engine.play([A, B]); await settleTransitions(); ready(audios[0]); ready(audios[1]);
+    engine.setSleep("track"); audios[0].currentTime = 9; audios[0].fire("timeupdate");
+    expect(audios[1].playCalls).toBe(0); audios[0].finish(); await settleTransitions();
+    expect(engine.getState().playing).toBe(false); expect(engine.getState().index).toBe(0);
+    engine.setRepeat("one"); engine.resume(); await settleTransitions(); audios[0].finish(); await settleTransitions();
+    expect(engine.current?.path).toBe(A.path); expect(played).toHaveBeenCalledTimes(2); engine.dispose();
+  });
+  it("keeps the outgoing song alive when the next deck cannot start", async () => {
+    const { engine, audios, ready } = seamless(3);
+    engine.play([A, B]); await settleTransitions(); ready(audios[0]); ready(audios[1]);
+    audios[1].play = async () => { throw new Error("decoder refused"); };
+    audios[0].currentTime = 8; audios[0].fire("timeupdate"); await settleTransitions();
+    expect(engine.current?.path).toBe(A.path); expect(engine.getState()).toMatchObject({ playing: true, error: null });
+    expect(audios[0].paused).toBe(false); audios[0].finish(); await settleTransitions();
+    expect(engine.current?.path).toBe(B.path); engine.dispose();
+  });
+  it("stops the outgoing tail on seek, queue replacement and clear", async () => {
+    const { engine, audios, ready, played } = seamless(3);
+    engine.play([A, B]); await settleTransitions(); ready(audios[0]); ready(audios[1]);
+    audios[0].currentTime = 8; audios[0].fire("timeupdate"); await settleTransitions();
+    engine.seek(5); expect(audios[0].src).toBe(""); expect(audios[1].volume).toBe(1); expect(played).not.toHaveBeenCalled();
+    engine.clear(); expect(audios.every((a) => a.paused && a.src === "")).toBe(true); engine.dispose();
+  });
+  it("releases open files for artwork editing and resumes at the saved point", async () => {
+    const { engine, audios, ready } = seamless(); engine.play([A, B]); await settleTransitions(); ready(audios[0]); ready(audios[1]);
+    audios[0].currentTime = 4; const release = engine.releaseFiles([A.path, B.path]);
+    expect(audios.every((a) => a.src === "")).toBe(true); expect(engine.getState().playing).toBe(false);
+    engine.resume(); await settleTransitions(); expect(engine.getState().playing).toBe(false); release(); engine.resume(); await settleTransitions(); ready(audios[0]); expect(audios[0].currentTime).toBe(4); engine.dispose();
+  });
+});
+
+it("does not restart a canceled promotion after pause", async () => {
+  const { engine, audios, ready } = seamless(3); engine.play([A, B]); await settleTransitions(); ready(audios[0]); ready(audios[1]);
+  let release!: () => void; const play = audios[1].play.bind(audios[1]);
+  audios[1].play = async () => { await play(); await new Promise<void>((resolve) => { release = resolve; }); };
+  audios[0].currentTime = 8; audios[0].fire("timeupdate"); await settleTransitions();
+  engine.pause(); release(); await settleTransitions();
+  expect(engine.current?.path).toBe(A.path); expect(engine.getState().playing).toBe(false); expect(audios.every((a) => a.paused)).toBe(true); engine.dispose();
+});
+it("preloads the first song at the end of a repeating queue", async () => {
+  const { engine, audios, ready, played } = seamless(); engine.setRepeat("all"); engine.play([A, B], 1); await settleTransitions(); ready(audios[0]); ready(audios[1]);
+  audios[0].finish(); await settleTransitions(); expect(engine.current?.path).toBe(A.path); expect(played.mock.calls[0][0].path).toBe(B.path); engine.dispose();
+});
+it("cancels both a prepared successor and an active overlap when transitions are disabled", async () => {
+  const { engine, audios, ready } = seamless(3); engine.play([A, B]); await settleTransitions(); ready(audios[0]); ready(audios[1]);
+  audios[0].currentTime = 8; audios[0].fire("timeupdate"); await settleTransitions(); engine.setTransitions(false, 3);
+  expect(audios[0].paused).toBe(true); expect(audios[1].volume).toBe(1); expect(engine.current?.path).toBe(B.path); engine.dispose();
+});
+
+it("a pending source cannot reopen a file after it is released for editing", async () => {
+  let resolve!: (src: string) => void;
+  const { engine, audio } = make({}, () => new Promise<string>((r) => { resolve = r; }));
+  engine.play([A]); const release = engine.releaseFiles([A.path]); resolve("late-source"); await settleTransitions();
+  expect(audio.src).toBe(""); expect(audio.playCalls).toBe(0); expect(engine.getState().playing).toBe(false); release(); engine.dispose();
 });

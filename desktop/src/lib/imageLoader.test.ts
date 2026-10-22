@@ -85,3 +85,15 @@ describe("createImageLoader", () => {
     expect(loader.peek("d")).toMatch(/^blob:/);
   });
 });
+
+it("invalidates cached artwork, notifies viewers and ignores old in-flight responses", async () => {
+  const releases: Array<(bytes: ArrayBuffer) => void> = [];
+  const loader = createImageLoader(() => new Promise((resolve) => releases.push(resolve)));
+  let changes = 0; const off = loader.subscribe!(() => changes++);
+  const stale = loader.load("song"); await tick(); loader.invalidate!(["song"]);
+  const fresh = loader.load("song"); await tick();
+  releases[1](bytes()); const next = await fresh;
+  releases[0](bytes()); expect(await stale).toBeNull();
+  expect(loader.peek("song")).toBe(next); expect(changes).toBe(1);
+  loader.invalidate!(["song"]); expect(loader.peek("song")).toBeUndefined(); off();
+});

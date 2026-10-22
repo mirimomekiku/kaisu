@@ -7,7 +7,9 @@ export type Field = (typeof FIELDS)[number];
 export type TagForm = Record<Field, string>;
 
 /** What the backend takes: only the fields that change; an empty string removes a field. */
+export type ArtworkEdit = { action: "replace"; token: string } | { action: "remove" };
 export interface TagEditRequest {
+  artwork?: ArtworkEdit;
   title?: string;
   artist?: string;
   album?: string;
@@ -68,7 +70,7 @@ export function startForm(tracks: LibTrack[]): FormStart {
 /** Only what the user changed. A mixed field is left alone unless something was typed in it. */
 export function buildEdit(start: FormStart, form: TagForm): TagEditRequest {
   const edit: TagEditRequest = {};
-  const key: Record<Field, keyof TagEditRequest> = { title: "title", artist: "artist", album: "album", albumArtist: "album_artist", genre: "genre", track: "track", disc: "disc", year: "year" };
+  const key: Record<Field, Exclude<keyof TagEditRequest, "artwork">> = { title: "title", artist: "artist", album: "album", albumArtist: "album_artist", genre: "genre", track: "track", disc: "disc", year: "year" };
   for (const f of FIELDS) {
     const now = form[f].trim();
     if (start.mixed.has(f) ? now === "" : now === start.values[f].trim()) continue;

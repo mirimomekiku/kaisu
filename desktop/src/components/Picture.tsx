@@ -20,6 +20,8 @@ export default function Picture({ url, fallback, source = thumbnails }: Props) {
   const marker = useRef<HTMLSpanElement>(null);
   const known = url ? source.peek(url) : null;
   const [src, setSrc] = useState<string | null | undefined>(known);
+  const [revision, setRevision] = useState(0);
+  useEffect(() => source.subscribe?.(() => setRevision((n) => n + 1)), [source]);
   const [near, setNear] = useState(false);
 
   useEffect(() => {
@@ -44,7 +46,7 @@ export default function Picture({ url, fallback, source = thumbnails }: Props) {
     return () => {
       stale = true;
     };
-  }, [url, near, source]);
+  }, [url, near, source, revision]);
 
   return (
     <>

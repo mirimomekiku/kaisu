@@ -1,3 +1,5 @@
+import ArtworkEditor from "./ArtworkEditor";
+import type { ArtworkEdit } from "../lib/tagEdit";
 import { useMemo, useState } from "react";
 import type { EditResult, LibTrack } from "../lib/api";
 import { baseName } from "../lib/mediaKind";
@@ -19,12 +21,14 @@ export default function TagEditor({ tracks, onSave, onClose }: Props) {
   const many = tracks.length > 1;
   const start = useMemo(() => startForm(tracks), [tracks]);
   const [form, setForm] = useState<TagForm>(start.values);
+  const [choosingArtwork, setChoosingArtwork] = useState(false);
+  const [artwork, setArtwork] = useState<ArtworkEdit | undefined>();
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState<EditResult[]>([]);
   const [problem, setProblem] = useState<string | null>(null);
 
   const problems = validateForm(form);
-  const edit = buildEdit(start, form);
+  const edit = { ...buildEdit(start, form), ...(artwork ? { artwork } : {}) };
   const changed = Object.keys(edit).length > 0;
   const fields = FIELDS.filter((f) => !many || !SINGLE_ONLY.includes(f));
 
@@ -46,13 +50,13 @@ export default function TagEditor({ tracks, onSave, onClose }: Props) {
   return (
     <Sheet
       title={many ? `Edit ${tracks.length} songs` : "Edit tags"}
-      onClose={() => !busy && onClose()}
+      onClose={() => !busy && !choosingArtwork && onClose()}
       footer={
         <>
-          <button type="button" className="btn" disabled={busy} onClick={onClose}>
+          <button type="button" className="btn" disabled={busy || choosingArtwork} onClick={onClose}>
             Cancel
           </button>
-          <button type="button" className="btn primary" disabled={busy || !changed || Object.keys(problems).length > 0} onClick={() => void save()}>
+          <button type="button" className="btn primary" disabled={busy || choosingArtwork || !changed || Object.keys(problems).length > 0} onClick={() => void save()}>
             {busy ? "Saving…" : "Save"}
           </button>
         </>
@@ -62,7 +66,7 @@ export default function TagEditor({ tracks, onSave, onClose }: Props) {
         className="flex flex-col gap-2"
         onSubmit={(e) => {
           e.preventDefault();
-          if (changed && Object.keys(problems).length === 0 && !busy) void save();
+          if (changed && Object.keys(problems).length === 0 && !busy && !choosingArtwork) void save();
         }}
       >
         <p className="m-0 truncate" title={many ? undefined : tracks[0]?.path}>
@@ -76,6 +80,7 @@ export default function TagEditor({ tracks, onSave, onClose }: Props) {
             </>
           )}
         </p>
+        <ArtworkEditor path={tracks[0].path} count={tracks.length} value={artwork} onChange={setArtwork} onBusy={setChoosingArtwork} disabled={busy} />
         <div className="grid gap-x-3 gap-y-2" style={{ gridTemplateColumns: "auto 1fr" }}>
           {fields.map((f) => (
             <label key={f} className="contents">
