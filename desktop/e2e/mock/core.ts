@@ -184,6 +184,10 @@ export async function invoke(cmd: string, args: any = {}): Promise<any> {
       return /--exec|(^|\s)-o\s/.test(args.text) ? "`--exec` isn't allowed because it can run programs on your computer." : null;
     case "allowed_custom_options":
       return [{ names: ["-R", "--retries"], values: 1 }, { names: ["--embed-chapters"], values: 0 }, { names: ["-f", "--format"], values: 1 }];
+    case "podcast_fetch":
+      await sleep(w.__mock.feedDelay ?? 30);
+      if (w.__mock.feedFail || !w.__mock.feeds?.[args.url]) throw "That isn't a podcast feed.";
+      return structuredClone(w.__mock.feeds[args.url]);
     case "lyrics_read":
       return (w.__mock.lyrics ?? {})[args.path] ?? { synced: null, plain: null, source: null };
     case "lyrics_find": {

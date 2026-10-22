@@ -396,6 +396,24 @@ export const libraryCover = (path: string) => invoke<ArrayBuffer>("library_cover
 
 // ---- lyrics ----
 
+export interface PodcastEpisode {
+  id: string;
+  title: string;
+  url: string;
+  published: string | null;
+  duration: number | null;
+  size: number | null;
+}
+
+export interface PodcastFeed {
+  title: string;
+  image: string | null;
+  episodes: PodcastEpisode[];
+}
+
+/** Contacts the subscribed website through the current proxy to read its RSS feed. */
+export const podcastFetch = (url: string) => invoke<PodcastFeed>("podcast_fetch", { url, proxy: currentProxy });
+
 export interface SongLyrics {
   /** Timed lines (`[01:23.45] words`). */
   synced: string | null;

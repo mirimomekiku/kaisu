@@ -1650,3 +1650,15 @@ html:not([data-accent="blue"]) :is(.itable tbody tr.sel, .row-card.sel, .sidebar
   font-weight: bold;
   font-size: 16px;
 }
+/* Podcast subscriptions and episodes. */
+.podcasts { padding: 20px; }
+.podcast-add { display: flex; align-items: end; gap: 8px; }
+.podcast-add label { display: grid; gap: 5px; }
+.podcast-layout { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 20px; margin-top: 20px; }
+.podcast-shows { align-self: start; display: grid; gap: 4px; }
+.podcast-shows .source { white-space: normal; overflow-wrap: anywhere; text-align: left; }
+.podcast-shows [aria-current="true"] { background: linear-gradient(var(--select-1), var(--select-2)); color: var(--ink-inv); }
+.podcast-episodes { min-width: 0; overflow-wrap: anywhere; }
+.podcast-list { list-style: none; padding: 0; margin: 16px 0 0; }
+.podcast-episode { display: flex; gap: 12px; align-items: center; padding: 12px 0; border-top: 1px solid var(--hairline); }
+.podcast-new { color: var(--select-2); font-size: 11px; font-weight: 700; }

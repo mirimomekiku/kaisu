@@ -4,6 +4,7 @@ import { joinProxyPassword, splitProxyPassword } from "./proxy";
 import type { AudioFormat, Browser, CloseMode, CoverMode, ExtraOptions, Layout, LyricsMode, MoveConflict, MoveMode, NameStyle, Preset, SearchSource, SponsorBlock } from "./api";
 import { sanitizePresets, type FormatPreset } from "./presets";
 import { sanitizePlaylists, type Playlist } from "./playlists";
+import { sanitizePodcasts, type PodcastSubscription } from "./podcasts";
 import type { HistorySort } from "./history";
 import type { ScheduleRule } from "./schedule";
 import type { RepeatMode, Track } from "./audioEngine";
@@ -367,6 +368,23 @@ export async function loadPlaylists(): Promise<Playlist[]> {
   } catch (e) {
     console.warn("Could not read the playlists", e);
     return [];
+  }
+}
+
+export async function loadPodcasts(): Promise<PodcastSubscription[]> {
+  try {
+    return sanitizePodcasts(await (await getStore()).get("podcasts"));
+  } catch (e) {
+    console.warn("Could not read podcasts", e);
+    return [];
+  }
+}
+
+export async function savePodcasts(podcasts: PodcastSubscription[]) {
+  try {
+    await (await getStore()).set("podcasts", podcasts);
+  } catch (e) {
+    console.warn("Could not save podcasts", e);
   }
 }
 

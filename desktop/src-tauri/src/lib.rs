@@ -11,6 +11,7 @@ mod media;
 mod meta;
 mod net;
 mod output;
+mod podcast;
 mod power;
 mod proc;
 mod scope;
@@ -112,6 +113,7 @@ pub fn run() {
             lyrics::lyrics_read,
             tags::library_edit_tags,
             loudness::library_analyze,
+            podcast::podcast_fetch,
             lyrics::lyrics_find,
             leftovers::remove_leftovers,
             media::play_in_app,

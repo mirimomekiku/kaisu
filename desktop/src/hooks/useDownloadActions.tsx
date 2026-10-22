@@ -47,11 +47,13 @@ export interface DownloadReq {
   cover?: CoverOptions | null;
   lyrics?: LyricsMode | null;
   audio?: AudioExtras | null;
-  /** Set by a site rule: where to save instead of the usual folder, and the audio format to use. */
+  /** Where to save instead of the usual folder (also used by site rules and podcasts). */
   outDir?: string;
   audioFormat?: AudioFormat;
   /** The site of the rule that changed this download, for saying so. */
   ruledBy?: string;
+  /** Feed episodes keep their original audio and stay inside the podcast folder. */
+  applySiteRules?: boolean;
 }
 
 const isFinishedStatus = (status: string) => status === "completed" || status === "error" || status === "cancelled";
@@ -91,7 +93,7 @@ export function useDownloadActions(a: Args) {
     // Site rules (Advanced mode) change what is downloaded and where it goes, before anything is compared or queued.
     const rules = settingsRef.current.mode === "advanced" ? settingsRef.current.siteRules : [];
     const reqs = asked.map((r): DownloadReq => {
-      const rule = rules.length ? matchSiteRule(rules, r.url, r.channel) : null;
+      const rule = rules.length && r.applySiteRules !== false ? matchSiteRule(rules, r.url, r.channel) : null;
       if (!rule) return r;
       return { ...r, preset: rule.preset || r.preset, audioFormat: rule.audioFormat || undefined, outDir: rule.folder.trim() || undefined, ruledBy: rule.host.trim() };
     });
@@ -179,6 +181,12 @@ export function useDownloadActions(a: Args) {
     const badFolders = new Map<string, string>();
     for (const folder of new Set(todo.flatMap((r) => (r.outDir ? [r.outDir] : [])))) {
       await checkFolder(folder).catch((err) => badFolders.set(folder, errorText(err)));
+    }
+    // Episodes must stay in their show folder. A failed folder check must not silently redirect them.
+    const refusedEpisode = todo.find((r) => r.applySiteRules === false && r.outDir && badFolders.has(r.outDir));
+    if (refusedEpisode?.outDir) {
+      showFlash(badFolders.get(refusedEpisode.outDir)!, true);
+      return 0;
     }
     if (badFolders.size > 0) showFlash(`A site rule's folder can't be used (${[...badFolders.values()][0]}). Saving in the usual folder instead.`, true);
 

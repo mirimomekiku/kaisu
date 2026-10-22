@@ -42,7 +42,7 @@ fn is_public_ip(ip: IpAddr) -> bool {
 }
 
 /// A link Kaisu may fetch a picture from: http(s), a sane length, and a public host.
-fn check_url(url: &Url) -> Result<(), String> {
+pub(crate) fn check_url(url: &Url) -> Result<(), String> {
     const NO: &str = "That picture can't be loaded.";
     if !matches!(url.scheme(), "http" | "https") || url.as_str().len() > MAX_URL_CHARS || !url.username().is_empty() || url.password().is_some() {
         return Err(NO.into());
@@ -77,7 +77,7 @@ impl Resolve for PublicOnly {
     }
 }
 
-fn build_client(proxy: Option<&str>) -> Result<reqwest::Client, String> {
+pub(crate) fn build_client(proxy: Option<&str>) -> Result<reqwest::Client, String> {
     let redirects = reqwest::redirect::Policy::custom(|attempt| {
         if attempt.previous().len() >= MAX_REDIRECTS || check_url(attempt.url()).is_err() { attempt.stop() } else { attempt.follow() }
     });

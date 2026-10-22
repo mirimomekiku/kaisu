@@ -23,7 +23,7 @@ export interface ShortcutContext {
   playerPrevious: () => void;
 }
 
-const PAGES: Page[] = ["search", "downloads", "history", "settings", "library"];
+const PAGES: Page[] = ["search", "downloads", "history", "settings", "library", "podcasts"];
 
 /** Global keyboard shortcuts. The cheat sheet (lib/shortcuts.ts) lists what is handled here. */
 export function useShortcuts(ctx: ShortcutContext) {
@@ -46,7 +46,7 @@ export function useShortcuts(ctx: ShortcutContext) {
       } else if (mod && !e.altKey && !e.shiftKey && ["f", "l", "k"].includes(key)) {
         e.preventDefault();
         c.focusSearch();
-      } else if (mod && !e.altKey && ["1", "2", "3", "4", "5"].includes(key)) {
+      } else if (mod && !e.altKey && ["1", "2", "3", "4", "5", "6"].includes(key)) {
         e.preventDefault();
         c.goTo(PAGES[Number(key) - 1]);
       } else if (mod && key === ",") {

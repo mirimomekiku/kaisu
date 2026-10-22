@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { AlertCircle, Loader2 } from "lucide-react";
 import AppBanners from "./components/AppBanners";
 import LibraryPage from "./components/LibraryPage";
+import PodcastsPage from "./components/PodcastsPage";
 import PlayerBar from "./components/PlayerBar";
 import { useConfirm } from "./components/ConfirmDialog";
 import DownloadsPage from "./components/DownloadsPage";
@@ -25,6 +26,7 @@ import { useClipboardOffer } from "./hooks/useClipboardOffer";
 import { useDownloadActions } from "./hooks/useDownloadActions";
 import { useLeftovers } from "./hooks/useLeftovers";
 import { useLibrary } from "./hooks/useLibrary";
+import { usePodcasts } from "./hooks/usePodcasts";
 import { MediaActionsContext, useMediaDialogs } from "./hooks/useMediaDialogs";
 import { useLoudness } from "./hooks/useLoudness";
 import { PlayerContext, useCreatePlayer, usePlayerState } from "./hooks/usePlayer";
@@ -174,6 +176,9 @@ export default function App() {
     setChecked: flow.setChecked,
     setBatchNotice: flow.setBatchNotice,
   });
+
+  const podcastsReady = files.ready && !!engine?.ready;
+  const podcasts = usePodcasts({ ready: podcastsReady, outDir: effectiveOutDir, submitDownloads: actions.submitDownloads, showFlash });
 
   // Unfinished downloads left in the download folder, looked for once when nothing is running.
   const leftovers = useLeftovers({
@@ -415,7 +420,7 @@ export default function App() {
     <MediaActionsContext.Provider value={mediaDialogs.actions}>
     <div className="app">
       <Toolbar
-        title={page === "settings" ? "Settings" : page === "library" ? "Library" : null}
+        title={page === "settings" ? "Settings" : page === "library" ? "Library" : page === "podcasts" ? "Podcasts" : null}
         view={currentView}
         viewOptions={viewOptions}
         onView={setView(viewKey)}
@@ -508,6 +513,7 @@ export default function App() {
         />
 
         <main className="content" aria-label={page}>
+          {page === "podcasts" && <PodcastsPage api={podcasts} ready={podcastsReady} />}
           {page === "search" && (
             <SearchPage
               flow={flow}
