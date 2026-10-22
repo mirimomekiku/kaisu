@@ -10,10 +10,10 @@ Kaisu is a desktop downloader for videos and music (Tauri v2: Rust backend in `d
 
 ## 1. Current state in one paragraph
 
-Everything from the audit and the two improvement rounds is done, tested and pushed. On top of that, a **music player** was started:
-steps 1 and 2 of a five-step audio roadmap are done (player bar, queue); **step 3 (the music library) is half done**: the Rust
-scanner and the pure TypeScript logic exist and are tested, but **there is no Library page yet** (no sidebar entry, no UI). The
-last commit before this document builds on everything below. **The final state was not re-verified end to end** (see section 6).
+Everything from the audit and the two improvement rounds is done, tested and pushed, and so is the audio roadmap except the last
+item: the **music player** (steps 1-2), the **library page** (3), **lyrics, tag editor and playlists** (4) and **volume leveling** (first
+half of 5) are on `main`. **Podcast subscriptions (second half of step 5) are started but uncommitted and do not compile yet**: see
+section 5. Nothing has been run in the real app (see section 6).
 
 ---
 
@@ -75,7 +75,8 @@ npm run test:ui -- round8           # one or more suites by file name (without .
 | `search.rs`, `links.rs` | Search sources (YouTube, SoundCloud, YouTube Music "Songs") and playlist listing. Only sources verified live are offered. |
 | `leftovers.rs` | Finds/removes leftover `.part` files in the download folder. |
 | `media.rs` | `play_in_app` (asset-protocol access for one file), 20-second `preview_clip`, `convert_audio` (ffmpeg, never overwrites). |
-| `library.rs` | **New, half wired.** Scans sound files with `lofty` 0.25, reads tags/properties, caches to `app_data/library.json`, serves covers. |
+| `library.rs` | Scans sound files with `lofty` 0.25, reads tags/properties, caches to `app_data/library.json`, serves covers. |
+| `lyrics.rs`, `tags.rs`, `loudness.rs` | Lyrics lookup/reading, safe tag writing, loudness measuring (all path-checked with `Scope::media_file`). |
 | `tray.rs` | Tray icon/menu. Music playing counts as "busy" (closing the window keeps Kaisu alive); tray has play/pause/next/previous items. |
 
 ### Frontend, `desktop/src/`
@@ -83,7 +84,7 @@ npm run test:ui -- round8           # one or more suites by file name (without .
   `useDownloadActions`, `useFinishedFiles`, `useLeftovers`, `useMediaDialogs`, `usePlayer`, `useDownloads`, ...) and pure code in `lib/`
   (`extra.ts` builds request options, `siteRules.ts`, `queueOrder.ts`, `library.ts`, `audioEngine.ts`, ...).
 - `lib/api.ts` is the **only** place that calls `invoke(...)`; keep all command wrappers there.
-- **Pages:** Search, Downloads, History, Settings. The planned **Library** page is not built yet.
+- **Pages:** Search, Downloads, History, Library (Songs/Albums/Artists/Playlists), Settings. Podcasts is next.
 - **Test mock of the backend:** `e2e/mock/core.ts` (commands, `convertFileSrc` returning a real silent WAV, `__mock` switches).
   Every new Rust command needs a case there or UI tests throw `unmocked command`.
 - Persistent data goes through `lib/storage.ts` (plugin-store file `kaisu.json`): settings, history, queue, `player`, `positions`.
@@ -97,59 +98,66 @@ npm run test:ui -- round8           # one or more suites by file name (without .
    failing Windows-path test.
 2. **Second round:** `App.tsx` split; queue order (drag, position `#n`) and per-download speed limit; leftover `.part` finder;
    in-app player/preview/convert-to-audio; site rules; custom-args allowlist; YouTube Music search; docs.
-3. **Music player (this session's end), committed with this document:**
-   - **Step 1, done:** `lib/audioEngine.ts` (queue, resume of long files, speed, sleep timer, repeat/shuffle, error mapping),
-     `lib/positions.ts` (remember position only for files over 10 minutes), `lib/mediaSession.ts` (OS media keys/overlay),
-     `hooks/usePlayer.ts` (creates the engine, saves/restores queue + positions), `components/PlayerBar.tsx`, tray controls,
-     shortcuts Ctrl+Shift+Space / Ctrl+Shift+Left/Right.
-   - **Step 2, done:** `components/QueuePanel.tsx` (drag-reorder, jump, remove, clear), "Play next"/"Add to queue" on audio files,
-     History multi-select "Play N songs", shuffle/repeat, queue persisted across restarts.
-   - **Step 3, half done:** `library.rs` (+ 8 tests), `lib/library.ts` (+ tests: group albums/artists, search, sort, quality label),
-     `lib/imageLoader.ts` (shared picture cache; thumbnails and covers both use it), `lib/covers.ts`, `CoverArt` in `Picture.tsx`,
-     the bar shows a cover for any track and gives the engine its URL (`engine.setCover`) for the OS overlay.
-
-Tests at the time of writing: about 203 vitest tests, about 140 Rust tests, UI suites `round3`..`round8` (round8 = player + queue, 56 checks).
+3. **Music player, steps 1-2:** `lib/audioEngine.ts`, `lib/positions.ts`, `lib/mediaSession.ts`, `hooks/usePlayer.ts`,
+   `components/PlayerBar.tsx`, `QueuePanel.tsx`, tray controls, shortcuts, queue persisted across restarts.
+4. **Step 3, the library:** `library.rs` scanner/cache, `lib/library.ts`, `hooks/useLibrary.ts`, `hooks/useVirtualRows.ts`,
+   `components/LibraryPage.tsx` (Songs virtualized / Albums / Artists / Playlists, search, format filter, sort, rescan), sidebar entry
+   "Music > Library", Ctrl+5. Suite `round9` (45 checks).
+5. **Step 4:** `lyrics.rs` + `lib/lrc.ts` + `LyricsPanel.tsx` (synced/plain lyrics, click to seek, opt-in LRCLIB lookup);
+   `tags.rs` + `lib/tagEdit.ts` + `TagEditor.tsx` (edits a temp copy, verifies, then renames; whole-album edit);
+   `lib/playlists.ts` + `hooks/usePlaylists.ts` + `PlaylistPicker.tsx` + `PlaylistsView.tsx` (stored in plugin-store key `playlists`,
+   play/queue/rename/reorder/delete, export `.m3u8` via `export_text`, which now allows `.m3u`/`.m3u8`). Suite `round10` (49 checks).
+6. **Step 5, loudness (done, pushed as `3f68f03`):** `loudness.rs` (`library_analyze`, parses `loudnorm` JSON from stderr; new
+   `proc::run_capture_stderr`), `lib/loudness.ts` (`levelGain`: never boosts, target -16 LUFS), `hooks/useLoudness.ts` (sets
+   `engine.setLevelGain` for the playing song, measures an unmeasured one lazily), `useLibrary` gained `measure`/`analyse`/`stopAnalysing`,
+   Library page button "Measure loudness (N)", Settings toggle `levelVolume` (default off). Suite `round11` (10 checks).
 
 ---
 
 ## 5. What to do next (in this order)
 
-### Finish step 3: the Library page (UI only; backend and logic exist)
-1. `hooks/useLibrary.ts`: on `files.ready` call `libraryLoad()` (instant, cached) then `libraryScan(progress)` once; expose
-   `{ tracks, scanning: {done,total}|null, scan() }`. Rescan (debounced ~2 s) when `history.length` grows after the first scan.
-2. `hooks/useVirtualRows.ts`: fixed-row-height windowing for the Songs list (a library can be thousands of rows).
-3. `components/LibraryPage.tsx`: search box (`filterTracks`), view switch **Songs / Albums / Artists**, format filter, sort, "Rescan"
-   with progress, counts. Songs: virtualized rows, double-click plays from there (queue the next ~500 filtered tracks), row buttons
-   Play next / Add to queue / Show in folder. Albums: cover grid, then an album detail view with Play album / Play next / Add to queue.
-   Artists: list; click filters Albums by that artist. Use `CoverArt` for covers, `toPlayerTrack` for the player.
-4. **Wire it:** `Page` type in `components/Sidebar.tsx` gets `"library"` plus a `songCount` prop and a "Music > Library" item
-   (the Sidebar edit was deliberately reverted so no dead link shipped; the first sidebar header "Library" should be renamed to
-   "Download" to avoid two things called Library); `App.tsx` renders the page; `Toolbar` `title` should be `"Library"` on that page
-   (hides the layout switcher); `useShortcuts` `PAGES` gets a fifth page for Ctrl+5; add it to `lib/shortcuts.ts`.
-5. **Mocks + tests:** add `library_load`, `library_scan` (use a `Channel` and send progress), `library_cover` to `e2e/mock/core.ts`
-   (cover: reject for some paths to test the placeholder); write `e2e/suites/round9.mjs` (search, views, play from list, album detail,
-   rescan, empty state). Update any test that looks for the sidebar header text.
+### Finish step 5: podcasts (started, UNCOMMITTED, does not compile yet)
+Uncommitted working-tree changes: `Cargo.toml`/`Cargo.lock` (adds `quick-xml = "0.42"`), `src/lib.rs` (registers `mod podcast;` and
+`podcast::podcast_fetch`), `src/thumbs.rs` (`check_url` and `build_client` made `pub(crate)`: reused for the public-hosts-only HTTP
+rules), and the new `src/podcast.rs`.
 
-### Step 4: lyrics, tag editor, playlists
-- **Synced lyrics:** Rust `read_lyrics(path)` (inside `Scope`, sibling `.lrc` first, then embedded plain lyrics via lofty
-  `ItemKey::Lyrics`); `lib/lrc.ts` parser (timestamps `[mm:ss.xx]`, offsets) with tests; a lyrics panel that highlights the current
-  line from `usePlayerTime`. LRCLIB lookups already exist for downloads and need consent (`lyricsConsent`).
-- **Tag editor:** Rust `write_tags(path, edit)` with lofty (`Option<String>` per field, `Some("")` removes). **Write a temp copy, re-read
-  to verify, then rename over the original** (the file may be open in the player on Windows: report a clear error). Dialog for one
-  track and bulk-edit for an album; rescan the changed files afterwards. `library.rs` tests already show how to build tagged WAV files.
-- **Playlists:** stored in plugin-store (`playlists`), "Add to playlist" menu, play playlist, export `.m3u` (extend `export_text`'s allowed
-  extensions in `files.rs`; keep its path checks).
+**`podcast.rs` state:** has `Feed`/`Episode` types, `parse_duration`, `parse_feed(xml)` (a quick-xml event loop with an element stack),
+the `podcast_fetch(url, proxy)` command (5 MB cap, 25 s timeout, public hosts only, enclosure and image URLs filtered with `check_url`,
+max 500 episodes) and 5 tests. It was last compiled against **quick-xml 0.42, whose API differs from older docs**, and the last
+`cargo test --lib podcast` still had compile errors:
+- `Attribute::normalized_value()` takes an `XmlVersion` argument (the old `unescape_value()` is deprecated); find the right way to get
+  the attribute text (look at `~/.cargo/registry/src/*/quick-xml-0.42.0/src/events/attributes.rs`).
+- `BytesText` has no `.decode()`: text must be unescaped another way (check `events/mod.rs`; entity references arrive as separate
+  `Event::GeneralRef` events, which the code already handles for `&amp;`, `&#169;` etc.). Check `BytesCData` the same way.
+- Element and attribute names are `&str` in 0.42 (already adapted with sed). If the API is too awkward, `roxmltree` is a fine
+  alternative (read-only DOM, no entity expansion problems): swap it in and keep the tests.
+The tests in the file define the expected behaviour (entities, CDATA, iTunes image preferred over `<image><url>`, items without audio or
+with private addresses skipped, guid fallback to the file URL, 500 cap, duration formats). Make them pass, then `cargo clippy`.
 
-### Step 5: loudness and podcasts
-- **Loudness:** Rust `analyze_loudness(path)` runs `ffmpeg -i f -af loudnorm=print_format=json -f null -` and parses `input_i` from
-  **stderr** (`proc::run_capture` returns only stdout on success: add a variant that returns stderr). Store LUFS in the library cache
-  (`LibTrack.loudness` already exists). Apply with `engine.setLevelGain(db)` = `min(0, -16 - lufs)`: this is **volume-only (never boosts)**
-  on purpose, because Web Audio `createMediaElementSource` can output silence for cross-origin asset URLs and could not be tested here.
-  Analyse lazily when a track starts, plus an "Analyse library" button with progress; a Settings toggle.
-- **Podcasts:** Rust `podcast.rs` (fetch RSS through the proxy with a size cap and the same public-host rules as `thumbs.rs`, parse with
-  `quick-xml` or `roxmltree`), subscriptions in the store, check on start and every ~6 hours, auto-download new episodes by queueing the
-  enclosure URL with preset `"best"` (not `"audio"`: that would re-encode) into `<download>/Podcasts/<show>/` (inside the registered
-  folder so move/delete still work). Resume positions already work for long files.
+**Still to build:**
+1. `lib/api.ts`: `podcastFetch(url)` wrapper (`invoke("podcast_fetch", { url, proxy: currentProxy })`, like `lyricsFind`) and types.
+2. `lib/podcasts.ts` (+ vitest): subscription type `{ id, url, title, image?, auto: boolean, seen: string[] (episode ids, cap ~500), checked: number }`,
+   `sanitize`, `newEpisodes(feed, seen)`, folder name for a show (safe file name, reuse the idea of `m3uFileName` in `lib/playlists.ts`),
+   parse the feed's `published` text with `Date.parse`.
+3. Persistence in `lib/storage.ts` (`loadPodcasts` / `savePodcasts`, store key `podcasts`; copy the playlists pattern) and a
+   `hooks/usePodcasts.ts` (copy `usePlaylists.ts`): subscribe (fetch, then mark all current episodes as seen so nothing floods the
+   queue), unsubscribe, toggle auto-download, check all on start and every ~6 hours, never overlapping.
+4. Downloading episodes: use `submitDownloads` from `useDownloadActions` (see `DownloadReq`): `preset: "best"` (**not** `"audio"`: that
+   re-encodes), `outDir = <download folder>/Podcasts/<show>` (inside the registered folder so move/delete/library scan still work),
+   `title` = episode title, `thumbnail` = feed image. The library then picks the files up on its normal rescan after a download.
+5. `components/PodcastsPage.tsx` + Sidebar item "Podcasts" under the "Music" header (`Page` type in `Sidebar.tsx`, `App.tsx`, toolbar
+   title, `lib/shortcuts.ts` / `useShortcuts` if you want Ctrl+6): add-feed box with Subscribe, list of shows, a show view listing
+   episodes (title, date, length, Download button, "new" badge), Unsubscribe, "Download new episodes automatically" checkbox.
+   Say plainly in the UI that adding a feed contacts that website (and that auto-download checks it every few hours).
+6. Tests: a `podcast_fetch` case in `e2e/mock/core.ts` (e.g. `__mock.feeds[url]`, `feedFail`), suite `e2e/suites/round12.mjs`
+   (subscribe, episodes listed, download queues with the right folder/preset, seen episodes not repeated, auto-download of a new
+   episode, unsubscribe, bad feed message). Follow `round10.mjs` for helpers (`open`, `nav`, `check`, `calls`, `waitCalls`).
+
+### Then
+- Update this file, run the full verification (section 2 commands; run UI suites one at a time), commit by feature (author only the
+  user, no co-author lines) and push to `main` when asked.
+- Small polish noted on the way: the Library bar's search/format/sort controls still show on the Playlists view (they do nothing there);
+  a song that can't be measured stays "unmeasured" and the "Measure loudness (N)" button keeps counting it (it is not retried this session).
 
 ### Other open items from earlier suggestions
 Pin tool hashes for yt-dlp/ffmpeg/Deno instead of trusting the same-release checksum file; sign the Windows exe; CI for Windows + Linux
@@ -160,14 +168,15 @@ screen readers); subscriptions for channels; auto-update of Kaisu itself.
 
 ## 6. Honest status and risks
 
-- **Not re-verified at the end:** the last full UI run (all suites) was green apart from the Edge-only `chrome` checks **before** the
-  final library/cover changes. After them only `tsc` (clean) and `vitest` (203 pass) were run. `Picture.tsx`/`thumbs.ts` were refactored onto
-  `imageLoader.ts` and the player bar gained cover loading, so **run `round6`, `round7`, `round8` first** (thumbnails, history, player).
-  Rust: `library.rs` tests passed (8); run the full `cargo test --lib` too.
-- **Never run for real:** the actual window, ffmpeg conversion, the preview download, `.part` resume, the credential store off Windows,
-  Media Session with real hardware keys, tray music items, `lofty` on real MP3/M4A/FLAC (tests use generated WAV files only).
+- **Last verified:** `tsc` clean, vitest 244 tests pass, `cargo test --lib` 156 pass (before `podcast.rs`), UI suites `round9` (45),
+  `round10` (49), `round11` (10) pass. The older suites (`round3`..`round8`, `flow`, `features`, `queue`, ...) passed at earlier points
+  but were **not all re-run after the library/lyrics/tags/playlists/loudness work**, and `cargo clippy` was not re-run. Do a full pass.
+- **Never run for real:** the actual window, ffmpeg conversion and loudness measuring, the preview download, `.part` resume, the credential
+  store off Windows, Media Session with real hardware keys, tray music items, `lofty` on real MP3/M4A/FLAC (tests use generated WAV files),
+  LRCLIB lookups, tag writing on real files (the temp-copy + verify + rename path is unit-tested only), `loudnorm` output parsing on real ffmpeg.
 - **Format support:** the Windows web view plays MP3, M4A/AAC, Opus, OGG, FLAC, WAV, not every container (MKV is unreliable); the player shows an
-  error and offers "Open in your player" for video files only. A library should eventually badge files the player can't decode.
+  error and offers "Open in your player" for video files only.
 - **Design decisions worth keeping:** queue resume threshold is 10 minutes (`REMEMBER_FROM_SECONDS`); the saved queue strips temporary
-  cover URLs; `engine.position` has its own subscription (it changes 4x a second) so only the bar re-renders; lyrics, tags and any other
-  third-party lookup must stay opt-in with a consent dialog (as lyrics did).
+  cover URLs; `engine.position` has its own subscription (it changes 4x a second) so only the bar re-renders; leveling is volume-only
+  (Web Audio `createMediaElementSource` can output silence for cross-origin asset URLs); lyrics, tags and any other third-party lookup
+  must stay opt-in; the page never gets to pick arbitrary paths (always `Scope::media_file`).
