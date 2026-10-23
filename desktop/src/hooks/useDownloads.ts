@@ -7,13 +7,14 @@ import {
   type ExtraOptions,
   type Preset,
 } from "../lib/api";
-import { isTransient, retryDelaySeconds, isRateLimited, retryAfterSeconds } from "../lib/errors";
+import { isTransient, retryDelaySeconds, isRateLimited, retryAfterSeconds, RETRY } from "../lib/errors";
 import { reorderWaiting } from "../lib/queueOrder";
 import { sanitizeDownloadQueue } from "../lib/downloadValidation";
 import { hostOf } from "../lib/links";
 import { uniqueDownloads } from "../lib/downloadIdentity";
 export { sameDownload } from "../lib/downloadIdentity";
 import { networkAllocation } from "../lib/networkBudget";
+import { pickStartable, resourceGate, type ResourceGate } from "../lib/queueStart";
 import { redactText } from "../lib/redact";
 import type { SavedDownload } from "../lib/storage";
 import { editWaitingDownloads, type QueueEdit } from "../lib/queueEdit";
@@ -111,8 +112,8 @@ export function useDownloads(concurrency: number, onCompleted: (item: DownloadIt
   const runs = useRef(new Map<string, { nativeId: string; terminal: boolean }>());
   const cooldowns = useRef(new Map<string, number>());
   const resourceKey = JSON.stringify([concurrency, limits.globalRate ?? "", limits.fragments ?? 8]);
-  const resources = useRef(resourceKey);
-  const draining = useRef(false);
+  const gate = useRef<ResourceGate>({ key: resourceKey, draining: false });
+  const lastResources = useRef(resourceKey);
   const stop = useCallback((id: string) => { const run = runs.current.get(id); return run ? cancelDownload(run.nativeId) : Promise.resolve(); }, []);
   const pausing = useRef(new Set<string>());
   /** Downloads the schedule stopped (or restarted to change their speed limit); they carry on by themselves. */
@@ -190,7 +191,7 @@ export function useDownloads(concurrency: number, onCompleted: (item: DownloadIt
           const it = itemsRef.current.find((x) => x.id === id);
           const attempt = (it?.attempt ?? 0) + 1;
           const rateLimited = isRateLimited(e.message);
-          const wait = Math.max(retryDelaySeconds(attempt, Math.random()), rateLimited ? 60 : 0, retryAfterSeconds(e.message)) * 1000;
+          const wait = Math.max(retryDelaySeconds(attempt, Math.random()), rateLimited ? RETRY.rateLimitCooldown : 0, retryAfterSeconds(e.message)) * 1000;
           if (it && rateLimited) {
             const host = hostOf(it.url), until = Math.max(cooldowns.current.get(hostOf(it.url)) ?? 0, Date.now() + wait);
             cooldowns.current.set(host, until);
@@ -216,8 +217,9 @@ export function useDownloads(concurrency: number, onCompleted: (item: DownloadIt
   useEffect(() => {
     if (policy.blocked) return;
     const running = items.filter((it) => isActive(it.status)).length;
-    if (resources.current !== resourceKey || (draining.current && running > 0)) return;
-    draining.current = false;
+    const opened = resourceGate(gate.current, resourceKey, running);
+    gate.current = opened.gate;
+    if (!opened.canStart) return;
     const allocation = networkAllocation(concurrency, limits.fragments, limits.globalRate);
     if (allocation.error) {
       if (items.some((item) => item.status === "queued")) setItems((prev) => prev.map((item) => item.status === "queued" ? { ...item, status: "error", errorMsg: `Total download speed: ${allocation.error}` } : item));
@@ -226,22 +228,7 @@ export function useDownloads(concurrency: number, onCompleted: (item: DownloadIt
     const free = Math.max(0, allocation.slots - running);
     if (free === 0) return;
 
-    // `items` is newest-first, so the oldest queued item is last. Items waiting to retry sit out until due, and
-    // one website can be limited to a few downloads at a time.
-    const now = Date.now();
-    const perHost = new Map<string, number>();
-    for (const it of items) if (isActive(it.status)) perHost.set(hostOf(it.url), (perHost.get(hostOf(it.url)) ?? 0) + 1);
-    const siteLimit = limits.perSite;
-    const toStart: DownloadItem[] = [];
-    for (const it of items.slice().reverse()) {
-      if (toStart.length >= free) break;
-      if (it.status !== "queued" || started.current.has(it.id) || (it.retryAt ?? 0) > now) continue;
-      const host = hostOf(it.url);
-      if ((cooldowns.current.get(host) ?? 0) > now) continue;
-      if (siteLimit > 0 && (perHost.get(host) ?? 0) >= siteLimit) continue;
-      perHost.set(host, (perHost.get(host) ?? 0) + 1);
-      toStart.push(it);
-    }
+    const toStart = pickStartable(items, { free, now: Date.now(), cooldowns: cooldowns.current, perSite: limits.perSite, started: started.current });
     if (toStart.length === 0) return;
 
     for (const it of toStart) started.current.add(it.id);
@@ -274,11 +261,10 @@ export function useDownloads(concurrency: number, onCompleted: (item: DownloadIt
   useEffect(() => {
     const before = lastPolicy.current;
     lastPolicy.current = policy;
-    const changedResources = resources.current !== resourceKey;
-    resources.current = resourceKey;
+    const changedResources = lastResources.current !== resourceKey;
+    lastResources.current = resourceKey;
     if (before.blocked === policy.blocked && before.limit === policy.limit && !changedResources) return;
     const running = itemsRef.current.filter((it) => isActive(it.status));
-    if (changedResources) { draining.current = running.length > 0; setTick((n) => n + 1); }
     if (policy.blocked) {
       for (const it of running) {
         autoPaused.current.add(it.id);
