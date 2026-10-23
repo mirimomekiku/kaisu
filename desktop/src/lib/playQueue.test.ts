@@ -1,7 +1,22 @@
 import { describe, expect, it } from "vitest";
-import { insertAfter, moveItem, removeAt, shuffleAround, shuffled, unshuffle } from "./playQueue";
+import { insertAfter, moveItem, moveSelected, removeAt, shuffleAround, shuffled, unshuffle } from "./playQueue";
 
 const q = ["a", "b", "c", "d", "e"];
+
+describe("moving a selection", () => {
+  it("collects nonadjacent entries in queue order and follows the current entry", () => {
+    expect(moveSelected(q, 3, [3, 1], 0)).toEqual({ queue: ["b", "d", "a", "c", "e"], current: 1 });
+    expect(moveSelected(q, 2, [1, 3], 5)).toEqual({ queue: ["a", "c", "e", "b", "d"], current: 1 });
+  });
+  it("distinguishes repeated values by position", () => {
+    expect(moveSelected(["a", "a", "b"], 1, [0], 3)).toEqual({ queue: ["a", "b", "a"], current: 0 });
+  });
+  it("ignores impossible moves and returns the same list for unchanged order", () => {
+    for (const [indices, gap] of [[[1, 2], 2], [[0, 1, 2, 3, 4], 5], [[], 0], [[1], -1], [[1], 1.5]] as [number[], number][]) {
+      expect(moveSelected(q, 0, indices, gap).queue).toBe(q);
+    }
+  });
+});
 
 describe("insertAfter", () => {
   it("puts items right after the playing one", () => {

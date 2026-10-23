@@ -1,5 +1,17 @@
 // Operations on a play queue: a list of items and the place in it. They never change what they are given.
 
+/** Collect selected entries in their existing order and insert them at a gap in the original queue. */
+export function moveSelected<T>(queue: T[], current: number, indices: number[], gap: number): { queue: T[]; current: number } {
+  if (!Number.isInteger(gap) || gap < 0 || gap > queue.length) return { queue, current };
+  const selected = new Set(indices.filter((i) => Number.isInteger(i) && i >= 0 && i < queue.length));
+  if (!selected.size) return { queue, current };
+  const order = queue.map((_, i) => i);
+  const moving = order.filter((i) => selected.has(i)), rest = order.filter((i) => !selected.has(i));
+  const at = rest.filter((i) => i < gap).length;
+  const next = [...rest.slice(0, at), ...moving, ...rest.slice(at)];
+  return next.every((old, i) => old === i) ? { queue, current } : { queue: next.map((i) => queue[i]), current: next.indexOf(current) };
+}
+
 /** Inserts `items` right after position `index` (at the front when nothing is playing). */
 export function insertAfter<T>(queue: T[], index: number, items: T[]): T[] {
   const at = Math.min(Math.max(index + 1, 0), queue.length);

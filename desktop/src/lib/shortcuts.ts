@@ -36,6 +36,10 @@ export const SHORTCUT_GROUPS: Array<{ title: string; items: Array<{ keys: string
   {
     title: "Music player",
     items: [
+      { keys: ["Mod", "A"], action: "Select all tracks when the play queue is focused" },
+      { keys: ["Mod", "Z"], action: "Undo a queue edit when the play queue is focused" },
+      { keys: ["Delete"], action: "Remove selected queued tracks (also Backspace)" },
+      { keys: ["Space"], action: "Toggle the focused queue entry in the selection" },
       { keys: ["Mod", "Shift", "Space"], action: "Play or pause the music" },
       { keys: ["Mod", "Shift", "→"], action: "Next track (also the keyboard's media keys)" },
       { keys: ["Mod", "Shift", "←"], action: "Previous track, or the start of this one" },

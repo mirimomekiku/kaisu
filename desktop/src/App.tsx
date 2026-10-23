@@ -9,6 +9,7 @@ import MiniPlayer from "./components/MiniPlayer";
 import { useMiniPlayer } from "./hooks/useMiniPlayer";
 import { useListening } from "./hooks/useListening";
 import PlayerBar from "./components/PlayerBar";
+import QueueUndoNotice from "./components/QueueUndo";
 import { useConfirm } from "./components/ConfirmDialog";
 import DownloadsPage from "./components/DownloadsPage";
 import { QUEUE_VIEWS } from "./components/DownloadRow";
@@ -644,6 +645,7 @@ export default function App() {
       </div>
 
       {playerState.queue.length > 0 && <PlayerBar engine={player} onMini={() => void mini.change(true)} miniBusy={mini.busy} />}
+      <QueueUndoNotice engine={player} />
 
       <StatusBar
         left={

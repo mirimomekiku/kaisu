@@ -71,6 +71,90 @@ function make(initial: Positions = {}, resolve?: (t: Track) => Promise<string>, 
 
 afterEach(() => vi.useRealTimers());
 
+describe("queue selection edits and undo", () => {
+  it("removes only the selected duplicate occurrence and keeps the playing copy", async () => {
+    const { engine, audio, resolved } = make();
+    engine.play([A, A, B], 1); await flush(); audio.loaded(120); audio.currentTime = 23;
+    const keys = engine.getState().queueKeys;
+    expect(new Set(keys).size).toBe(3);
+    engine.removeMany([keys[0]]);
+    expect(engine.getState().queueKeys).toEqual([keys[1], keys[2]]);
+    engine.undoQueue();
+    expect(engine.getState()).toMatchObject({ queueKeys: keys, index: 1, playing: true });
+    expect(audio.currentTime).toBe(23); expect(resolved).toHaveLength(1); engine.dispose();
+  });
+  it("moves a selection and undoes it without reloading the playing track", async () => {
+    const { engine, audio, resolved } = make();
+    engine.play([A, B, C], 1); await flush(); audio.loaded(120); audio.currentTime = 14;
+    const keys = engine.getState().queueKeys;
+    engine.moveMany([keys[1], keys[2]], 0);
+    expect(engine.getState()).toMatchObject({ queue: [B, C, A], index: 0 });
+    engine.undoQueue();
+    expect(engine.getState()).toMatchObject({ queue: [A, B, C], index: 1, playing: true });
+    expect(audio.currentTime).toBe(14); expect(resolved).toHaveLength(1); engine.dispose();
+  });
+  it("removes the current selection once and undo preserves the successor's playback", async () => {
+    const { engine, audio, resolved } = make();
+    engine.play([A, B, C]); await flush();
+    engine.removeMany(engine.getState().queueKeys.slice(0, 2)); await flush();
+    audio.loaded(120); audio.currentTime = 9;
+    expect(engine.getState()).toMatchObject({ queue: [C], index: 0, playing: true });
+    engine.undoQueue();
+    expect(engine.getState()).toMatchObject({ queue: [A, B, C], index: 2, playing: true });
+    expect(audio.currentTime).toBe(9); expect(resolved).toEqual([A.path, C.path]); engine.dispose();
+  });
+  it("restores a cleared queue paused at its exact short-track position", async () => {
+    const { engine, audio } = make();
+    engine.play([A, B], 1); await flush(); audio.loaded(120); audio.currentTime = 34;
+    const keys = engine.getState().queueKeys;
+    engine.clear(); expect(engine.getState().queue).toEqual([]);
+    engine.undoQueue();
+    expect(engine.getState()).toMatchObject({ queue: [A, B], queueKeys: keys, index: 1, playing: false });
+    expect(engine.getTime().position).toBe(34);
+    engine.toggle(); await flush(); audio.loaded(120);
+    expect(audio.currentTime).toBe(34); expect(engine.getState().playing).toBe(true); engine.dispose();
+  });
+  it("restores duplicate membership and original order after shuffled edits", async () => {
+    const { engine } = make();
+    engine.play([A, A, B, C], 1); await flush();
+    const keys = engine.getState().queueKeys;
+    engine.toggleShuffle();
+    engine.removeMany([keys[0], keys[2]]);
+    engine.undoQueue(); engine.toggleShuffle();
+    expect(engine.getState()).toMatchObject({ queueKeys: keys, index: 1 }); engine.dispose();
+  });
+  it("updates paths and metadata for entries removed into history", () => {
+    const { engine } = make();
+    engine.restore([A, B], 0, 0); engine.remove(1);
+    engine.replacePath(B.path, "/moved/b.mp3");
+    engine.updateTrackDetails([{ ...B, path: "/moved/b.mp3", title: "Renamed" }]);
+    engine.undoQueue();
+    expect(engine.getState().queue[1]).toMatchObject({ path: "/moved/b.mp3", title: "Renamed" }); engine.dispose();
+  });
+  it("ignores stale keys and invalid gaps; additions reset undo", () => {
+    const { engine } = make(); engine.restore([A, B, C], 0, 0);
+    engine.removeMany(["missing"]); engine.moveMany(engine.getState().queueKeys, NaN);
+    expect(engine.getState().queueUndoLabel).toBeNull();
+    engine.remove(2); engine.enqueue([C]); engine.undoQueue();
+    expect(engine.getState().queue).toEqual([A, B, C]);
+    expect(engine.getState().queueUndoLabel).toBeNull(); engine.dispose();
+  });
+  it("caps history at twenty edits", () => {
+    const { engine } = make(); engine.restore([A, B, C], 0, 0);
+    for (let i = 0; i < 22; i++) engine.move(0, 1);
+    for (let i = 0; i < 20; i++) engine.undoQueue();
+    expect(engine.getState().queueUndoLabel).toBeNull();
+    expect(engine.getState().queue).toEqual([A, B, C]); engine.dispose();
+  });
+  it("does not start a late source after clearing and undoing a pending load", async () => {
+    let resolve!: (source: string) => void;
+    const { engine, audio } = make({}, () => new Promise((r) => { resolve = r; }));
+    engine.play([A, B]); await flush(); engine.clear(); engine.undoQueue();
+    resolve("asset://late"); await flush();
+    expect(audio.playCalls).toBe(0); expect(engine.getState()).toMatchObject({ playing: false, loading: false, queue: [A, B] }); engine.dispose();
+  });
+});
+
 describe("playing", () => {
   it("opens the first track and plays it", async () => {
     const { audio, engine, resolved } = make();

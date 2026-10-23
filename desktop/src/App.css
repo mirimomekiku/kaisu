@@ -1893,3 +1893,12 @@ select.field:disabled, select.source-select:disabled { opacity:.6; }
 .eq-band { display:flex; flex-direction:column; align-items:center; gap:7px; font-size:11px; }
 .eq-band input[type=range] { writing-mode:vertical-lr; direction:rtl; height:105px; width:24px; }
 .eq-band output { white-space:nowrap; font-size:10px; }
+.queuepanel .qp-head { flex-wrap: wrap; }
+.qp-selection, .queue-undo-notice { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--hairline); font-size: 11px; }
+.qp-selection-hint { flex-basis: 100%; }
+.queuepanel .qp-row[data-selected=true] { background: var(--select-2); color: var(--ink-inv); }
+.queuepanel .qp-row[data-selected=true] .qp-num { color: inherit; }
+.queuepanel .qp-row[data-selected=true] .dim { color: inherit; }
+.qp-selection, .qp-head { flex-shrink: 0; }
+.queuepanel .qp-row:focus-visible { outline: 2px solid var(--blue-edge); outline-offset: -2px; }
+.queue-undo-notice { background: var(--paper); justify-content: center; }

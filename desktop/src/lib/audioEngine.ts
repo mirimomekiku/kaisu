@@ -1,4 +1,4 @@
-import { insertAfter, moveItem, removeAt, shuffleAround, unshuffle } from "./playQueue";
+import { insertAfter, moveItem, moveSelected, shuffleAround, unshuffle } from "./playQueue";
 import { forget, remember, resumeAt, type Positions } from "./positions";
 import { relocatePositions } from "./relocation";
 import type { AudioProcessing } from "./equalizerGraph";
@@ -32,6 +32,8 @@ export type RepeatMode = "off" | "all" | "one";
 export type Sleep = { kind: "timer"; endsAt: number; fadeSeconds?: number; finishTrack?: boolean } | { kind: "track"; fadeSeconds?: number } | null;
 
 export interface PlayerState {
+  queueKeys: string[];
+  queueUndoLabel: string | null;
   phase: "idle" | "loading" | "buffering" | "playing" | "paused" | "failed";
   errorDetails: string | null;
   notice: string | null;
@@ -100,6 +102,7 @@ const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n
 const errorText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : "This file can't be played.");
 
 export const CANT_PLAY = "This file can't be played here. It may be damaged, or in a format Kaisu's player doesn't support.";
+interface QueueSnapshot { queue: Track[]; keys: string[]; index: number; position: number; duration: number; original: Track[] | null; originalKeys: string[] | null; shuffle: boolean; label: string }
 
 /** What to tell the user when the browser refuses to play, or `null` when it only means "a newer request replaced this one". */
 export function playbackError(e: unknown): string | null {
@@ -113,7 +116,10 @@ export function playbackError(e: unknown): string | null {
 export class PlayerEngine {
   private audio: AudioLike;
   private readonly deps: EngineDeps;
-  private state: PlayerState = { phase: "idle", errorDetails: null, notice: null, queue: [], index: -1, playing: false, loading: false, duration: 0, volume: 1, rate: 1, repeat: "off", shuffle: false, sleep: null, error: null };
+  private state: PlayerState = { queueKeys: [], queueUndoLabel: null, phase: "idle", errorDetails: null, notice: null, queue: [], index: -1, playing: false, loading: false, duration: 0, volume: 1, rate: 1, repeat: "off", shuffle: false, sleep: null, error: null };
+  private entrySequence = 0;
+  private queueHistory: QueueSnapshot[] = [];
+  private originalKeys: string[] | null = null;
   private time: PlayerTime = { position: 0, duration: 0 };
   private listeners = new Set<() => void>();
   private timeListeners = new Set<() => void>();
@@ -225,7 +231,8 @@ export class PlayerEngine {
   private now = () => (this.deps.now ?? Date.now)();
 
   private set(patch: Partial<PlayerState>) {
-    if (patch.queue && (patch.queue.length !== this.state.queue.length || patch.queue.some((t, i) => t.path !== this.state.queue[i]?.path))) { this.cancelPreload(); this.finishTail(false); }
+    if (patch.queue && !patch.queueKeys) patch.queueKeys = patch.queue.length === this.state.queueKeys.length ? this.state.queueKeys : this.freshKeys(patch.queue);
+    if (patch.queue && (patch.queue.length !== this.state.queue.length || patch.queue.some((t, i) => t.path !== this.state.queue[i]?.path || patch.queueKeys![i] !== this.state.queueKeys[i]))) { this.cancelPreload(); this.finishTail(false); }
     this.state = { ...this.state, ...patch };
     this.state.phase = this.state.error ? "failed" : this.state.index < 0 ? "idle" : this.state.loading ? this.state.playing ? "buffering" : "loading" : this.state.playing ? "playing" : "paused";
     this.listeners.forEach((fn) => fn());
@@ -248,13 +255,17 @@ export class PlayerEngine {
     this.saveNow();
     this.failedPaths.clear(); this.transitionFailures.clear();
     this.original = null;
+    this.originalKeys = null; this.forgetQueueHistory();
     let queue = tracks;
+    let keys = this.freshKeys(tracks);
     let index = Number.isFinite(start) ? clamp(Math.trunc(start), 0, tracks.length - 1) : 0;
     if (this.state.shuffle) {
       this.original = tracks;
-      ({ queue, current: index } = shuffleAround(tracks, index, this.deps.random));
+      this.originalKeys = keys;
+      const shuffled = shuffleAround(keys, index, this.deps.random);
+      queue = shuffled.queue.map((key) => tracks[keys.indexOf(key)]); keys = shuffled.queue; index = shuffled.current;
     }
-    this.set({ queue, index });
+    this.set({ queue, queueKeys: keys, index, queueUndoLabel: null });
     void this.load(index, true, { save: false });
   }
 
@@ -262,8 +273,8 @@ export class PlayerEngine {
   restore(tracks: Track[], index: number, position: number) {
     if (tracks.length === 0) return;
     const i = Number.isFinite(index) ? clamp(Math.trunc(index), 0, tracks.length - 1) : 0;
-    this.original = null;
-    this.set({ queue: tracks, index: i, duration: tracks[i].duration ?? 0 });
+    this.forgetQueueHistory(); this.original = null; this.originalKeys = null;
+    this.set({ queue: tracks, queueKeys: this.freshKeys(tracks), queueUndoLabel: null, index: i, duration: tracks[i].duration ?? 0 });
     this.pendingSeek = Number.isFinite(position) ? Math.max(0, position) : 0;
     this.seekRequested = true;
     this.unloaded = true;
@@ -448,15 +459,17 @@ export class PlayerEngine {
   }
 
   toggleShuffle() {
-    const { queue, index, shuffle } = this.state;
+    const { queue, queueKeys, index, shuffle } = this.state;
+    this.forgetQueueHistory();
     if (!shuffle) {
       this.original = queue;
-      const s = shuffleAround(queue, index, this.deps.random);
-      this.set({ shuffle: true, queue: s.queue, index: s.current });
+      this.originalKeys = queueKeys;
+      const s = shuffleAround(queueKeys, index, this.deps.random);
+      this.set({ shuffle: true, queue: s.queue.map((key) => queue[queueKeys.indexOf(key)]), queueKeys: s.queue, index: s.current, queueUndoLabel: null });
     } else {
-      const back = this.original ? unshuffle(queue, index, this.original) : { queue, current: index };
-      this.original = null;
-      this.set({ shuffle: false, queue: back.queue, index: back.current });
+      const back = this.originalKeys ? unshuffle(queueKeys, index, this.originalKeys) : { queue: queueKeys, current: index };
+      this.original = null; this.originalKeys = null;
+      this.set({ shuffle: false, queue: back.queue.map((key) => queue[queueKeys.indexOf(key)]), queueKeys: back.queue, index: back.current, queueUndoLabel: null });
     }
   }
 
@@ -528,19 +541,23 @@ export class PlayerEngine {
   enqueue(tracks: Track[]) {
     if (tracks.length === 0) return;
     if (this.state.queue.length === 0) return this.restoreFresh(tracks);
-    if (this.original) this.original = [...this.original, ...tracks];
-    this.set({ queue: [...this.state.queue, ...tracks] });
+    this.forgetQueueHistory();
+    const keys = this.freshKeys(tracks);
+    if (this.original) { this.original = [...this.original, ...tracks]; this.originalKeys = [...this.originalKeys!, ...keys]; }
+    this.set({ queue: [...this.state.queue, ...tracks], queueKeys: [...this.state.queueKeys, ...keys], queueUndoLabel: null });
   }
 
   /** Adds right after the current track. */
   playNext(tracks: Track[]) {
     if (tracks.length === 0) return;
     if (this.state.queue.length === 0) return this.restoreFresh(tracks);
+    this.forgetQueueHistory(); const keys = this.freshKeys(tracks);
     if (this.original) {
-      const at = this.original.indexOf(this.current as Track);
+      const at = this.originalKeys!.indexOf(this.state.queueKeys[this.state.index]);
       this.original = insertAfter(this.original, at, tracks);
+      this.originalKeys = insertAfter(this.originalKeys!, at, keys);
     }
-    this.set({ queue: insertAfter(this.state.queue, this.state.index, tracks) });
+    this.set({ queue: insertAfter(this.state.queue, this.state.index, tracks), queueKeys: insertAfter(this.state.queueKeys, this.state.index, keys), queueUndoLabel: null });
   }
 
   /** Nothing was queued: the first item becomes the current one, waiting to be played. */
@@ -549,35 +566,89 @@ export class PlayerEngine {
   }
 
   remove(at: number) {
-    if (!Number.isInteger(at)) return;
-    const { queue, index, playing } = this.state;
-    const r = removeAt(queue, index, at);
-    if (r.queue === queue) return;
+    if (Number.isInteger(at) && this.state.queueKeys[at]) this.removeMany([this.state.queueKeys[at]]);
+  }
+
+  removeMany(keys: string[]) {
+    const wanted = new Set(keys);
+    const { queue, queueKeys, index, playing } = this.state;
+    const kept = queueKeys.map((_, i) => i).filter((i) => !wanted.has(queueKeys[i]));
+    if (kept.length === queue.length) return;
     this.saveNow();
-    if (this.original) this.original = this.original.filter((t) => t !== queue[at]);
-    if (r.queue.length === 0) return this.clear();
-    if (r.removedCurrent) this.loadToken++;
-    this.set({ queue: r.queue, index: r.current });
-    if (r.removedCurrent) {
-      if (playing) void this.load(r.current, true, { save: false });
+    this.rememberQueueEdit(`Remove ${queue.length - kept.length} track${queue.length - kept.length === 1 ? "" : "s"}`);
+    if (!kept.length) return this.clearQueue(false);
+    if (this.original && this.originalKeys) { this.original = this.original.filter((_, i) => !wanted.has(this.originalKeys![i])); this.originalKeys = this.originalKeys.filter((key) => !wanted.has(key)); }
+    const removedCurrent = wanted.has(queueKeys[index]);
+    const current = removedCurrent ? Math.max(0, kept.indexOf(kept.find((i) => i > index) ?? kept[kept.length - 1])) : kept.indexOf(index);
+    const next = kept.map((i) => queue[i]);
+    // A source resolved for the removed track must never attach to its replacement.
+    if (removedCurrent) this.loadToken++;
+    this.set({ queue: next, queueKeys: kept.map((i) => queueKeys[i]), index: current });
+    if (removedCurrent) {
+      if (playing) void this.load(current, true, { save: false });
       else {
         this.pause();
-        this.hasSource = false; this.audio.src = "";
+        this.hasSource = false;
+        this.audio.src = "";
         this.unloaded = true;
-        this.pendingSeek = 0; this.seekRequested = true;
-        this.set({ playing: false, loading: false, error: null, errorDetails: null, duration: r.queue[r.current].duration ?? 0 });
-        this.setTime(0, r.queue[r.current].duration ?? 0);
+        this.pendingSeek = 0;
+        this.seekRequested = true;
+        this.set({ playing: false, loading: false, error: null, errorDetails: null, duration: next[current].duration ?? 0 });
+        this.setTime(0, next[current].duration ?? 0);
       }
     }
   }
 
   move(from: number, to: number) {
     if (!Number.isInteger(from) || !Number.isInteger(to)) return;
-    const m = moveItem(this.state.queue, this.state.index, from, to);
-    if (m.queue !== this.state.queue) this.set({ queue: m.queue, index: m.current });
+    const m = moveItem(this.state.queueKeys, this.state.index, from, to);
+    if (m.queue !== this.state.queueKeys) { this.rememberQueueEdit("Move track"); this.applyQueueOrder(m.queue, m.current); }
+  }
+
+  moveMany(keys: string[], gap: number) {
+    const wanted = new Set(keys);
+    const m = moveSelected(this.state.queueKeys, this.state.index, this.state.queueKeys.flatMap((key, i) => wanted.has(key) ? [i] : []), gap);
+    if (m.queue !== this.state.queueKeys) { this.rememberQueueEdit("Move selected tracks"); this.applyQueueOrder(m.queue, m.current); }
+  }
+
+  private applyQueueOrder(keys: string[], index: number) {
+    const tracks = new Map(this.state.queueKeys.map((key, i) => [key, this.state.queue[i]]));
+    this.set({ queue: keys.map((key) => tracks.get(key)!), queueKeys: keys, index });
+  }
+
+  private freshKeys(tracks: Track[]) { return tracks.map(() => `queue-${++this.entrySequence}`); }
+  private forgetQueueHistory() { this.queueHistory = []; }
+  private rememberQueueEdit(label: string) {
+    const position = this.unloaded ? this.pendingSeek : this.hasSource ? this.audio.currentTime : this.time.position;
+    this.queueHistory.push({ queue: this.state.queue, keys: this.state.queueKeys, index: this.state.index, position: Number.isFinite(position) ? position : 0, duration: this.state.duration || this.time.duration, original: this.original, originalKeys: this.originalKeys, shuffle: this.state.shuffle, label });
+    if (this.queueHistory.length > 20) this.queueHistory.shift();
+    this.set({ queueUndoLabel: label });
+  }
+
+  undoQueue() {
+    const saved = this.queueHistory.pop(); if (!saved) return;
+    const currentKey = this.state.queueKeys[this.state.index];
+    const current = saved.keys.indexOf(currentKey);
+    const live = new Map(this.state.queueKeys.map((key, i) => [key, this.state.queue[i]]));
+    const queue = saved.queue.map((track, i) => live.get(saved.keys[i]) ?? { ...track, cover: undefined });
+    this.originalKeys = saved.originalKeys;
+    const restored = new Map(saved.keys.map((key, i) => [key, queue[i]]));
+    this.original = saved.originalKeys ? saved.originalKeys.map((key) => restored.get(key)!) : null;
+    if (current < 0) {
+      this.pause(); this.loadToken++; this.cancelPreload(false); this.finishTail(false);
+      this.audio.src = ""; this.hasSource = false; this.unloaded = true;
+      this.pendingSeek = saved.position; this.seekRequested = true;
+    }
+    this.set({ queue, queueKeys: saved.keys, index: current >= 0 ? current : saved.index, shuffle: saved.shuffle, queueUndoLabel: this.queueHistory[this.queueHistory.length - 1]?.label ?? null,
+      ...(current < 0 ? { playing: false, loading: false, error: null, errorDetails: null, duration: saved.duration } : {}) });
+    if (current < 0) this.setTime(saved.position, saved.duration);
   }
 
   clear() {
+    this.clearQueue(true);
+  }
+  private clearQueue(remember: boolean) {
+    if (remember && this.state.queue.length) this.rememberQueueEdit("Clear queue");
     this.loadToken++;
     this.wantsPlay = false; this.resolving = false; this.clearWatchdog(); this.failedPaths.clear();
     this.saveNow();
@@ -587,6 +658,7 @@ export class PlayerEngine {
     this.audio.pause();
     this.audio.src = "";
     this.original = null;
+    this.originalKeys = null;
     this.unloaded = false;
     this.pendingSeek = 0;
     this.seekRequested = false;
@@ -733,6 +805,7 @@ export class PlayerEngine {
     const next = relocatePositions(positions, from, to);
     if (next !== positions) this.deps.setPositions(next);
     const swap = (queue: Track[]) => queue.map((t) => t.path === from ? { ...t, path: to, cover: undefined } : t);
+    this.queueHistory.forEach((saved) => { saved.queue = swap(saved.queue); });
     if (this.original) this.original = swap(this.original);
     this.set({ queue: swap(this.state.queue) });
     if (retryLoading) void this.load(this.state.index, true, { save: false });
@@ -753,6 +826,7 @@ export class PlayerEngine {
   updateTrackDetails(tracks: Track[]) {
     const info = new Map(tracks.map((track) => [track.path, track]));
     const swap = (queue: Track[]) => queue.map((track) => info.has(track.path) ? { ...track, ...info.get(track.path) } : track);
+    this.queueHistory.forEach((saved) => { saved.queue = swap(saved.queue); });
     if (this.original) this.original = swap(this.original);
     this.set({ queue: swap(this.state.queue) });
   }
