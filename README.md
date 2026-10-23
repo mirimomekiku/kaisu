@@ -48,6 +48,10 @@ works behind a proxy, and can check again if you installed the tools yourself. A
 **Finding your way**
 - Right-click a download or history row for its actions; Shift+F10 opens the same menu from the keyboard. Selected history rows also offer batch actions.
 - Downloads can be filtered by status; History actions groups export and cleanup. File actions groups queue, conversion, copy and delete controls on downloaded files, with Open and Play kept visible.
+- Downloads show preparation, downloading, conversion, extras and verification separately. Unknown sizes use indeterminate progress. Pause and cancel cover the entire job, including final helper processes; missing, empty or unreadable output is reported as a failure.
+- Destination checks group downloads by drive, reserve space for active jobs and allow three times the estimated size for downloading and conversion. Windows checks the complete generated path; Linux checks filename byte limits and the original recovery drive identity.
+- Interrupted downloads keep recovery records independently of the saved queue, with their original URL, destination, output choices and resolved format. Recovery reuses compatible partial files and may restart when they are unavailable. Discarding recovery records keeps media and partial files. Legacy partial-file scanning includes registered alternate destinations.
+- Copied download commands use PowerShell syntax on Windows and shell syntax on Linux, with the installed tool paths and redacted proxy passwords.
 - Settings opens with general preferences. Choose a section or search for a setting; changes save automatically.
 
 **Music**

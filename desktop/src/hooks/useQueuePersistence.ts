@@ -19,6 +19,7 @@ export function useQueuePersistence(items: DownloadItem[], loaded: boolean) {
         .filter((i) => i.status !== "completed")
         .map((i) => ({
           id: i.id,
+          recoveryId: i.recoveryId ?? i.id, estimatedBytes: i.estimatedBytes, expectedVolume: i.expectedVolume,
           title: i.title,
           url: i.url,
           thumbnail: i.thumbnail,

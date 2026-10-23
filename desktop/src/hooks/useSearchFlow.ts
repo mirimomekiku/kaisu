@@ -3,6 +3,7 @@ import type { Page } from "../components/Sidebar";
 import { classifyLink, errorText, getMediaInfo, getPlaylist, searchMedia, type LinkKind, type MediaInfo, type SearchResult } from "../lib/api";
 import { extractUrls } from "../lib/links";
 import { knownSource } from "../lib/sources";
+import { checkDownloadUrl } from "../lib/validate";
 import type { Settings } from "../lib/storage";
 
 const AUTO_INSPECT_DELAY_MS = 700;
@@ -90,6 +91,8 @@ export function useSearchFlow({ settings, settingsLoaded, settingsRef, engineRea
     async (arg?: string) => {
       const target = (arg ?? url).trim();
       if (!target) return;
+      const problem = checkDownloadUrl(target);
+      if (problem) { setErrorMessage(problem); return; }
 
       const token = ++inspectToken.current;
       lastAutoInspected.current = target;

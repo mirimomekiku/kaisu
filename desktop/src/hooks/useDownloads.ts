@@ -9,14 +9,20 @@ import {
 } from "../lib/api";
 import { isTransient, retryDelaySeconds } from "../lib/errors";
 import { reorderWaiting } from "../lib/queueOrder";
-import { editWaitingDownloads, type QueueEdit } from "../lib/queueEdit";
+import { safeConcurrency, sanitizeDownloadQueue } from "../lib/downloadValidation";
 import { canonicalUrl, hostOf } from "../lib/links";
 import type { SavedDownload } from "../lib/storage";
+import { editWaitingDownloads, type QueueEdit } from "../lib/queueEdit";
 
 export type DownloadStatus = "queued" | "downloading" | "processing" | "paused" | "completed" | "error" | "cancelled";
 
 export interface DownloadItem {
   id: string;
+  recoveryId?: string;
+  estimatedBytes?: number;
+  expectedVolume?: number;
+  stage?: "preparing" | "downloading" | "converting" | "extras" | "verifying";
+  indeterminate?: boolean;
   title: string;
   url: string;
   thumbnail: string;
@@ -46,6 +52,9 @@ export interface DownloadItem {
 }
 
 export interface EnqueueInput {
+  recoveryId?: string;
+  estimatedBytes?: number;
+  expectedVolume?: number;
   url: string;
   title: string;
   thumbnail: string;
@@ -94,6 +103,8 @@ export function useDownloads(concurrency: number, onCompleted: (item: DownloadIt
   const [tick, setTick] = useState(0);
   const [items, setItems] = useState<DownloadItem[]>([]);
   const started = useRef(new Set<string>());
+  const runs = useRef(new Map<string, { nativeId: string; terminal: boolean }>());
+  const stop = useCallback((id: string) => { const run = runs.current.get(id); return run ? cancelDownload(run.nativeId) : Promise.resolve(); }, []);
   const pausing = useRef(new Set<string>());
   /** Downloads the schedule stopped (or restarted to change their speed limit); they carry on by themselves. */
   const autoPaused = useRef(new Set<string>());
@@ -110,14 +121,23 @@ export function useDownloads(concurrency: number, onCompleted: (item: DownloadIt
     setItems((prev) => prev.map((it) => (it.id === id && !isFinished(it.status) ? { ...it, ...update(it) } : it)));
   }, []);
 
+  const handleMissingOutput = (id: string) => patch(id, () => ({ status: "error", errorMsg: "The downloader exited without producing an output file.", speed: null, eta: null }));
+
   const handleEvent = useCallback(
     (id: string, e: DownloadEvent) => {
       switch (e.kind) {
+        case "stage":
+          patch(id, (it) => it.status === "paused" ? {} : { stage: e.stage, status: e.stage === "preparing" ? "downloading" : "processing", indeterminate: true, speed: null, eta: null });
+          break;
+        case "warning":
+          warnings.current.set(id, e.message);
+          patch(id, () => ({ warning: e.message }));
+          break;
         case "progress":
-          patch(id, (it) => (it.status === "paused" ? {} : { status: "downloading", progress: Math.max(it.progress, e.pct), speed: e.speed, eta: e.eta }));
+          patch(id, (it) => (it.status === "paused" ? {} : { status: "downloading", stage: "downloading", indeterminate: e.pct == null || !Number.isFinite(e.pct), progress: e.pct != null && Number.isFinite(e.pct) ? Math.max(it.progress, Math.min(99, Math.max(0, e.pct))) : it.progress, speed: e.speed != null && Number.isFinite(e.speed) && e.speed >= 0 ? e.speed : null, eta: e.eta != null && Number.isFinite(e.eta) && e.eta >= 0 ? e.eta : null }));
           break;
         case "processing":
-          patch(id, (it) => (it.status === "paused" ? {} : { status: "processing", progress: 99, speed: null, eta: null }));
+          patch(id, (it) => (it.status === "paused" ? {} : { status: "processing", stage: "converting", indeterminate: true, progress: 99, speed: null, eta: null }));
           break;
         case "meta":
           patch(id, (it) => (it.placeholderTitle ? { title: e.title, placeholderTitle: false } : {}));
@@ -126,6 +146,7 @@ export function useDownloads(concurrency: number, onCompleted: (item: DownloadIt
           patch(id, (it) => ({ log: [...it.log, e.line].slice(-MAX_LOG_LINES) }));
           break;
         case "done": {
+          if (!e.path) { handleMissingOutput(id); break; }
           const done = itemsRef.current.find((it) => it.id === id);
           patch(id, () => ({ status: "completed", progress: 100, speed: null, eta: null, path: e.path }));
           if (done && !isFinished(done.status)) onCompletedRef.current({ ...done, path: e.path, warning: warnings.current.get(id) ?? done.warning });
@@ -175,7 +196,7 @@ export function useDownloads(concurrency: number, onCompleted: (item: DownloadIt
   useEffect(() => {
     if (policy.blocked) return;
     const running = items.filter((it) => isActive(it.status)).length;
-    const free = Math.max(0, concurrency - running);
+    const free = Math.max(0, safeConcurrency(concurrency) - running);
     if (free === 0) return;
 
     // `items` is newest-first, so the oldest queued item is last. Items waiting to retry sit out until due, and
@@ -197,13 +218,23 @@ export function useDownloads(concurrency: number, onCompleted: (item: DownloadIt
 
     for (const it of toStart) started.current.add(it.id);
     const ids = new Set(toStart.map((it) => it.id));
-    setItems((prev) => prev.map((it) => (ids.has(it.id) ? { ...it, status: "downloading" } : it)));
+    setItems((prev) => prev.map((it) => (ids.has(it.id) ? { ...it, status: "downloading", stage: "preparing", indeterminate: true, warning: undefined } : it)));
 
     for (const it of toStart) {
+      warnings.current.delete(it.id);
+      const run = { nativeId: newId(), terminal: false };
+      runs.current.set(it.id, run);
+      const receive = (e: DownloadEvent) => {
+        if (runs.current.get(it.id) !== run || run.terminal) return;
+        if (["done", "error", "cancelled"].includes(e.kind)) run.terminal = true;
+        handleEvent(it.id, e);
+      };
       startDownload(
-        { id: it.id, url: it.url, preset: it.preset, out_dir: it.outDir, extra: policy.limit ? { ...it.extra, rate_limit: policy.limit } : it.extra },
-        (e) => handleEvent(it.id, e),
-      ).catch((err) => handleEvent(it.id, { kind: "error", message: errorText(err) }));
+        { id: run.nativeId, recovery_id: it.recoveryId ?? it.id, estimated_bytes: it.estimatedBytes, expected_volume: it.expectedVolume, url: it.url, preset: it.preset, out_dir: it.outDir, extra: policy.limit ? { ...it.extra, rate_limit: policy.limit } : it.extra },
+        receive,
+      ).catch((err) => receive({ kind: "error", message: errorText(err) })).finally(() => {
+        if (runs.current.get(it.id) === run) runs.current.delete(it.id);
+      });
     }
   }, [items, concurrency, handleEvent, policy.blocked, policy.limit, limits.perSite, tick]);
 
@@ -219,7 +250,7 @@ export function useDownloads(concurrency: number, onCompleted: (item: DownloadIt
       for (const it of running) {
         autoPaused.current.add(it.id);
         pausing.current.add(it.id);
-        cancelDownload(it.id).catch(() => pausing.current.delete(it.id));
+        stop(it.id).catch(() => pausing.current.delete(it.id));
       }
       return;
     }
@@ -239,7 +270,7 @@ export function useDownloads(concurrency: number, onCompleted: (item: DownloadIt
     for (const it of running) {
       autoPaused.current.add(it.id);
       pausing.current.add(it.id);
-      cancelDownload(it.id).catch(() => pausing.current.delete(it.id));
+      stop(it.id).catch(() => pausing.current.delete(it.id));
     }
   }, [policy]);
 
@@ -267,7 +298,7 @@ export function useDownloads(concurrency: number, onCompleted: (item: DownloadIt
         started.current.add(id);
         setItems((prev) => prev.map((x) => (x.id === id ? { ...x, status: "cancelled" } : x)));
       } else {
-        cancelDownload(id).catch((e) => console.warn("cancel failed", e));
+        stop(id).catch((e) => console.warn("cancel failed", e));
       }
     },
     [],
@@ -283,7 +314,7 @@ export function useDownloads(concurrency: number, onCompleted: (item: DownloadIt
       setItems((prev) => prev.map((x) => (x.id === id ? { ...x, status: "paused" } : x)));
     } else if (isActive(it.status)) {
       pausing.current.add(id);
-      cancelDownload(id).catch((e) => {
+      stop(id).catch((e) => {
         pausing.current.delete(id);
         console.warn("pause failed", e);
       });
@@ -333,7 +364,7 @@ export function useDownloads(concurrency: number, onCompleted: (item: DownloadIt
     if (running) {
       autoPaused.current.add(id);
       pausing.current.add(id);
-      cancelDownload(id).catch(() => pausing.current.delete(id));
+      stop(id).catch(() => pausing.current.delete(id));
     }
   }, []);
 
@@ -359,7 +390,7 @@ export function useDownloads(concurrency: number, onCompleted: (item: DownloadIt
     setItems((prev) =>
       prev.map((it) =>
         it.id === id && (it.status === "error" || it.status === "cancelled")
-          ? { ...it, status: "queued", progress: 0, speed: null, eta: null, errorMsg: undefined, log: [], attempt: 0, retryAt: undefined, warning: undefined }
+          ? { ...it, status: "queued", progress: 0, speed: null, eta: null, stage: "preparing", indeterminate: true, errorMsg: undefined, log: [], attempt: 0, retryAt: undefined, warning: undefined }
           : it,
       ),
     );
@@ -375,8 +406,9 @@ export function useDownloads(concurrency: number, onCompleted: (item: DownloadIt
 
   /** Puts back what was unfinished last time. Things that were running come back paused, so nothing starts by surprise. */
   const restore = useCallback((saved: SavedDownload[]) => {
-    const restored: DownloadItem[] = saved.map((s) => ({
+    const restored: DownloadItem[] = sanitizeDownloadQueue(saved).map((s) => ({
       id: s.id,
+      recoveryId: s.recoveryId ?? s.id, estimatedBytes: s.estimatedBytes, expectedVolume: s.expectedVolume,
       title: s.title,
       url: s.url,
       thumbnail: s.thumbnail,

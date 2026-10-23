@@ -645,6 +645,7 @@ export default function MediaCard({ info, extras, presets, onSavePreset, onPrevi
                 </button>
                 {command !== null && (
                   <div className="pl-3.5 flex flex-col gap-1.5">
+                    <span className="dim">{/Win/i.test(navigator.platform) ? "PowerShell" : "Shell"} command. Proxy passwords stay redacted; replace them before running.</span>
                     <pre className="m-0 max-h-32 overflow-auto bg-white border border-[#b4b4b4] rounded-[3px] p-2 mono whitespace-pre-wrap break-all selectable" aria-label="Command">
                       {command}
                     </pre>

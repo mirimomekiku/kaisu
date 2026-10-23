@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::proc;
 
@@ -19,7 +19,7 @@ pub const TITLE_NOISE_REGEX: &str = r"(?i)\s*[(\[][^)\]]*(?:official|lyrics?|mus
 
 // ---- tags --------------------------------------------------------------------------------
 
-#[derive(Deserialize, Default, Clone, Debug, PartialEq)]
+#[derive(Deserialize, Serialize, Default, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct MetaOptions {
     pub title: Option<String>,
@@ -106,7 +106,7 @@ impl MetaOptions {
 
 // ---- cover art ---------------------------------------------------------------------------
 
-#[derive(Deserialize, Clone, Copy, Default, PartialEq, Eq, Debug)]
+#[derive(Deserialize, Serialize, Clone, Copy, Default, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum CoverMode {
     /// The site's thumbnail (audio files only, like before).
@@ -120,7 +120,7 @@ pub enum CoverMode {
     Custom,
 }
 
-#[derive(Deserialize, Default, Clone, Debug)]
+#[derive(Deserialize, Serialize, Default, Clone, Debug)]
 #[serde(default)]
 pub struct CoverOptions {
     pub mode: CoverMode,
@@ -205,7 +205,7 @@ async fn run_ffmpeg_replace(ffmpeg: &Path, args: &[String], tmp: &Path, target: 
 
 // ---- audio processing ----------------------------------------------------------------------
 
-#[derive(Deserialize, Default, Clone, Debug)]
+#[derive(Deserialize, Serialize, Default, Clone, Debug)]
 #[serde(default)]
 pub struct AudioExtras {
     /// `0` (best) to `9` for variable quality, or a bitrate like `192K`.
@@ -254,7 +254,7 @@ impl AudioExtras {
 
 // ---- lyrics --------------------------------------------------------------------------------
 
-#[derive(Deserialize, Clone, Copy, Default, PartialEq, Eq, Debug)]
+#[derive(Deserialize, Serialize, Clone, Copy, Default, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum LyricsMode {
     #[default]
@@ -409,8 +409,11 @@ pub fn judge_duration(found: Option<f64>, expected: Option<f64>) -> Verdict {
 
 pub async fn verify_file(ffprobe: &Path, file: &Path, expected: Option<f64>) -> Verdict {
     let path = file.display().to_string();
-    let args = ["-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", path.as_str()];
-    let found = proc::run_capture(ffprobe, &args, Duration::from_secs(30)).await.ok().and_then(|out| out.trim().parse::<f64>().ok());
+    let args = ["-v", "error", "-show_entries", "format=duration:stream=codec_type", "-of", "json", path.as_str()];
+    let probe = proc::run_capture(ffprobe, &args, Duration::from_secs(30)).await.ok().and_then(|out| serde_json::from_str::<serde_json::Value>(&out).ok());
+    let playable = probe.as_ref().and_then(|p| p["streams"].as_array()).is_some_and(|streams| streams.iter().any(|s| matches!(s["codec_type"].as_str(), Some("audio" | "video"))));
+    if !playable { return Verdict { ok: false, note: Some("This file has no readable audio or video stream.".into()) }; }
+    let found = probe.as_ref().and_then(|p| p["format"]["duration"].as_str()).and_then(|d| d.parse::<f64>().ok());
     let size = tokio::fs::metadata(file).await.map(|m| m.len()).unwrap_or(0);
     if size == 0 {
         return Verdict { ok: false, note: Some("This file is empty.".into()) };

@@ -1,5 +1,6 @@
 import { Channel, convertFileSrc, invoke } from "@tauri-apps/api/core";
 import type { TagEditRequest } from "./tagEdit";
+import { checkDownloadUrl, checkSpeedLimit } from "./validate";
 
 export type Preset = "best" | "p1080" | "p720" | "audio";
 export type AudioFormat = "mp3" | "m4a" | "opus" | "flac" | "wav";
@@ -99,6 +100,9 @@ export interface ExtraOptions {
 }
 
 export interface DownloadRequest {
+  recovery_id?: string;
+  estimated_bytes?: number;
+  expected_volume?: number;
   id: string;
   url: string;
   preset: Preset;
@@ -107,8 +111,10 @@ export interface DownloadRequest {
 }
 
 export type DownloadEvent =
-  | { kind: "progress"; pct: number; speed: number | null; eta: number | null }
+  | { kind: "progress"; pct: number | null; speed: number | null; eta: number | null }
   | { kind: "processing" }
+  | { kind: "stage"; stage: "preparing" | "converting" | "extras" | "verifying" }
+  | { kind: "warning"; message: string }
   | { kind: "meta"; title: string }
   | { kind: "log"; line: string }
   | { kind: "checked"; ok: boolean; note: string | null }
@@ -327,6 +333,8 @@ export const setLyricsConsent = (agreed: boolean) => {
 
 /** Starts a download; resolves when yt-dlp exits. Progress arrives through `onEvent`. */
 export function startDownload(req: DownloadRequest, onEvent: (e: DownloadEvent) => void) {
+  const problem = checkDownloadUrl(req.url) || checkSpeedLimit(req.extra.rate_limit ?? "");
+  if (problem) return Promise.reject(new Error(problem));
   const channel = new Channel<DownloadEvent>();
   channel.onmessage = onEvent;
   // A queued download, a saved preset or a restored session may still ask for lyrics; without consent they are dropped here.
@@ -489,3 +497,9 @@ export interface ArtworkChoice { token: string; name: string }
 export const libraryChooseArtwork = () => invoke<ArtworkChoice | null>("library_choose_artwork");
 export const libraryArtworkPreview = (token: string) => invoke<ArrayBuffer>("library_artwork_preview", { token });
 export const libraryDiscardArtwork = (token: string) => invoke<void>("library_discard_artwork", { token });
+
+export interface DownloadRecovery { id: string; request: DownloadRequest; expected_path: string | null; resolved_format: string | null; updated: number }
+export const downloadRecovery = () => folderRegistration.then(() => invoke<DownloadRecovery[]>("download_recovery"));
+export const discardDownloadRecovery = (ids: string[]) => invoke<void>("discard_download_recovery", { ids });
+
+export const preflightDownloads = (requests: DownloadRequest[]) => invoke<Array<{ folder: string; free: number; needed: number; estimated: boolean }>>("preflight_downloads", { requests });

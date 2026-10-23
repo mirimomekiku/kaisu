@@ -96,7 +96,7 @@ check("pause: display says paused", true);
 check("pause: not marked as cancelled/failed", await page.getByText("Cancelled", { exact: true }).filter({ visible: true }).count() === 0);
 await page.getByRole("button", { name: "Resume download" }).click();
 await waitCalls(page, "start_download", 2);
-check("resume: the same download starts again", (await calls(page, "start_download"))[0].args.req.id === (await calls(page, "start_download"))[1].args.req.id);
+check("resume: the same download uses a new attempt identity", (await calls(page, "start_download"))[0].args.req.recovery_id === (await calls(page, "start_download"))[1].args.req.recovery_id && (await calls(page, "start_download"))[0].args.req.id !== (await calls(page, "start_download"))[1].args.req.id);
 await page.waitForSelector("text=Done", { timeout: 20000 });
 check("resume: it finishes", true);
 

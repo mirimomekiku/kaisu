@@ -51,8 +51,8 @@ function barClass(i: DownloadItem): string {
 
 function Bar({ item }: { item: DownloadItem }) {
   return (
-    <div className={`progress ${barClass(item)}`} role="progressbar" aria-valuenow={Math.round(item.progress)} aria-valuemin={0} aria-valuemax={100} aria-label={`Progress for ${item.title}`}>
-      <i style={{ width: `${Math.max(item.progress, item.status === "queued" ? 0 : 4)}%` }} />
+    <div className={`progress ${barClass(item)}`} role="progressbar" aria-valuenow={item.indeterminate && (item.status === "downloading" || item.status === "processing") ? undefined : Math.round(item.progress)} aria-valuemin={0} aria-valuemax={100} aria-label={`Progress for ${item.title}`}>
+      <i className={item.indeterminate && (item.status === "downloading" || item.status === "processing") ? "download-indeterminate" : undefined} style={{ width: `${Math.max(item.progress, item.status === "queued" ? 0 : 4)}%` }} />
     </div>
   );
 }
@@ -103,15 +103,16 @@ function statusText(item: DownloadItem, advanced: boolean, position?: number): R
     case "paused":
       return <span className="dim">Paused{item.progress > 0 ? ` at ${Math.round(item.progress)}%` : ""}</span>;
     case "downloading":
+      if (item.stage === "preparing") return <span className="inline-flex items-center gap-1.5"><Loader2 className="w-3 h-3 animate-spin" />Preparing…</span>;
       return (
         <span className="inline-flex items-center gap-1.5">
           {item.speed == null && <Loader2 className="w-3 h-3 animate-spin" />}
-          {advanced ? formatSpeed(item.speed) || `${Math.round(item.progress)}%` : `${Math.round(item.progress)}%`}
+          {advanced && formatSpeed(item.speed) ? formatSpeed(item.speed) : item.indeterminate ? "Downloading…" : `${Math.round(item.progress)}%`}
           {item.eta != null && <span className="dim">{formatEta(item.eta)}</span>}
         </span>
       );
     case "processing":
-      return <span style={{ color: "#a56a00" }}>Finishing up…</span>;
+      return <span style={{ color: "#a56a00" }}>{item.stage === "verifying" ? "Verifying…" : item.stage === "extras" ? "Adding extras…" : "Converting…"}</span>;
     case "completed":
       return (
         <span className="inline-flex items-center gap-1" style={item.warning ? { color: "#a56a00" } : { color: "#2f8a2b" }} title={item.warning}>

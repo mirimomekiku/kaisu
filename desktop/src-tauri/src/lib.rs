@@ -1,6 +1,7 @@
 mod artwork;
 mod custom_args;
 mod download;
+mod download_manifest;
 mod duplicates;
 mod engine;
 mod files;
@@ -117,6 +118,8 @@ pub fn run() {
             custom_args::allowed_custom_options,
             custom_args::check_custom_args,
             leftovers::find_leftovers,
+            download_manifest::download_recovery,
+            download_manifest::discard_download_recovery,
             artwork::library_choose_artwork,
             artwork::library_artwork_preview,
             artwork::library_discard_artwork,
@@ -146,6 +149,7 @@ pub fn run() {
             transfer::transfer_files,
             transfer::delete_files,
             download::free_space,
+            download::preflight_downloads,
             search::search_media,
             net::test_proxy,
             tray::set_tray_status,

@@ -1902,3 +1902,9 @@ select.field:disabled, select.source-select:disabled { opacity:.6; }
 .qp-selection, .qp-head { flex-shrink: 0; }
 .queuepanel .qp-row:focus-visible { outline: 2px solid var(--blue-edge); outline-offset: -2px; }
 .queue-undo-notice { background: var(--paper); justify-content: center; }
+.download-recovery { padding: 8px 12px; border-bottom: 1px solid var(--hairline); background: var(--paper); font-size: 11px; max-height: 28vh; overflow: auto; }
+.download-recovery p { margin: 4px 0; }
+.download-recovery ul { max-height: 10vh; overflow: auto; margin: 4px 0; overflow-wrap: anywhere; }
+.progress i.download-indeterminate { width: 30% !important; animation: download-pulse 1.4s ease-in-out infinite alternate; }
+@keyframes download-pulse { from { transform: translateX(0); } to { transform: translateX(230%); } }
+@media (prefers-reduced-motion: reduce) { .progress i.download-indeterminate { animation: none; } }

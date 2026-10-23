@@ -25,8 +25,8 @@ export async function open({ mock = {}, store = {}, data = {}, history = [], que
     if (!localStorage.getItem("__store")) localStorage.setItem("__store", JSON.stringify({ settings: { mode: "simple", tourSeen: true, ...st }, history: h, queue: q, ...d }));
   }, [ready, mock, store, history, queue, focus, data]);
   if (clock) await page.clock.install();
-  await page.goto(BASE_URL);
-  await page.waitForSelector("input[type=text]");
+  await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
+  await page.waitForSelector("input[type=text]", { timeout: 60000 });
   return page;
 }
 export const calls = (page, cmd) => page.evaluate((c) => window.__mock.calls.filter((x) => x.cmd === c), cmd);

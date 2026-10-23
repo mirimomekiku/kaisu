@@ -1,0 +1,21 @@
+{
+  "urls": [
+    ["https://example.com/watch?v=a&x=b", true],
+    ["http://127.0.0.1:8080/video", true],
+    ["HTTPS://example.com/video", true],
+    ["https://", false],
+    ["http://?", false],
+    ["https:example.com", false],
+    ["file:///tmp/video", false],
+    ["https://user:secret@example.com/video", false],
+    ["https://example.com/has space", false],
+    ["https://example.com/\u0000", false]
+  ],
+  "rates": [
+    ["1", true], ["500K", true], ["1.5m", true], ["0.5K", true],
+    ["0", false], ["0K", false], [".", false], [".5M", false],
+    ["1.", false], ["1.2.3K", false], ["1e9", false], ["Infinity", false],
+    ["999999999999999999999999999999999999999999999999", false],
+    ["1000000000001", false], ["0.1", false], ["1G", false]
+  ]
+}

@@ -148,6 +148,9 @@ const WINDOWS_RESERVED: &[&str] = &[
 
 /// Problems with a folder name that depend only on the text (so they can be tested anywhere).
 fn folder_text_problem(path: &str, windows: bool) -> Option<String> {
+    if path.chars().any(char::is_control) || path.split(['/', '\\']).any(|p| p == "..") {
+        return Some("Use a full download folder without parent-directory shortcuts or control characters.".into());
+    }
     if path.trim().is_empty() {
         return Some("Choose a download folder.".into());
     }
@@ -162,6 +165,9 @@ fn folder_text_problem(path: &str, windows: bool) -> Option<String> {
         return Some("The download folder must be a full path.".into());
     }
     if windows {
+        if path.starts_with(r"\\.\") || path.starts_with(r"\\?\") || path.chars().any(|c| "<>\"|?*".contains(c)) {
+            return Some("Choose a normal drive or network folder, without device paths or invalid characters.".into());
+        }
         if path.chars().count() > MAX_FOLDER_CHARS_WINDOWS {
             return Some(format!("That folder's path is too long for Windows (over {MAX_FOLDER_CHARS_WINDOWS} characters). Choose a shorter one."));
         }
@@ -196,10 +202,11 @@ pub fn check_folder(path: String) -> Result<FolderCheck, String> {
     if !probe.is_dir() {
         return Err("That location isn't a folder.".into());
     }
-    let test = probe.join(format!(".kaisu-write-test-{}", std::process::id()));
-    std::fs::write(&test, b"").map_err(|_| {
+    let test = probe.join(format!(".kaisu-write-test-{}", uuid::Uuid::new_v4()));
+    let handle = std::fs::OpenOptions::new().write(true).create_new(true).open(&test).map_err(|_| {
         if probe == dir { "Kaisu can't write to that folder. Choose another one.".to_string() } else { format!("Kaisu can't create the folder inside {}.", probe.display()) }
     })?;
+    drop(handle);
     let _ = std::fs::remove_file(&test);
     let free = crate::download::free_space_for(&dir)?;
     Ok(FolderCheck { exists: dir.is_dir(), free })

@@ -103,6 +103,19 @@ a guarded native shell operation; other platforms use the `trash` crate. Never f
 - The proxy is passed explicitly to every yt-dlp call and to the setup downloads.
 - Search sources are a short list in `search.rs` and `lib/sources.ts`; add one only after checking it returns results.
 
+- Download attempts have distinct native IDs; the persisted recovery ID remains stable. A terminal event is accepted once
+  per attempt. `proc::DOWNLOAD_JOB` tracks yt-dlp and final helper processes through verification, including cancellation
+  before process startup. Keep process leases alive until the child is reaped.
+- `download_manifest.rs` writes recovery records in app data before starting a download and updates the planned path and
+  resolved format before media transfer. Proxy credentials are excluded. Successful verification removes the record;
+  failure or cancellation keeps it. Recovery is offered only after folder registration and keeps original output choices.
+- Preflight groups destinations by filesystem volume and reserves three times known input estimates plus active-job
+  reservations and a 200 MiB floor. Unknown sizes remain estimates; free space is checked again at launch. Planned output
+  paths are checked before transfer, and final files must exist, be nonempty, remain inside the destination and pass ffprobe.
+- `testdata/download-validation.json` supplies the same URL and speed-limit cases to TypeScript and Rust tests.
+  `npm run test:ui -- round25 queue safety round4 round21` covers lifecycle, late events, stages, recovery, destination
+  preflight, retries and existing queue controls. Native process cancellation tests exercise a real helper process.
+  Native Linux testing is still required for mount identity and process-group behavior on the target system.
 
 ## Releases
 

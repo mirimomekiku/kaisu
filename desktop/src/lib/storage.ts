@@ -1,4 +1,5 @@
 import { sanitizeMusicPreferences, type MusicPreferences } from "./musicPreferences";
+import { sanitizeDownloadQueue, safeConcurrency } from "./downloadValidation";
 import { defaultEqualizer, sanitizeEqualizer, type EqualizerSettings } from "./equalizer";
 import { load, type Store } from "@tauri-apps/plugin-store";
 import { secretDelete, secretGet, secretSet } from "./api";
@@ -200,6 +201,9 @@ export const DEFAULT_SETTINGS: Settings = {
 
 /** A download that was unfinished when the app closed. Stored so it can be resumed next time. */
 export interface SavedDownload {
+  recoveryId?: string;
+  estimatedBytes?: number;
+  expectedVolume?: number;
   id: string;
   title: string;
   url: string;
@@ -224,6 +228,7 @@ export async function loadSettings(): Promise<Settings> {
     const saved = await (await getStore()).get<Partial<Settings> & { subtitles?: boolean }>("settings");
     const merged: Settings = { ...DEFAULT_SETTINGS, ...saved };
     merged.presets = sanitizePresets(saved?.presets);
+    merged.concurrency = safeConcurrency(merged.concurrency);
     merged.autoRetries = Math.min(5, Math.max(0, Math.round(Number(merged.autoRetries) || 0)));
     merged.perSiteLimit = Math.min(6, Math.max(0, Math.round(Number(merged.perSiteLimit) || 0)));
     if (!["system", "aqua", "graphite", "dark"].includes(merged.theme)) merged.theme = "aqua";
@@ -474,9 +479,10 @@ export async function savePositions(positions: Positions) {
 export async function loadQueue(): Promise<SavedDownload[]> {
   try {
     const store = await getStore();
-    const saved = (await store.get<SavedDownload[]>("queue")) ?? [];
-    const queue = queueWithoutProxy(saved);
-    if (saved.some((item) => item.extra?.proxy != null)) {
+    const raw = await store.get<unknown>("queue");
+    const saved = Array.isArray(raw) ? raw : [];
+    const queue = sanitizeDownloadQueue(saved);
+    if (saved.some((item) => item && typeof item === "object" && item.extra?.proxy != null)) {
       try {
         await store.set("queue", queue);
         // Finish the migration before returning: old credentials must not remain on disk.

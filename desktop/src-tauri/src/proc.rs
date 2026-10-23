@@ -4,6 +4,55 @@
 use std::{path::Path, process::Stdio, time::Duration};
 
 use tokio::{io::AsyncReadExt, process::Command};
+use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}};
+
+/// A download owns every subprocess until final verification has finished.
+#[derive(Default)]
+pub struct JobControl {
+    cancelled: AtomicBool,
+    pids: Mutex<Vec<u32>>,
+    wake: tokio::sync::Notify,
+}
+impl JobControl {
+    pub fn is_cancelled(&self) -> bool { self.cancelled.load(Ordering::SeqCst) }
+    pub fn cancel(&self) {
+        let pids = self.pids.lock().unwrap_or_else(|e| e.into_inner());
+        if self.cancelled.swap(true, Ordering::SeqCst) { return; }
+        for pid in pids.iter() { kill_tree(*pid); }
+        drop(pids);
+        self.wake.notify_waiters();
+    }
+    pub async fn cancelled(&self) {
+        loop {
+            let notified = self.wake.notified();
+            tokio::pin!(notified); notified.as_mut().enable();
+            if self.is_cancelled() { return; }
+            notified.await;
+        }
+    }
+    pub fn attach(self: &Arc<Self>, pid: u32) -> ProcessLease {
+        let mut pids = self.pids.lock().unwrap_or_else(|e| e.into_inner());
+        if self.is_cancelled() { kill_tree(pid); } else { pids.push(pid); }
+        ProcessLease { job: Some(self.clone()), pid, reaped: false }
+    }
+}
+pub struct ProcessLease { job: Option<Arc<JobControl>>, pid: u32, reaped: bool }
+impl ProcessLease { pub fn reaped(&mut self) { self.reaped = true; } }
+impl Drop for ProcessLease {
+    fn drop(&mut self) {
+        if let Some(job) = &self.job {
+            // Holding the lock also prevents cancellation from targeting an already reaped PID.
+            if let Ok(mut pids) = job.pids.lock() {
+                if !self.reaped && !job.is_cancelled() { kill_tree(self.pid); }
+                pids.retain(|pid| *pid != self.pid);
+            }
+        }
+    }
+}
+tokio::task_local! { pub static DOWNLOAD_JOB: Arc<JobControl>; }
+fn track_child(pid: Option<u32>) -> Option<ProcessLease> {
+    pid.and_then(|pid| DOWNLOAD_JOB.try_with(|job| job.attach(pid)).ok())
+}
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -43,6 +92,7 @@ pub async fn run_capture(program: &Path, args: &[&str], timeout: Duration) -> Re
 /// `run_capture`, through `proxy` when one is given (see `command_with_proxy`).
 pub async fn run_capture_proxied(program: &Path, args: &[&str], timeout: Duration, proxy: Option<&str>) -> Result<String, String> {
     let mut child = command_with_proxy(program, proxy).args(args).spawn().map_err(|e| format!("Failed to start {}: {e}", program.display()))?;
+    let mut lease = track_child(child.id());
     let mut stdout = child.stdout.take().ok_or("no stdout")?;
     let mut stderr = child.stderr.take().ok_or("no stderr")?;
 
@@ -52,7 +102,9 @@ pub async fn run_capture_proxied(program: &Path, args: &[&str], timeout: Duratio
         (out, err, status)
     };
 
-    match tokio::time::timeout(timeout, work).await {
+    let result = tokio::time::timeout(timeout, work).await;
+    if matches!(&result, Ok((_, _, Ok(_)))) { if let Some(lease) = &mut lease { lease.reaped(); } }
+    match result {
         Ok((out, _, Ok(status))) if status.success() => Ok(String::from_utf8_lossy(&out).into_owned()),
         Ok((_, err, Ok(_))) => Err(clean_stderr(&String::from_utf8_lossy(&err))),
         Ok((_, _, Err(e))) => Err(format!("Process error: {e}")),
@@ -70,6 +122,7 @@ pub async fn run_capture_proxied(program: &Path, args: &[&str], timeout: Duratio
 /// non-zero exit or timeout.
 pub async fn run_capture_stderr(program: &Path, args: &[&str], timeout: Duration) -> Result<String, String> {
     let mut child = command(program).args(args).spawn().map_err(|e| format!("Failed to start {}: {e}", program.display()))?;
+    let mut lease = track_child(child.id());
     let mut stdout = child.stdout.take().ok_or("no stdout")?;
     let mut stderr = child.stderr.take().ok_or("no stderr")?;
 
@@ -79,7 +132,9 @@ pub async fn run_capture_stderr(program: &Path, args: &[&str], timeout: Duration
         (err, status)
     };
 
-    match tokio::time::timeout(timeout, work).await {
+    let result = tokio::time::timeout(timeout, work).await;
+    if matches!(&result, Ok((_, Ok(_)))) { if let Some(lease) = &mut lease { lease.reaped(); } }
+    match result {
         Ok((err, Ok(status))) if status.success() => Ok(String::from_utf8_lossy(&err).into_owned()),
         Ok((err, Ok(_))) => Err(clean_stderr(&String::from_utf8_lossy(&err))),
         Ok((_, Err(e))) => Err(format!("Process error: {e}")),
@@ -108,6 +163,37 @@ pub fn kill_tree(pid: u32) {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[tokio::test]
+    async fn cancellation_before_subscription_is_observed() {
+        let job = JobControl::default(); job.cancel();
+        tokio::time::timeout(Duration::from_millis(100), job.cancelled()).await.unwrap();
+    }
+    #[tokio::test]
+    async fn cancellation_interrupts_a_final_processing_helper() {
+        let job = Arc::new(JobControl::default());
+        let control = job.clone();
+        let cancel = async {
+            loop {
+                if !control.pids.lock().unwrap().is_empty() { control.cancel(); break; }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        };
+        let work = DOWNLOAD_JOB.scope(job.clone(), async {
+            #[cfg(windows)]
+            let result = run_capture(Path::new("powershell.exe"), &["-NoProfile", "-NonInteractive", "-Command", "Start-Sleep -Seconds 30"], Duration::from_secs(35)).await;
+            #[cfg(unix)]
+            let result = run_capture(Path::new("/bin/sh"), &["-c", "sleep 30"], Duration::from_secs(35)).await;
+            assert!(result.is_err());
+        });
+        tokio::time::timeout(Duration::from_secs(10), async { tokio::join!(work, cancel); }).await.unwrap();
+        assert!(job.is_cancelled());
+        assert!(job.pids.lock().unwrap().is_empty());
+    }
 }
 
 #[cfg(unix)]

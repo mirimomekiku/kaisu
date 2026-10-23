@@ -152,6 +152,22 @@ export async function invoke(cmd: string, args: any = {}): Promise<any> {
       return { exists: true, free: w.__mock.free ?? 500 * 1024 ** 3 };
     case "preview_command":
       return `yt-dlp --no-playlist -P '${args.req.out_dir}' -- ${args.req.url}${args.req.extra.audio?.normalize ? " --ppa 'ExtractAudio+ffmpeg_o:-af loudnorm'" : ""}`;
+    case "download_recovery":
+      return w.__mock.downloadRecovery ?? [];
+    case "discard_download_recovery":
+      w.__mock.downloadRecovery = (w.__mock.downloadRecovery ?? []).filter((r: any) => !args.ids.includes(r.id));
+      return;
+    case "preflight_downloads": {
+      if (w.__mock.folderProblem) throw w.__mock.folderProblem;
+      const groups = new Map<string, any>();
+      for (const req of args.requests) {
+        if ((w.__mock.badFolders ?? []).includes(req.out_dir)) throw "That destination isn't available.";
+        const group = groups.get(req.out_dir) ?? { folder: req.out_dir, free: w.__mock.freeByFolder?.[req.out_dir] ?? w.__mock.free ?? 500 * 1024 ** 3, needed: 200 * 1024 ** 2, estimated: false };
+        group.needed += (req.estimated_bytes ?? 0) * 3; group.estimated ||= !!req.estimated_bytes;
+        groups.set(req.out_dir, group);
+      }
+      return [...groups.values()];
+    }
     case "check_destination":
       if (w.__mock.destMissing) throw "That drive or folder isn't connected right now.";
       return { free: w.__mock.destFree ?? 200 * 1024 ** 3 };
@@ -406,6 +422,12 @@ export async function invoke(cmd: string, args: any = {}): Promise<any> {
       const ch: Channel = args.onEvent;
       const req = args.req;
       const send = (e: Ev) => ch.onmessage(e);
+      if (w.__mock.manualDownloads) {
+        return new Promise((resolve, reject) => {
+          (w.__mock.downloadControls ??= {})[req.id] = { send, resolve, reject };
+          send({ kind: "stage", stage: "preparing" });
+        });
+      }
       w.__mock.cancelled?.delete(req.id); // a resumed download starts fresh
       const cancelled = () => w.__mock.cancelled?.has(req.id);
       send({ kind: "log", line: `[youtube] Extracting URL: ${req.url}` });
@@ -439,6 +461,10 @@ export async function invoke(cmd: string, args: any = {}): Promise<any> {
     }
     case "cancel_download":
       (w.__mock.cancelled ??= new Set()).add(args.id);
+      if (w.__mock.downloadControls?.[args.id]) {
+        w.__mock.downloadControls[args.id].send({ kind: "cancelled" });
+        w.__mock.downloadControls[args.id].resolve();
+      }
       return;
     default:
       throw `unmocked command ${cmd}`;

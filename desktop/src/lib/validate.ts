@@ -28,8 +28,18 @@ export function checkSpeedLimit(text: string): string | null {
   const t = text.trim();
   if (!t) return null;
   if (!/^\d+(\.\d+)?[KkMm]?$/.test(t)) return "Use a number with K or M, like 500K or 2M.";
-  if (Number.parseFloat(t) <= 0) return "The limit must be more than zero.";
+  const bytes = Number.parseFloat(t) * (/[Kk]$/.test(t) ? 1024 : /[Mm]$/.test(t) ? 1048576 : 1);
+  if (t.length > 32 || !Number.isFinite(bytes) || bytes < 1 || bytes > 1e12) return "Use a limit between 1 byte/s and 1 TB/s.";
   return null;
+}
+
+export function checkDownloadUrl(text: string): string | null {
+  const value = text.trim();
+  try {
+    const u = new URL(value);
+    if (!/^https?:\/\//i.test(value) || value.length > 8192 || /[\s\x00-\x1f\x7f]/.test(value) || !["http:", "https:"].includes(u.protocol) || !u.hostname || u.username || u.password) throw new Error();
+    return null;
+  } catch { return "Enter a full web link (starting with http:// or https://) without spaces or embedded credentials."; }
 }
 
 /** Why an audio quality isn't valid: 0 to 9, or a bitrate like 192K. Empty means best. */

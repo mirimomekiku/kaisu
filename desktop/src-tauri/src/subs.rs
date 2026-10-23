@@ -7,7 +7,7 @@ const MAX_LANG_CHARS: usize = 20;
 /// YouTube lists a machine translation into ~150 languages for most videos; offering them all is noise.
 const MAX_AUTO_TRACKS: usize = 12;
 
-#[derive(Deserialize, Clone, Debug, Default)]
+#[derive(Deserialize, Serialize, Clone, Debug, Default)]
 #[serde(default)]
 pub struct SubtitleOptions {
     /// Language codes or patterns: `en`, `pt-BR`, `en.*`.

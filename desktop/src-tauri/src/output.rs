@@ -4,14 +4,14 @@
 //! A custom template is the one piece of free text that ends up in a path, so it is validated strictly:
 //! relative only, no `..`, no characters that are illegal in filenames, and only well-formed `%(field)s` groups.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 const MAX_CUSTOM_CHARS: usize = 300;
 const MAX_PLAYLIST_FOLDER_CHARS: usize = 100;
 /// 48 hours: nothing sensible is longer, and it keeps the arithmetic away from silly values.
 const MAX_CLIP_SECONDS: f64 = 48.0 * 3600.0;
 
-#[derive(Deserialize, Clone, Copy, Default, PartialEq, Eq, Debug)]
+#[derive(Deserialize, Serialize, Clone, Copy, Default, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum Layout {
     /// Everything in the download folder.
@@ -27,7 +27,7 @@ pub enum Layout {
     Music,
 }
 
-#[derive(Deserialize, Clone, Copy, Default, PartialEq, Eq, Debug)]
+#[derive(Deserialize, Serialize, Clone, Copy, Default, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum NameStyle {
     /// `Title [id]`, which can't collide.
@@ -44,7 +44,7 @@ fn yes() -> bool {
     true
 }
 
-#[derive(Deserialize, Clone, Debug)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 #[serde(default)]
 pub struct OutputOptions {
     pub layout: Layout,
@@ -65,7 +65,7 @@ impl Default for OutputOptions {
     }
 }
 
-#[derive(Deserialize, Clone, Debug)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct PlaylistCtx {
     pub title: String,
     /// 1-based position in the playlist.
@@ -73,7 +73,7 @@ pub struct PlaylistCtx {
     pub total: u32,
 }
 
-#[derive(Deserialize, Clone, Copy, Debug)]
+#[derive(Deserialize, Serialize, Clone, Copy, Debug)]
 pub struct Clip {
     pub start: f64,
     pub end: f64,

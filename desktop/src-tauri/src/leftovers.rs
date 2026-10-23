@@ -14,7 +14,7 @@ use std::{
 use serde::Serialize;
 use tauri::State;
 
-use crate::scope::Scope;
+use crate::{scope::Scope, download::Downloads};
 
 const MAX_DEPTH: usize = 4;
 const MAX_FOUND: usize = 200;
@@ -126,9 +126,14 @@ pub fn remove(paths: &[String], base: &Path) -> Vec<(String, Result<(), String>)
 
 /// Unfinished downloads in the download folder.
 #[tauri::command]
-pub async fn find_leftovers(scope: State<'_, Scope>) -> Result<Vec<Leftover>, String> {
-    let dir = scope.download()?;
-    tauri::async_runtime::spawn_blocking(move || scan(&dir)).await.map_err(|e| e.to_string())
+pub async fn find_leftovers(scope: State<'_, Scope>, downloads: State<'_, Downloads>) -> Result<Vec<Leftover>, String> {
+    if !downloads.is_idle() { return Ok(Vec::new()); }
+    let mut dirs = scope.destination_dirs(); dirs.extend(scope.download().ok()); dirs.sort(); dirs.dedup();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut found: Vec<_> = dirs.iter().flat_map(|dir| scan(dir)).collect();
+        found.sort_by(|a,b| a.path.cmp(&b.path)); found.dedup_by(|a,b| a.path == b.path);
+        found.sort_by(|a,b| b.modified.cmp(&a.modified)); found.truncate(MAX_FOUND); found
+    }).await.map_err(|e| e.to_string())
 }
 
 #[derive(Serialize)]
@@ -140,9 +145,17 @@ pub struct RemoveResult {
 
 /// Removes unfinished downloads (`.part` files) from the download folder.
 #[tauri::command]
-pub async fn remove_leftovers(scope: State<'_, Scope>, paths: Vec<String>) -> Result<Vec<RemoveResult>, String> {
-    let dir = scope.download()?;
-    let results = tauri::async_runtime::spawn_blocking(move || remove(&paths, &dir)).await.map_err(|e| e.to_string())?;
+pub async fn remove_leftovers(scope: State<'_, Scope>, downloads: State<'_, Downloads>, paths: Vec<String>) -> Result<Vec<RemoveResult>, String> {
+    if !downloads.is_idle() { return Err("Wait for running downloads to stop before removing partial files.".into()); }
+    if paths.len() > MAX_FOUND { return Err("Remove up to 200 partial files at once.".into()); }
+    let mut dirs = scope.destination_dirs(); dirs.extend(scope.download().ok()); dirs.sort(); dirs.dedup();
+    let results = tauri::async_runtime::spawn_blocking(move || paths.into_iter().map(|path| {
+        let result = dirs.iter().find_map(|dir| {
+            let real = fs::canonicalize(&path).ok()?; let root = fs::canonicalize(dir).ok()?;
+            real.starts_with(root).then(|| remove(std::slice::from_ref(&path), dir).remove(0).1)
+        }).unwrap_or_else(|| Err("That partial file isn't in a registered download destination.".into()));
+        (path, result)
+    }).collect::<Vec<_>>()).await.map_err(|e| e.to_string())?;
     Ok(results.into_iter().map(|(path, r)| RemoveResult { path, ok: r.is_ok(), error: r.err() }).collect())
 }
 

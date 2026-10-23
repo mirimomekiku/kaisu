@@ -6,7 +6,7 @@ import type { Page } from "../components/Sidebar";
 import {
   checkFolder,
   errorText,
-  freeSpace,
+  preflightDownloads,
   previewCommand,
   type AudioExtras,
   type AudioFormat,
@@ -50,6 +50,7 @@ export interface DownloadReq {
   /** Where to save instead of the usual folder (also used by site rules and podcasts). */
   outDir?: string;
   audioFormat?: AudioFormat;
+  estimatedBytes?: number;
   /** The site of the rule that changed this download, for saying so. */
   ruledBy?: string;
   /** Feed episodes keep their original audio and stay inside the podcast folder. */
@@ -148,35 +149,6 @@ export function useDownloadActions(a: Args) {
       }
     }
 
-    try {
-      await checkFolder(outDir);
-    } catch (err) {
-      showFlash(errorText(err), true);
-      return 0;
-    }
-
-    const free = await freeSpace(outDir).catch(() => null);
-    if (free !== null) {
-      const needed = estimateBytes ? estimateBytes * 1.3 : 0;
-      if (free < LOW_DISK_BYTES || (needed > 0 && free < needed)) {
-        const choice = await confirm.ask({
-          title: "Low disk space",
-          body: (
-            <p className="m-0">
-              Only <b>{formatBytes(free)}</b> is free where downloads are saved
-              {needed > 0 ? `, and this needs about ${formatBytes(needed)}` : ""}. If the drive fills up, the download will fail part-way. Continue anyway?
-            </p>
-          ),
-          buttons: [
-            { id: "go", label: "Download anyway" },
-            { id: "cancel", label: "Cancel", primary: true },
-          ],
-          cancelId: "cancel",
-        });
-        if (choice !== "go") return 0;
-      }
-    }
-
     // A rule's folder has to be usable; if it isn't, say so and use the usual folder rather than failing.
     const badFolders = new Map<string, string>();
     for (const folder of new Set(todo.flatMap((r) => (r.outDir ? [r.outDir] : [])))) {
@@ -190,19 +162,24 @@ export function useDownloadActions(a: Args) {
     }
     if (badFolders.size > 0) showFlash(`A site rule's folder can't be used (${[...badFolders.values()][0]}). Saving in the usual folder instead.`, true);
 
-    enqueue(
-      todo.map((r) => ({
-        url: r.url,
-        title: r.title,
-        thumbnail: r.thumbnail,
-        preset: r.preset,
-        outDir: r.outDir && !badFolders.has(r.outDir) ? r.outDir : outDir,
-        extra: buildExtra(settings, r.formatId, { playlist: r.playlist, clip: r.clip, subs: r.subs, meta: r.meta, cover: r.cover, lyrics: r.lyrics, audio: r.audio, audioFormat: r.audioFormat }),
-        clipKey: clipKeyOf(r.clip ?? null),
-        placeholderTitle: r.placeholderTitle,
-        channel: r.channel,
-      })),
-    );
+    const inputs = todo.map((r) => ({
+      url: r.url, title: r.title, thumbnail: r.thumbnail, preset: r.preset,
+      outDir: r.outDir && !badFolders.has(r.outDir) ? r.outDir : outDir,
+      extra: buildExtra(settings, r.formatId, { playlist: r.playlist, clip: r.clip, subs: r.subs, meta: r.meta, cover: r.cover, lyrics: r.lyrics, audio: r.audio, audioFormat: r.audioFormat }),
+      estimatedBytes: r.estimatedBytes ?? (estimateBytes && Number.isSafeInteger(estimateBytes) && estimateBytes > 0 ? Math.ceil(estimateBytes / todo.length) : undefined),
+      clipKey: clipKeyOf(r.clip ?? null), placeholderTitle: r.placeholderTitle, channel: r.channel,
+    }));
+    try {
+      const groups = await preflightDownloads(inputs.map((r, i) => ({ id: `preflight-${i}`, url: r.url, preset: r.preset, out_dir: r.outDir, extra: r.extra, estimated_bytes: r.estimatedBytes })));
+      for (const group of groups) {
+        if (group.free < group.needed) throw new Error(`There isn't enough free disk space for ${group.folder}. Allow at least ${formatBytes(group.needed)} for downloads, conversion files and active jobs.`);
+        if (group.free < LOW_DISK_BYTES || group.free < group.needed) {
+          const choice = await confirm.ask({ title: "Low disk space", body: <p className="m-0">Only <b>{formatBytes(group.free)}</b> is free for <b>{group.folder}</b>. {group.estimated ? `Allow about ${formatBytes(group.needed)} for these downloads, temporary conversion files and active jobs.` : "The final download size is unknown."} Continue anyway?</p>, buttons: [{ id: "go", label: "Download anyway" }, { id: "cancel", label: "Cancel", primary: true }], cancelId: "cancel" });
+          if (choice !== "go") return 0;
+        }
+      }
+    } catch (err) { showFlash(errorText(err), true); return 0; }
+    enqueue(inputs);
     const ruled = todo.filter((r) => r.ruledBy);
     const what = todo.length === 1 ? todo[0].title : `${todo.length} items`;
     announce({ title: "Added to Downloads", subtitle: ruled.length > 0 ? `${what} · site rule for ${ruled[0].ruledBy}` : what });

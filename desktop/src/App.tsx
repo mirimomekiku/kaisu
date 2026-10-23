@@ -9,6 +9,7 @@ import MiniPlayer from "./components/MiniPlayer";
 import { useMiniPlayer } from "./hooks/useMiniPlayer";
 import { useListening } from "./hooks/useListening";
 import PlayerBar from "./components/PlayerBar";
+import DownloadRecoveryNotice from "./components/DownloadRecoveryNotice";
 import QueueUndoNotice from "./components/QueueUndo";
 import { useConfirm } from "./components/ConfirmDialog";
 import DownloadsPage from "./components/DownloadsPage";
@@ -537,6 +538,7 @@ export default function App() {
         }
       />
 
+      <DownloadRecoveryNotice ready={files.ready} items={items} enqueue={enqueue} />
       <div className="app-body">
         <Sidebar
           page={page}
