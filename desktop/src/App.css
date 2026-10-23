@@ -1869,3 +1869,9 @@ select.field:disabled, select.source-select:disabled { opacity:.6; }
 .full-cover { width:min(100%, 420px, calc(100dvh - 400px)); }
 @media (max-width:880px), (max-height:600px) { .full-cover { width:min(100%, 290px, calc(100dvh - 340px)); } }
 .statusbar { min-height:36px; height:auto; padding-top:4px; padding-bottom:4px; }
+/* Playlist organization and waiting-download selection. */
+.playlist-organize-row { display: flex; align-items: center; gap: 6px; }
+.playlist-organize-row .artist-row { flex: 1; min-width: 0; }
+.playlist-cover { width: 36px; height: 36px; object-fit: cover; border-radius: 5px; flex-shrink: 0; }
+.playlist-cover.large { width: 112px; height: 112px; }
+.playlist-cover-editor { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }

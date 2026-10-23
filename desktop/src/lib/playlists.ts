@@ -11,6 +11,17 @@ export interface Playlist {
   /** When it last changed (ms since 1970). */
   updated: number;
   smart?: SmartRules;
+  folder?: string;
+  cover?: string;
+}
+
+export function sanitizeFolders(raw: unknown): string[] {
+  return Array.isArray(raw) ? [...new Set(raw.filter((x): x is string => typeof x === "string" && !!x.trim()).map((x) => x.trim().slice(0, MAX_NAME_CHARS)))].slice(0, 100) : [];
+}
+
+/** Covers are small, locally encoded images; remote URLs and arbitrary markup are never restored. */
+export function validPlaylistCover(value: unknown): value is string {
+  return typeof value === "string" && value.length <= 100_000 && /^data:image\/(jpeg|png);base64,[A-Za-z0-9+/=]+$/.test(value);
 }
 
 export const MAX_PLAYLISTS = 200;
@@ -70,6 +81,8 @@ export function sanitizePlaylists(raw: unknown): Playlist[] {
       paths: p.paths.filter((x): x is string => typeof x === "string" && x !== "").slice(0, MAX_TRACKS),
       updated: typeof p.updated === "number" && Number.isFinite(p.updated) ? p.updated : 0,
       ...(smart ? { smart } : {}),
+      ...(typeof p.folder === "string" && p.folder.trim() ? { folder: p.folder.trim().slice(0, MAX_NAME_CHARS) } : {}),
+      ...(validPlaylistCover(p.cover) ? { cover: p.cover } : {}),
     });
   }
   return out;

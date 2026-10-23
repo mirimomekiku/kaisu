@@ -50,6 +50,8 @@ works behind a proxy, and can check again if you installed the tools yourself. A
 
 **Music**
 - Browse downloaded music by song, album or artist, edit tags, and make playlists you can export as `.m3u8`.
+- **Playlist organization:** create and rename folders, move playlists between them, and choose a local JPEG/PNG cover.
+  Drag playlists or songs to reorder them; arrow buttons provide the same controls. Removing a folder keeps its playlists.
 - **A quieter library:** use the view dropdown to switch between Songs, Albums, Artists, Playlists and Listening. Library filters group format, file availability, favorites and ratings; Library tools holds folders, rescanning and duplicate cleanup.
 - **Select several songs:** tick their boxes, Ctrl/Command-click rows to toggle them, or Shift-click a range. Apply tags,
   favorites and ratings together, or play, queue and add the selection to a playlist. Selected actions groups tag, favorite, queue and playlist operations; Rate selected applies a rating. Ctrl/Command+A in the song list

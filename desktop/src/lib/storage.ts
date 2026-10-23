@@ -424,6 +424,14 @@ export async function savePlaylists(playlists: Playlist[]) {
   }
 }
 
+export async function loadPlaylistFolders(): Promise<unknown> {
+  try { return await (await getStore()).get("playlistFolders"); } catch { return []; }
+}
+export async function savePlaylistFolders(folders: string[]) {
+  try { await (await getStore()).set("playlistFolders", folders); }
+  catch (e) { console.warn("Could not save playlist folders", e); }
+}
+
 export async function loadPositions(): Promise<Positions> {
   try {
     return sanitizePositions(await (await getStore()).get("positions"));

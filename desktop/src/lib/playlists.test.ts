@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { addPaths, checkName, createPlaylist, m3uFileName, moveTrack, removeAt, sanitizePlaylists, toM3u, MAX_NAME_CHARS } from "./playlists";
+import { addPaths, checkName, createPlaylist, m3uFileName, moveTrack, removeAt, sanitizePlaylists, sanitizeFolders, toM3u, MAX_NAME_CHARS } from "./playlists";
+
+it("restores folder membership and local covers while rejecting remote or oversized covers", () => {
+  const base = createPlaylist("Mix", ["/a"]);
+  const cover = "data:image/jpeg;base64,YWJj";
+  expect(sanitizePlaylists([{ ...base, folder: " Focus ", cover }])[0]).toMatchObject({ folder: "Focus", cover });
+  for (const bad of ["https://example.com/a.jpg", "data:image/svg+xml;base64,YWJj", "data:image/jpeg;base64," + "a".repeat(100000)]) {
+    expect(sanitizePlaylists([{ ...base, cover: bad }])[0].cover).toBeUndefined();
+  }
+  expect(sanitizeFolders([null, "", " Focus ", "Focus", "Travel"])).toEqual(["Focus", "Travel"]);
+});
 
 describe("checkName", () => {
   const others = [createPlaylist("Road trip"), createPlaylist("Focus")];

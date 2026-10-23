@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { addPaths, checkName, createPlaylist, MAX_PLAYLISTS, moveTrack, removeAt, type Playlist } from "../lib/playlists";
-import { loadPlaylists, savePlaylists } from "../lib/storage";
+import { addPaths, checkName, createPlaylist, MAX_PLAYLISTS, moveTrack, removeAt, sanitizeFolders, validPlaylistCover, type Playlist } from "../lib/playlists";
+import { loadPlaylists, savePlaylists, loadPlaylistFolders, savePlaylistFolders } from "../lib/storage";
+import { moveItem } from "../lib/playQueue";
 import { smartProblem, type SmartRules } from "../lib/smartPlaylists";
 import { relocatePlaylists } from "../lib/relocation";
 
@@ -9,13 +10,17 @@ export function usePlaylists() {
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [loaded, setLoaded] = useState(false);
   const latest = useRef<Playlist[]>([]);
+  const [folders, setFolders] = useState<string[]>([]);
+  const foldersRef = useRef<string[]>([]);
 
   useEffect(() => {
     let stale = false;
-    void loadPlaylists().then((saved) => {
+    void Promise.all([loadPlaylists(), loadPlaylistFolders()]).then(([saved, rawFolders]) => {
       if (stale) return;
       latest.current = saved;
       setPlaylists(saved);
+      const names = sanitizeFolders([...(sanitizeFolders(rawFolders)), ...saved.flatMap((p) => p.folder ? [p.folder] : [])]);
+      foldersRef.current = names; setFolders(names);
       setLoaded(true);
     });
     return () => {
@@ -81,7 +86,31 @@ export function usePlaylists() {
     commit(relocatePlaylists(latest.current, from, to));
   }, [commit]);
 
-  return { playlists, loaded, create, rename, remove, add, removeTrack, move, editSmart, relocate };
+  const saveFolders = (next: string[]) => { foldersRef.current = next; setFolders(next); void savePlaylistFolders(next); };
+  const createFolder = (name: string): string | null => {
+    const value = name.trim();
+    if (!value || value.length > 80) return "Use a folder name between 1 and 80 characters.";
+    if (foldersRef.current.some((f) => f.toLowerCase() === value.toLowerCase())) return "That folder already exists.";
+    if (foldersRef.current.length >= 100) return "You can create up to 100 folders.";
+    saveFolders([...foldersRef.current, value]); return null;
+  };
+  const renameFolder = (from: string, name: string): string | null => {
+    const value = name.trim();
+    if (!value || value.length > 80) return "Use a folder name between 1 and 80 characters.";
+    if (foldersRef.current.some((f) => f !== from && f.toLowerCase() === value.toLowerCase())) return "That folder already exists.";
+    saveFolders(foldersRef.current.map((f) => f === from ? value : f));
+    commit(latest.current.map((p) => p.folder === from ? { ...p, folder: value } : p)); return null;
+  };
+  const removeFolder = (folder: string) => {
+    // Save memberships first, so a removed folder cannot be recovered from stale playlists on restart.
+    commit(latest.current.map((p) => p.folder === folder ? { ...p, folder: undefined } : p));
+    saveFolders(foldersRef.current.filter((f) => f !== folder));
+  };
+  const organize = (id: string, folder: string) => change(id, (p) => ({ ...p, folder: foldersRef.current.includes(folder) ? folder : undefined }));
+  const setCover = (id: string, cover?: string) => { if (cover === undefined || validPlaylistCover(cover)) change(id, (p) => ({ ...p, cover })); };
+  const reorder = (from: string, to: string) => commit(moveItem(latest.current, -1, latest.current.findIndex((p) => p.id === from), latest.current.findIndex((p) => p.id === to)).queue);
+
+  return { playlists, folders, loaded, create, rename, remove, add, removeTrack, move, editSmart, relocate, createFolder, renameFolder, removeFolder, organize, setCover, reorder };
 }
 
 export type PlaylistsApi = ReturnType<typeof usePlaylists>;

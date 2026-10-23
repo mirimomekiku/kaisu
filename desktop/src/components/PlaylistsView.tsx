@@ -1,7 +1,8 @@
 import { useMusicPreferences } from "../hooks/useMusicPreferences";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { ArrowDown, ArrowLeft, ArrowUp, Download, ListEnd, ListMusic, ListStart, Pencil, Play, Trash2, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import PlaylistCoverEditor from "./PlaylistCoverEditor";
 import type { PlaylistsApi } from "../hooks/usePlaylists";
 import { errorText, exportText, type LibTrack } from "../lib/api";
 import { formatClock } from "../lib/format";
@@ -34,6 +35,10 @@ export default function PlaylistsView({ api, byPath, listening, onPlay, onNext, 
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [smartEdit, setSmartEdit] = useState<Playlist | "new" | null>(null);
   const [minute, tick] = useState(0);
+  const [folder, setFolder] = useState<string | null>(null);
+  const [folderEdit, setFolderEdit] = useState<{ from?: string } | null>(null);
+  const dragging = useRef<string | null>(null);
+  const draggingTrack = useRef<number | null>(null);
   useEffect(() => { const timer = setInterval(() => tick((n) => n + 1), 60_000); return () => clearInterval(timer); }, []);
   const resolved = useMemo(() => api.playlists.map((p) => p.smart ? { ...p, paths: smartTracks([...byPath.values()], p.smart, listening, Date.now(), preferences).map((t) => t.path) } : p), [api.playlists, byPath, listening, minute, preferences]);
   const open = resolved.find((p) => p.id === openId) ?? null;
@@ -51,7 +56,14 @@ export default function PlaylistsView({ api, byPath, listening, onPlay, onNext, 
   if (!open) {
     return (
       <><div className="lib-scroll">
-        <div className="lib-tools"><button className="btn small" disabled={!api.loaded} onClick={() => setSmartEdit("new")}>New smart playlist</button></div>
+        <div className="lib-tools flex-wrap">
+          <button className="btn small" disabled={!api.loaded} onClick={() => setSmartEdit("new")}>New smart playlist</button>
+          <label>Folder <select className="field" aria-label="Playlist folder filter" value={folder === null ? "all" : `folder:${folder}`} onChange={(e) => setFolder(e.target.value === "all" ? null : e.target.value.slice(7))}>
+            <option value="all">All playlists</option><option value="folder:">Unfiled</option>{api.folders.map((f) => <option key={f} value={`folder:${f}`}>{f}</option>)}
+          </select></label>
+          <button className="btn small" disabled={!api.loaded} onClick={() => setFolderEdit({})}>New folder</button>
+          {folder !== null && api.folders.includes(folder) && <><button className="btn small" onClick={() => setFolderEdit({ from: folder })}>Rename folder</button><button className="btn small" onClick={() => { api.removeFolder(folder); setFolder(""); }}>Remove folder</button><span className="dim">Removing a folder keeps its playlists.</span></>}
+        </div>
         {api.playlists.length === 0 ? (
           <div className="empty" style={{ minHeight: 200 }}>
             <div className="big">
@@ -62,17 +74,24 @@ export default function PlaylistsView({ api, byPath, listening, onPlay, onNext, 
           </div>
         ) : (
           <ul className="artist-list" aria-label="Playlists">
-            {resolved.map((p) => (
-              <li key={p.id}>
+            {resolved.filter((p) => folder === null || (p.folder ?? "") === folder).map((p, i, list) => (
+              <li key={p.id} className="playlist-organize-row" draggable onDragStart={(e) => { dragging.current = p.id; e.dataTransfer.setData("text/plain", p.id); }} onDragEnd={() => { dragging.current = null; }} onDragOver={(e) => { if (dragging.current) e.preventDefault(); }} onDrop={(e) => { e.preventDefault(); if (dragging.current) api.reorder(dragging.current, p.id); dragging.current = null; }}>
                 <button type="button" className="artist-row" aria-label={`Open ${p.name}`} onClick={() => setOpenId(p.id)}>
+                  {p.cover && <img className="playlist-cover" src={p.cover} alt="" />}
                   <b className="truncate">{p.name}</b>
-                  <span className="dim">{p.smart ? "Smart · " : ""}{count(p.paths.length)}</span>
+                  <span className="dim">{p.folder ? `${p.folder} · ` : ""}{p.smart ? "Smart · " : ""}{count(p.paths.length)}</span>
                 </button>
+                <button className="row-btn" aria-label={`Move playlist ${p.name} up`} disabled={i === 0} onClick={() => api.reorder(p.id, list[i - 1].id)}><ArrowUp className="w-3 h-3" /></button>
+                <button className="row-btn" aria-label={`Move playlist ${p.name} down`} disabled={i === list.length - 1} onClick={() => api.reorder(p.id, list[i + 1].id)}><ArrowDown className="w-3 h-3" /></button>
               </li>
             ))}
           </ul>
         )}
-      </div>{smartDialog}</>
+      </div>{smartDialog}{folderEdit && <FolderSheet initial={folderEdit.from ?? ""} onSave={(name) => {
+        const problem = folderEdit.from ? api.renameFolder(folderEdit.from, name) : api.createFolder(name);
+        if (!problem) { setFolder(name.trim()); setFolderEdit(null); }
+        return problem;
+      }} onClose={() => setFolderEdit(null)} />}</>
     );
   }
 
@@ -113,6 +132,8 @@ export default function PlaylistsView({ api, byPath, listening, onPlay, onNext, 
             <ArrowLeft className="w-3 h-3" /> Back to playlists
           </button>
           <h2 className="m-0 text-[18px] truncate">{open.name}</h2>
+          <label>Folder <select className="field" aria-label="Move playlist to folder" value={open.folder ?? ""} onChange={(e) => api.organize(open.id, e.target.value)}><option value="">Unfiled</option>{api.folders.map((f) => <option key={f} value={f}>{f}</option>)}</select></label>
+          <PlaylistCoverEditor playlist={open} api={api} />
           <div className="dim">
             {count(open.paths.length)}
             {total > 0 ? ` · ${formatClock(total)}` : ""}
@@ -168,7 +189,7 @@ export default function PlaylistsView({ api, byPath, listening, onPlay, onNext, 
               const t = byPath.get(path);
               const title = t?.title ?? baseName(path);
               return (
-                <li key={path} className="lib-row album-track">
+                <li key={path} className="lib-row album-track" draggable={!open.smart} onDragStart={(e) => { draggingTrack.current = i; e.dataTransfer.setData("text/plain", String(i)); }} onDragEnd={() => { draggingTrack.current = null; }} onDragOver={(e) => { if (!open.smart && draggingTrack.current !== null) e.preventDefault(); }} onDrop={(e) => { e.preventDefault(); if (!open.smart && draggingTrack.current !== null) api.move(open.id, draggingTrack.current, i); draggingTrack.current = null; }}>
                   <span className="num dim mono">{i + 1}</span>
                   {t && !t.missing ? (
                     <button type="button" className="lib-title link truncate" aria-label={`Play ${title}`} onClick={() => onPlay(found.slice(found.indexOf(t)))}>
@@ -200,6 +221,15 @@ export default function PlaylistsView({ api, byPath, listening, onPlay, onNext, 
       {renaming && <RenameSheet playlist={open} onRename={(name) => api.rename(open.id, name)} onClose={() => setRenaming(false)} />}
     </div>{smartDialog}</>
   );
+}
+
+function FolderSheet({ initial, onSave, onClose }: { initial: string; onSave: (name: string) => string | null; onClose: () => void }) {
+  const [name, setName] = useState(initial);
+  const [error, setError] = useState<string | null>(null);
+  const save = () => setError(onSave(name));
+  return <Sheet title={initial ? "Rename folder" : "New playlist folder"} onClose={onClose} footer={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={!name.trim()} onClick={save}>Save folder</button></>}>
+    <form onSubmit={(e) => { e.preventDefault(); save(); }}><input autoFocus className="field" aria-label="Folder name" maxLength={80} value={name} onChange={(e) => setName(e.target.value)} />{error && <p role="alert">{error}</p>}</form>
+  </Sheet>;
 }
 
 function RenameSheet({ playlist, onRename, onClose }: { playlist: Playlist; onRename: (name: string) => string | null; onClose: () => void }) {
