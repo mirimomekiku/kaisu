@@ -88,9 +88,10 @@ a guarded native shell operation; other platforms use the `trash` crate. Never f
   It uses a temporary local CDP test session and needs a current debug executable, without ffmpeg or WebDriver.
   Linux uses the shared Web Audio graph and `test:real:playback` with WebKitGTK/tauri-driver; its EQ check measures non-silent
   processed audio. A Linux native run is still needed to validate the installed system's WebKitGTK/GStreamer stack.
-- The native media stream permits anonymous CORS access for its random capabilities, including Range preflights.
-  Host validation and per-request folder authorization still apply. This avoids the silent cross-origin output required by
-  the [Web Audio specification](https://www.w3.org/TR/webaudio-1.1/).
+- The native media stream echoes CORS access only to the app's own origins (`tauri://localhost`, `http(s)://tauri.localhost`,
+  and the Vite dev server in debug builds) and answers any other `Origin` with 403, including Range preflights. Host validation
+  and per-request folder authorization still apply, and a URL expires after six hours without a request (each request renews
+  it). This avoids the silent cross-origin output required by the [Web Audio specification](https://www.w3.org/TR/webaudio-1.1/).
 - Native playback validation requires a newly built app, `tauri-driver`, ffmpeg (`KAISU_FFMPEG` can override its path),
   and on Windows a matching Edge WebDriver (`KAISU_NATIVE_DRIVER`). Close any existing Kaisu instance first.
   `npm run test:real:playback` reports missing prerequisites and writes `src-tauri/target/playback-report.json` with
@@ -112,7 +113,10 @@ a guarded native shell operation; other platforms use the `trash` crate. Never f
 - Preflight groups destinations by filesystem volume and reserves three times known input estimates plus active-job
   reservations and a 200 MiB floor. Unknown sizes remain estimates; free space is checked again at launch. Planned output
   paths are checked before transfer, and final files must exist, be nonempty, remain inside the destination and pass ffprobe.
-- `testdata/download-validation.json` supplies the same URL and speed-limit cases to TypeScript and Rust tests.
+- `testdata/download-validation.json` supplies the same URL and speed-limit cases, the stall/timeout and retry timings, and the
+  secret query-name lists (with names that must and must not be redacted) to TypeScript and Rust tests.
+  Change a shared value there and in both `download.rs`/`net.rs` and `errors.ts`/`redact.ts`, or a test fails.
+  Scheduling decisions are pure functions in `lib/queueStart.ts` (`pickStartable`, `resourceGate`) with unit tests.
   `npm run test:ui -- round25 queue safety round4 round21` covers lifecycle, late events, stages, recovery, destination
   preflight, retries and existing queue controls. Native process cancellation tests exercise a real helper process.
   Native Linux testing is still required for mount identity and process-group behavior on the target system.
