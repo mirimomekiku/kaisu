@@ -129,7 +129,7 @@ export default function App() {
   const policy = useMemo(() => ({ blocked: schedule.paused, limit: schedule.limit }), [schedule.paused, schedule.limit]);
   const limits = useMemo(() => (advanced ? { retries: settings.autoRetries, perSite: settings.perSiteLimit } : { retries: 0, perSite: 0 }), [advanced, settings.autoRetries, settings.perSiteLimit]);
 
-  const { items, enqueue, runNext, runLater, reorder, setRateLimit, cancel, pause, resume, pauseAll, resumeAll, retry, remove, clearFinished, restore, hasActive } = useDownloads(
+  const { items, enqueue, runNext, runLater, reorder, setRateLimit, editWaiting, cancel, pause, resume, pauseAll, resumeAll, retry, remove, clearFinished, restore, hasActive } = useDownloads(
     advanced ? settings.concurrency : 2,
     handleCompleted,
     policy,
@@ -567,6 +567,7 @@ export default function App() {
               onRunLater={runLater}
               onReorder={reorder}
               onSetRateLimit={setRateLimit}
+              onEditWaiting={editWaiting}
               onRemove={remove}
               onOpen={openDownloaded}
               onReveal={revealDownloaded}

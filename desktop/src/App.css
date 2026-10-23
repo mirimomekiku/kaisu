@@ -1875,3 +1875,6 @@ select.field:disabled, select.source-select:disabled { opacity:.6; }
 .playlist-cover { width: 36px; height: 36px; object-fit: cover; border-radius: 5px; flex-shrink: 0; }
 .playlist-cover.large { width: 112px; height: 112px; }
 .playlist-cover-editor { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.download-selection { padding: 8px 12px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; border-bottom: 1px solid var(--hairline); }
+.download-selection-items { width: 100%; max-height: 90px; overflow: auto; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 4px 12px; }
+.download-selection-items label { display: flex; min-width: 0; gap: 6px; align-items: center; }

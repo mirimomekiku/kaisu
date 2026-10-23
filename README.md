@@ -28,6 +28,8 @@ works behind a proxy, and can check again if you installed the tools yourself. A
   again (yt-dlp carries on from where it stopped when it can) or to clear them away.
 - **Queue:** waiting downloads show their place in line. Drag one onto another to change who starts first, or give a
   single download its own speed limit.
+- **Search and bulk editing:** search Downloads by title, URL or folder. Select waiting downloads to change quality,
+  audio format, destination or speed together. Running downloads are skipped; changing quality or destination may start a fresh file.
 - Queued and restored downloads use your current proxy settings. Proxy addresses and passwords are not saved with the queue.
 
 **Stay organised**

@@ -106,7 +106,7 @@ await page.locator(".progress.done").waitFor();
 await main().getByLabel("Download status").selectOption("completed");
 check("Downloads: status filtering retains the matching file", await main().locator("tbody tr").count() === 1);
 await main().getByLabel("Download status").selectOption("paused");
-check("Downloads: no-match state explains how to recover", await main().getByRole("heading", { name: "No downloads match this status", exact: true }).count() === 1);
+check("Downloads: no-match state explains how to recover", await main().getByRole("heading", { name: "No downloads match these filters", exact: true }).count() === 1);
 await main().getByRole("button", { name: "Show all downloads", exact: true }).click();
 check("Downloads: resetting the status filter restores the queue", await main().getByLabel("Download status").inputValue() === "all" && await main().locator("tbody tr").count() === 1);
 check("Downloads: filtering never removes stored items", (await page.evaluate(() => JSON.parse(localStorage.getItem("__store")).history)).length === 1 && await page.getByRole("button", { name: "Clear finished", exact: true }).count() === 1);

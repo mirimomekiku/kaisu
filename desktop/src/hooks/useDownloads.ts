@@ -9,6 +9,7 @@ import {
 } from "../lib/api";
 import { isTransient, retryDelaySeconds } from "../lib/errors";
 import { reorderWaiting } from "../lib/queueOrder";
+import { editWaitingDownloads, type QueueEdit } from "../lib/queueEdit";
 import { canonicalUrl, hostOf } from "../lib/links";
 import type { SavedDownload } from "../lib/storage";
 
@@ -336,6 +337,14 @@ export function useDownloads(concurrency: number, onCompleted: (item: DownloadIt
     }
   }, []);
 
+  const editWaiting = useCallback((ids: string[], edit: QueueEdit) => {
+    const selected = new Set(ids);
+    setItems((prev) => {
+      const unavailable = new Set(prev.filter((item) => pausing.current.has(item.id) || (item.status === "queued" && started.current.has(item.id))).map((item) => item.id));
+      return editWaitingDownloads(prev, selected, edit, unavailable);
+    });
+  }, []);
+
   const pauseAll = useCallback(() => itemsRef.current.forEach((x) => (x.status === "queued" || isActive(x.status)) && pause(x.id)), [pause]);
   const resumeAll = useCallback(() => {
     // Resume oldest first so the queue order is what it was.
@@ -394,5 +403,5 @@ export function useDownloads(concurrency: number, onCompleted: (item: DownloadIt
 
   const unfinished = items.filter((i) => i.status === "queued" || isActive(i.status)).length;
 
-  return { items, enqueue, runNext, runLater, reorder, setRateLimit, cancel, pause, resume, pauseAll, resumeAll, retry, remove, clearFinished, restore, hasActive: unfinished > 0 };
+  return { items, enqueue, runNext, runLater, reorder, setRateLimit, editWaiting, cancel, pause, resume, pauseAll, resumeAll, retry, remove, clearFinished, restore, hasActive: unfinished > 0 };
 }
