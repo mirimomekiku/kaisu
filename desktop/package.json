@@ -16,6 +16,7 @@
     "test:real": "node e2e/real/run.mjs",
     "test:real:audit": "node e2e/real/audit.mjs",
     "test:real:playback": "node e2e/real/playback.mjs",
+    "test:real:eq:windows": "node e2e/real/equalizer-windows.mjs",
     "test:real:media": "node e2e/real/media.mjs"
   },
   "dependencies": {
@@ -36,6 +37,7 @@
     "@vitejs/plugin-react": "^6.0.2",
     "lucide-react": "^1.59.0",
     "playwright-core": "^1.64.1",
+    "rolldown": "1.2.14",
     "tailwindcss": "^4.3.3",
     "typescript": "~6.0.3",
     "vite": "^8.0.16",

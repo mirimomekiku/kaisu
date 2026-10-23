@@ -80,6 +80,10 @@ works behind a proxy, and can check again if you installed the tools yourself. A
 - **Audio output and details:** choose an available output in Settings > Playback or Playback options. Permission and
   platform support determine which devices are available. A disconnected device falls back to the system default while
   its preference is retained. Playback details show the file, format, sample rate, bitrate, bit depth and decoder errors when available.
+- **Equalizer (Windows and Linux):** open Equalizer from the player bar or full-screen player, or Settings > Playback.
+  Adjust ten bands from 31 Hz to 16 kHz and a preamp, choose a preset, or reset to flat. Bypass keeps your adjustments.
+  Automatic headroom reduces EQ boosts to help avoid clipping. Settings stay local and apply to both crossfade decks;
+  your music files are unchanged.
 - **Mini-player:** use Playback options > Open mini-player for a compact always-on-top window with playback, seek and volume controls.
   Return to the full window without restarting playback.
 - Read saved lyrics or choose to look them up online. Measure loudness to make loud songs quieter during playback.

@@ -74,8 +74,9 @@ fn serve(mut stream: TcpStream, port: u16, files: &Mutex<VecDeque<(String, PathB
     let mut request = String::new();
     let mut used = reader.read_line(&mut request)?;
     let parts: Vec<_> = request.split_whitespace().collect();
-    if parts.len() != 3 || !matches!(parts[0], "GET" | "HEAD") { return status(&mut stream, "405 Method Not Allowed"); }
+    if parts.len() != 3 || !matches!(parts[0], "GET" | "HEAD" | "OPTIONS") { return status(&mut stream, "405 Method Not Allowed"); }
     let head = parts[0] == "HEAD";
+    let preflight = parts[0] == "OPTIONS";
     let token = parts[1].strip_prefix('/').unwrap_or("").to_string();
     if token.len() != 32 || !token.bytes().all(|b| b.is_ascii_hexdigit()) { return status(&mut stream, "404 Not Found"); }
     let mut host = String::new(); let mut range = None;
@@ -97,29 +98,44 @@ fn serve(mut stream: TcpStream, port: u16, files: &Mutex<VecDeque<(String, PathB
     let Some(path) = path else { return status(&mut stream, "404 Not Found"); };
     // Recheck current folder authorization on every request, including seeks after a folder was removed.
     let Ok(real) = app.state::<crate::scope::Scope>().media_file(&path.to_string_lossy()) else { return status(&mut stream, "403 Forbidden"); };
+    // Web Audio needs CORS-readable media. Capabilities remain random, file-specific and scope-checked.
+    if preflight { return status(&mut stream, "204 No Content"); }
     let Ok(mut file) = File::open(&real) else { return status(&mut stream, "404 Not Found"); };
     let len = file.metadata()?.len();
     let (code, start, end) = if let Some(value) = range {
         let Some((start, end)) = byte_range(&value, len) else {
-            write!(stream, "HTTP/1.1 416 Range Not Satisfiable\r\nContent-Range: bytes */{len}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")?;
+            write!(stream, "HTTP/1.1 416 Range Not Satisfiable\r\n{CORS_HEADERS}Content-Range: bytes */{len}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")?;
             return Ok(());
         };
         ("206 Partial Content", start, end)
     } else { ("200 OK", 0, len.saturating_sub(1)) };
     let count = if len == 0 { 0 } else { end - start + 1 };
-    write!(stream, "HTTP/1.1 {code}\r\nContent-Type: {}\r\nContent-Length: {count}\r\nAccept-Ranges: bytes\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n", mime(&real))?;
+    write!(stream, "HTTP/1.1 {code}\r\n{CORS_HEADERS}Content-Type: {}\r\nContent-Length: {count}\r\nAccept-Ranges: bytes\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n", mime(&real))?;
     if code.starts_with("206") { write!(stream, "Content-Range: bytes {start}-{end}/{len}\r\n")?; }
     write!(stream, "\r\n")?;
     if !head { file.seek(SeekFrom::Start(start))?; io::copy(&mut file.take(count), &mut stream)?; }
     Ok(())
 }
+const CORS_HEADERS: &str = "Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, HEAD, OPTIONS\r\nAccess-Control-Allow-Headers: Range\r\nAccess-Control-Expose-Headers: Content-Length, Content-Range, Accept-Ranges\r\n";
 fn status(stream: &mut TcpStream, code: &str) -> io::Result<()> {
-    write!(stream, "HTTP/1.1 {code}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+    write!(stream, "HTTP/1.1 {code}\r\n{CORS_HEADERS}Content-Length: 0\r\nConnection: close\r\n\r\n")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn cors_status_exposes_anonymous_media_access_without_credentials() {
+        let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (mut server, _) = listener.accept().unwrap();
+        status(&mut server, "204 No Content").unwrap(); drop(server);
+        let mut response = String::new(); client.read_to_string(&mut response).unwrap();
+        assert!(response.starts_with("HTTP/1.1 204"));
+        assert!(response.contains("Access-Control-Allow-Origin: *\r\n"));
+        assert!(response.contains("Access-Control-Allow-Headers: Range\r\n"));
+        assert!(!response.contains("Access-Control-Allow-Credentials"));
+    }
     #[test]
     fn seek_ranges_cover_explicit_open_ended_and_suffix_requests() {
         assert_eq!(byte_range("bytes=10-19", 100), Some((10, 19)));

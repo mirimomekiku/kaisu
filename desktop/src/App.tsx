@@ -59,6 +59,7 @@ import { usePlaylists } from "./hooks/usePlaylists";
 import { relocateTrack } from "./lib/relocation";
 import { useAudioOutput, PlaybackServicesContext } from "./hooks/useAudioOutput";
 import { toPlayerTrack } from "./lib/library";
+import { EqualizerContext } from "./components/Equalizer";
 
 const isFinishedStatus = (status: string) => status === "completed" || status === "error" || status === "cancelled";
 
@@ -89,6 +90,7 @@ export default function App() {
 
   const { settings, settingsRef, settingsLoaded, changeSettings, changeSettingsGuarded, ensureLyricsConsent, applyLoaded } = useAppSettings(confirm);
   const audioOutput = useAudioOutput(player, settings, settingsLoaded, changeSettings);
+  useEffect(() => { if (settingsLoaded) player.processing?.configure(settings.equalizer); }, [player, settingsLoaded, settings.equalizer]);
   useEffect(() => { if (settingsLoaded) player.setPlaybackPolicy(settings.skipUnavailableTracks, settings.crossfadeCurve, settings.preserveAlbumTransitions); }, [player, settingsLoaded, settings.skipUnavailableTracks, settings.crossfadeCurve, settings.preserveAlbumTransitions]);
   useEffect(() => { if (settingsLoaded) player.setTransitions(settings.gaplessPlayback, settings.crossfadeSeconds); }, [player, settingsLoaded, settings.gaplessPlayback, settings.crossfadeSeconds]);
   const { history, historyRef, setHistory, updateHistory } = useHistoryStore();
@@ -449,6 +451,7 @@ export default function App() {
     <PlayerContext.Provider value={player}>
     <MediaActionsContext.Provider value={mediaDialogs.actions}>
     <PlaybackServicesContext.Provider value={{ output: audioOutput, locate: locatePlayback }}>
+    <EqualizerContext.Provider value={{ settings: settings.equalizer, ready: settingsLoaded, change: (equalizer) => changeSettings({ equalizer }) }}>
     {mini.mini ? <MiniPlayer engine={player} onRestore={() => void mini.change(false)} busy={mini.busy} error={flash?.error ? flash.text : undefined} /> : <>
     <div className="app">
       <Toolbar
@@ -698,6 +701,7 @@ export default function App() {
       )}
     </div>
     </>}
+    </EqualizerContext.Provider>
     </PlaybackServicesContext.Provider>
     </MediaActionsContext.Provider>
     </PlayerContext.Provider>

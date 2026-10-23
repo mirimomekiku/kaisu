@@ -1884,3 +1884,12 @@ select.field:disabled, select.source-select:disabled { opacity:.6; }
 .full-transport .playback-details { max-height: 90px; }
 .full-options { flex-wrap: wrap; }
 .filter-dropdown { max-height: calc(100vh - 16px); overflow-y: auto; }
+.equalizer { display:flex; flex-direction:column; gap:14px; min-width:0; padding:8px; }
+.eq-tools { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+.eq-tools label { display:flex; gap:6px; align-items:center; }
+.eq-preamp { display:flex; align-items:center; gap:10px; }
+.eq-preamp input { flex:1; min-width:60px; }
+.eq-bands { display:grid; grid-template-columns:repeat(auto-fit,minmax(43px,1fr)); gap:8px; }
+.eq-band { display:flex; flex-direction:column; align-items:center; gap:7px; font-size:11px; }
+.eq-band input[type=range] { writing-mode:vertical-lr; direction:rtl; height:105px; width:24px; }
+.eq-band output { white-space:nowrap; font-size:10px; }

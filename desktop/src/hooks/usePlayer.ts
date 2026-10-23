@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useRef, useSyncExternalStore } fr
 import { playInApp } from "../lib/api";
 import { PlayerEngine, type PlayerState, type PlayerTime, type Track } from "../lib/audioEngine";
 import { bindMediaSession } from "../lib/mediaSession";
+import { EqualizerGraph } from "../lib/equalizerGraph";
 import type { Positions } from "../lib/positions";
 import { loadPlayer, loadPositions, savePlayer, savePositions } from "../lib/storage";
 
@@ -40,10 +41,12 @@ export function useCreatePlayer(onPlayed?: (track: Track) => void, onListen?: (t
 
   if (engineRef.current === null) {
     const audio = new Audio();
+    audio.crossOrigin = "anonymous";
     audio.preload = "metadata";
     engineRef.current = new PlayerEngine({
       audio,
-      createAudio: () => { const next = new Audio(); next.preload = "auto"; return next; },
+      processing: new EqualizerGraph(),
+      createAudio: () => { const next = new Audio(); next.preload = "auto"; next.crossOrigin = "anonymous"; return next; },
       onPlayed: (track) => playedRef.current?.(track),
       onListen: (track, seconds) => listenedRef.current?.(track, seconds),
       resolve: (track) => playInApp(track.path),

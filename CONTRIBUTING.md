@@ -80,6 +80,23 @@ a guarded native shell operation; other platforms use the `trash` crate. Never f
 - `round22` covers delayed-source cancellation, retry/locate/skip, playback quality details, output-device persistence,
   disconnect/reconnect fallback and switching errors. Engine tests additionally cover bounded automatic skipping,
   stale decoder events, loading timeouts, equal-power/album transitions and crossfade rollback.
+- `round23` covers the ten-band equalizer, presets, custom gains, reset/bypass, saved settings, fullscreen and minimum-size
+  layouts. OfflineAudioContext tests render the production EqualizerGraph to verify boost, attenuation and headroom;
+  a context without `setSinkId` exercises the media-stream bridge used when only media-element routing is available.
+- `npm run test:real:eq:windows` runs the production DSP graph in the real Windows WebView2, against temporary PCM audio
+  served by the Rust capability stream. It measures non-silent output, 6 dB boost, headroom, bypass, volume, mute and both decks.
+  It uses a temporary local CDP test session and needs a current debug executable, without ffmpeg or WebDriver.
+  Linux uses the shared Web Audio graph and `test:real:playback` with WebKitGTK/tauri-driver; its EQ check measures non-silent
+  processed audio. A Linux native run is still needed to validate the installed system's WebKitGTK/GStreamer stack.
+- The native media stream permits anonymous CORS access for its random capabilities, including Range preflights.
+  Host validation and per-request folder authorization still apply. This avoids the silent cross-origin output required by
+  the [Web Audio specification](https://www.w3.org/TR/webaudio-1.1/).
+- Native playback validation requires a newly built app, `tauri-driver`, ffmpeg (`KAISU_FFMPEG` can override its path),
+  and on Windows a matching Edge WebDriver (`KAISU_NATIVE_DRIVER`). Close any existing Kaisu instance first.
+  `npm run test:real:playback` reports missing prerequisites and writes `src-tauri/target/playback-report.json` with
+  passed, failed or blocked status. The runner checks real decoding, long seeks, queue/crossfade controls, corrupt media
+  and simulated unavailable paths using temporary files; it does not physically disconnect a drive or verify perceived sound quality.
+  See [Tauri WebDriver setup](https://v2.tauri.app/develop/tests/webdriver/).
 - Output routing uses the [Audio Output Devices API](https://developer.mozilla.org/en-US/docs/Web/API/HTMLMediaElement/setSinkId),
   applying the sink to both active and preloaded decks. Device permission prompts are only opened by a user action;
   the app never requests microphone access to enumerate speakers.

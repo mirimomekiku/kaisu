@@ -12,6 +12,7 @@ import QueuePanel from "./QueuePanel";
 import PlaybackDetails from "./PlaybackDetails";
 import AudioOutputPicker from "./AudioOutputPicker";
 import { FilterDropdown } from "./Dropdown";
+import EqualizerButton from "./Equalizer";
 
 const nextRepeat: Record<RepeatMode, RepeatMode> = { off: "all", all: "one", one: "off" };
 
@@ -49,6 +50,7 @@ export default function FullScreenPlayer({ engine, onClose }: { engine: PlayerEn
   if (!track) return null;
   return createPortal(<div ref={root} role="dialog" aria-modal="true" aria-label="Full-screen player" className="full-player">
     <header className="full-header" data-tauri-drag-region>
+      <EqualizerButton />
       <button className="btn" aria-label="Exit full-screen player" onClick={onClose}><Minimize2 className="w-4 h-4" />Back to Kaisu</button>
       <div className="full-heading"><span>Now playing</span><b>Kaisu</b></div>
       <div role="tablist" aria-label="Player view" className="seg blue">

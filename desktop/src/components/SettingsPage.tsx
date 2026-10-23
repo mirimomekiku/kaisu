@@ -14,6 +14,7 @@ import SiteRulesEditor from "./SiteRulesEditor";
 import { LAYOUT_LABEL, NAME_LABEL, checkCustomName, previewPath } from "../lib/output";
 import { ACCENTS, type Accent, type Mode, type Settings, type SubtitleMode, type Theme } from "../lib/storage";
 import AudioOutputPicker from "./AudioOutputPicker";
+import { EqualizerControls } from "./Equalizer";
 
 export type EngineState =
   | { kind: "idle" }
@@ -64,6 +65,7 @@ const SETTINGS_SECTIONS: Record<string, { section: string; keywords: string }> =
   "Playback transitions": { section: "Playback", keywords: "music audio gapless crossfade player" },
   "Playback recovery": { section: "Playback", keywords: "skip failed unavailable retry missing" },
   "Audio output": { section: "Playback", keywords: "speakers headphones device output" },
+  Equalizer: { section: "Playback", keywords: "eq bass treble bands frequencies preamp presets sound" },
   "Move downloads": { section: "Automation", keywords: "move copy external drive destination" },
   "Clean up": { section: "Automation", keywords: "delete trash older days cleanup" },
   "Site rules": { section: "Automation", keywords: "site channel format destination rules" },
@@ -742,6 +744,7 @@ export default function SettingsPage({ settings, effectiveOutDir, engine, engine
       </Group>
       <Group title="Playback recovery" hint="Automatic skipping stops once every remaining file has failed. Files being edited are kept out of playback."><div className="pref-row"><label><input type="checkbox" aria-label="Skip unavailable tracks automatically" checked={settings.skipUnavailableTracks} onChange={(e) => onChange({ skipUnavailableTracks: e.target.checked })} /> Skip unavailable tracks automatically</label></div></Group>
       <Group title="Audio output"><AudioOutputPicker /></Group>
+      <Group title="Equalizer" hint="Ten frequency bands for the music player on Windows and Linux. Turning it off keeps your saved adjustments."><EqualizerControls /></Group>
       <Group title="Helpers">
         <div className="pref-row">
           <label className="flex items-center gap-2">

@@ -1,6 +1,7 @@
 import { insertAfter, moveItem, removeAt, shuffleAround, unshuffle } from "./playQueue";
 import { forget, remember, resumeAt, type Positions } from "./positions";
 import { relocatePositions } from "./relocation";
+import type { AudioProcessing } from "./equalizerGraph";
 
 // The music player's brain: a queue, the audio element, and everything that happens around them (resuming a long file where
 // it stopped, speed, a sleep timer, repeat and shuffle). It knows nothing about the page, so it can be tested with a fake
@@ -77,6 +78,7 @@ export interface AudioLike {
 }
 
 export interface EngineDeps {
+  processing?: AudioProcessing;
   audio: AudioLike;
   createAudio?: () => AudioLike;
   /** Makes a file playable and says where from (the page may only play files it has been told about). */
@@ -198,6 +200,7 @@ export class PlayerEngine {
     this.loadToken++;
     this.listeners.clear();
     this.timeListeners.clear();
+    this.deps.processing?.dispose();
   }
 
   // ---- reading --------------------------------------------------------------------------------
@@ -217,6 +220,7 @@ export class PlayerEngine {
   get current(): Track | null {
     return this.state.queue[this.state.index] ?? null;
   }
+  get processing() { return this.deps.processing; }
 
   private now = () => (this.deps.now ?? Date.now)();
 
@@ -288,12 +292,14 @@ export class PlayerEngine {
     this.set({ index, loading: true, error: null, errorDetails: null, playing: false, duration: track.duration ?? 0 });
     this.armWatchdog();
     // Start/resume the context while this call still belongs to the user's play gesture.
+    const activation = this.deps.processing?.activate(); activation?.catch(() => {});
     this.setTime(0, track.duration ?? 0);
     this.audio.pause();
     let src: string;
     try {
       src = await this.deps.resolve(track);
       if (token !== this.loadToken || this.disposed) return;
+      await activation;
       await this.routeAudio(this.audio);
     } catch (e) {
       if (token === this.loadToken) this.fail((e as { name?: string })?.name === "NotAllowedError" ? "Press play to start the music." : errorText(e), `Opening media: ${errorText(e)}`, (e as { name?: string })?.name !== "NotAllowedError");
@@ -334,7 +340,7 @@ export class PlayerEngine {
       const token = this.loadToken; const audio = this.audio;
       this.wantsPlay = true; this.set({ loading: true }); this.armWatchdog();
       const start = () => token === this.loadToken && audio === this.audio && this.wantsPlay ? audio.play() : Promise.resolve();
-      const resumed = start();
+      const resumed = this.deps.processing ? this.deps.processing.activate().then(start) : start();
       void resumed.catch((e) => {
         if (token !== this.loadToken || audio !== this.audio || !this.wantsPlay) return;
         const why = playbackError(e);
@@ -758,14 +764,16 @@ export class PlayerEngine {
   }
 
   private async routeAudio(audio: AudioLike) {
+    this.deps.processing?.attach(audio);
     if (!audio.setSinkId) { if (this.sinkId) throw new Error("Audio output selection is not supported by this player."); return; }
     let id: string;
     do {
       id = this.sinkId;
-      try { await audio.setSinkId(id); }
+      try { await audio.setSinkId(id); await this.deps.processing?.setOutput(id); }
       catch (e) {
         if (!id) throw e;
         this.sinkId = "";
+        await this.deps.processing?.setOutput("");
         await Promise.allSettled([...this.bound.keys()].map((deck) => deck.setSinkId?.("")));
         this.set({ notice: "The selected audio output is unavailable. Using the system default." });
       }
@@ -781,9 +789,10 @@ export class PlayerEngine {
       try { await Promise.all([...this.bound.keys()].map((audio) => {
         if (!audio.setSinkId) { if (id) throw new Error("This player does not support output selection."); return; }
         return audio.setSinkId(id);
-      })); if (this.state.notice?.startsWith("The selected audio output is unavailable.")) this.set({ notice: null }); }
+      })); await this.deps.processing?.setOutput(id); if (this.state.notice?.startsWith("The selected audio output is unavailable.")) this.set({ notice: null }); }
       catch (e) {
         this.sinkId = "";
+        await this.deps.processing?.setOutput("");
         await Promise.allSettled([...this.bound.keys()].map((audio) => audio.setSinkId?.("")));
         this.set({ notice: "The selected audio output is unavailable. Using the system default." });
         throw e;
@@ -858,7 +867,7 @@ export class PlayerEngine {
   }
 
   private unbindAudio(audio: AudioLike) { const handlers = this.bound.get(audio) ?? []; for (const [type, fn] of handlers) audio.removeEventListener(type, fn); this.bound.delete(audio); }
-  private dropAudio(audio: AudioLike) { this.unbindAudio(audio); audio.pause(); audio.src = ""; }
+  private dropAudio(audio: AudioLike) { this.unbindAudio(audio); audio.pause(); audio.src = ""; this.deps.processing?.detach(audio); }
 
   private nextIndex() {
     if (this.state.sleep?.kind === "track" || this.state.repeat === "one") return -1;

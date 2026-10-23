@@ -1,4 +1,5 @@
 import { sanitizeMusicPreferences, type MusicPreferences } from "./musicPreferences";
+import { defaultEqualizer, sanitizeEqualizer, type EqualizerSettings } from "./equalizer";
 import { load, type Store } from "@tauri-apps/plugin-store";
 import { secretDelete, secretGet, secretSet } from "./api";
 import { joinProxyPassword, splitProxyPassword } from "./proxy";
@@ -25,6 +26,7 @@ export const ACCENTS: Accent[] = ["blue", "orange", "green", "purple", "pink", "
 export type ViewMode = "list" | "grid" | "compact" | "details";
 
 export interface Settings {
+  equalizer: EqualizerSettings;
   mode: Mode;
   outDir: string | null;
   autoUpdate: boolean;
@@ -130,6 +132,7 @@ export interface HistoryItem {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
+  equalizer: defaultEqualizer(),
   mode: "simple",
   outDir: null,
   autoUpdate: true,
@@ -234,6 +237,7 @@ export async function loadSettings(): Promise<Settings> {
     // Before language choice existed there was one on/off switch for English subtitles.
     if (saved?.subtitles === true && saved.subtitleMode === undefined) merged.subtitleMode = "embed";
     merged.gaplessPlayback = merged.gaplessPlayback !== false;
+    merged.equalizer = sanitizeEqualizer(saved?.equalizer);
     merged.crossfadeSeconds = Math.min(12, Math.max(0, Number(merged.crossfadeSeconds) || 0));
     merged.crossfadeCurve = merged.crossfadeCurve === "equalPower" ? "equalPower" : "linear";
     merged.preserveAlbumTransitions = merged.preserveAlbumTransitions !== false;

@@ -14,6 +14,7 @@ import QueuePanel from "./QueuePanel";
 import { useMediaActions } from "../hooks/useMediaDialogs";
 import PlaybackDetails from "./PlaybackDetails";
 import AudioOutputPicker from "./AudioOutputPicker";
+import EqualizerButton from "./Equalizer";
 
 const NEXT_REPEAT: Record<RepeatMode, RepeatMode> = { off: "all", all: "one", one: "off" };
 const REPEAT_LABEL: Record<RepeatMode, string> = { off: "Repeat: off", all: "Repeat: the whole queue", one: "Repeat: this track" };
@@ -132,6 +133,7 @@ export default function PlayerBar({ engine, onMini, miniBusy }: { engine: Player
       </div>
 
       <div className="pb-extras">
+        <EqualizerButton />
         <button className="row-btn" aria-label="Open full-screen player" title="Full-screen player" disabled={fullscreen.busy} onClick={(e) => { setPanel(null); void fullscreen.enter(e.currentTarget); }}><Maximize2 className="w-3.5 h-3.5" /></button>
         <button className="row-btn" aria-label="Show the lyrics" aria-expanded={panel === "lyrics"} title="Lyrics" style={panel === "lyrics" ? { background: "rgba(59,130,230,.25)" } : undefined} onClick={() => setPanel((p) => (p === "lyrics" ? null : "lyrics"))}>
           <Captions className="w-3.5 h-3.5" />
