@@ -1878,3 +1878,9 @@ select.field:disabled, select.source-select:disabled { opacity:.6; }
 .download-selection { padding: 8px 12px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; border-bottom: 1px solid var(--hairline); }
 .download-selection-items { width: 100%; max-height: 90px; overflow: auto; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 4px 12px; }
 .download-selection-items label { display: flex; min-width: 0; gap: 6px; align-items: center; }
+.playback-details { font-size: 11px; padding: 4px 10px; min-width: 0; max-height: 150px; overflow: auto; }
+.playback-details dd { margin: 0 0 4px; overflow-wrap: anywhere; }
+.playback-error-details { white-space: pre-wrap; overflow-wrap: anywhere; }
+.full-transport .playback-details { max-height: 90px; }
+.full-options { flex-wrap: wrap; }
+.filter-dropdown { max-height: calc(100vh - 16px); overflow-y: auto; }

@@ -12,6 +12,8 @@ import { covers } from "../lib/covers";
 import LyricsPanel from "./LyricsPanel";
 import QueuePanel from "./QueuePanel";
 import { useMediaActions } from "../hooks/useMediaDialogs";
+import PlaybackDetails from "./PlaybackDetails";
+import AudioOutputPicker from "./AudioOutputPicker";
 
 const NEXT_REPEAT: Record<RepeatMode, RepeatMode> = { off: "all", all: "one", one: "off" };
 const REPEAT_LABEL: Record<RepeatMode, string> = { off: "Repeat: off", all: "Repeat: the whole queue", one: "Repeat: this track" };
@@ -25,6 +27,8 @@ function SleepPicker({ engine }: { engine: PlayerEngine }) {
   const { sleep } = usePlayerState(engine);
   // The countdown is shown in whole minutes, so it only needs to look again now and then.
   const [now, setNow] = useState(() => Date.now());
+  const [fadeSeconds, setFadeSeconds] = useState(sleep?.fadeSeconds ?? 30);
+  const [finishTrack, setFinishTrack] = useState(sleep?.kind === "timer" && !!sleep.finishTrack);
   useEffect(() => {
     if (sleep?.kind !== "timer") return;
     setNow(Date.now());
@@ -34,7 +38,7 @@ function SleepPicker({ engine }: { engine: PlayerEngine }) {
 
   const value = sleep === null ? "off" : sleep.kind === "track" ? "track" : "running";
   return (
-    <select
+    <div className="flex flex-col gap-1"><select
       className="field"
       aria-label="Sleep timer"
       title="Stop playing after a while"
@@ -42,8 +46,8 @@ function SleepPicker({ engine }: { engine: PlayerEngine }) {
       onChange={(e) => {
         const v = e.target.value;
         if (v === "off") engine.setSleep(null);
-        else if (v === "track") engine.setSleep("track");
-        else if (v !== "running") engine.setSleep({ minutes: Number(v) });
+        else if (v === "track") engine.setSleep("track", fadeSeconds);
+        else if (v !== "running") engine.setSleep({ minutes: Number(v), fadeSeconds, finishTrack });
       }}
     >
       <option value="off">Sleep: off</option>
@@ -55,6 +59,9 @@ function SleepPicker({ engine }: { engine: PlayerEngine }) {
       ))}
       <option value="track">End of this track</option>
     </select>
+    <label>Fade out<select className="field" aria-label="Sleep fade duration" disabled={sleep !== null} value={fadeSeconds} onChange={(e) => setFadeSeconds(Number(e.target.value))}><option value="0">No fade</option><option value="10">10 seconds</option><option value="30">30 seconds</option><option value="60">60 seconds</option></select></label>
+    <label><input type="checkbox" aria-label="Finish current song after timer" disabled={sleep !== null} checked={finishTrack} onChange={(e) => setFinishTrack(e.target.checked)} /> Finish current song after timer</label>
+    <span className="dim">Choose options before starting a timer.</span></div>
   );
 }
 
@@ -97,7 +104,7 @@ export default function PlayerBar({ engine, onMini, miniBusy }: { engine: Player
             {track.title}
           </div>
           <div className="pb-sub truncate" role={state.error ? "alert" : undefined} style={state.error ? { color: "#b3261e" } : undefined} title={state.error ?? undefined}>
-            {state.error ?? ([track.artist, track.album].filter(Boolean).join(" · ") || " ")}
+            {state.error ?? (state.loading ? state.phase === "buffering" ? "Buffering…" : "Loading…" : [track.artist, track.album].filter(Boolean).join(" · ") || " ")}
           </div>
         </div>
       </div>
@@ -106,7 +113,7 @@ export default function PlayerBar({ engine, onMini, miniBusy }: { engine: Player
         <button className="row-btn" aria-label="Previous track" title="Previous track" onClick={() => engine.previous()}>
           <SkipBack className="w-3.5 h-3.5" />
         </button>
-        <button className="btn small pb-play" aria-label={state.playing ? "Pause" : "Play"} title={state.playing ? "Pause" : "Play"} onClick={() => engine.toggle()}>
+        <button className="btn small pb-play" aria-label={state.playing || state.loading ? "Pause" : "Play"} title={state.playing || state.loading ? "Pause" : "Play"} onClick={() => engine.toggle()}>
           {state.loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : state.playing ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
         </button>
         <button className="row-btn" aria-label="Next track" title="Next track" disabled={last && state.repeat !== "all"} onClick={() => engine.next()}>
@@ -133,6 +140,8 @@ export default function PlayerBar({ engine, onMini, miniBusy }: { engine: Player
           <ListMusic className="w-3.5 h-3.5" /> {state.queue.length}
         </button>
         <FilterDropdown label="Playback options">
+        {!state.error && <PlaybackDetails engine={engine} />}
+        <AudioOutputPicker />
         <TrackPreferences path={track.path} title={track.title} compact />
         <label>Speed<select className="field" aria-label="Playback speed" title="Playback speed" value={state.rate} onChange={(e) => engine.setRate(Number(e.target.value))}>
           {RATES.map((r) => (
@@ -141,7 +150,7 @@ export default function PlayerBar({ engine, onMini, miniBusy }: { engine: Player
             </option>
           ))}
         </select></label>
-        <label>Sleep timer<SleepPicker engine={engine} /></label>
+        <div>Sleep timer<SleepPicker engine={engine} /></div>
         {onMini && <button className="btn small" disabled={miniBusy} aria-label="Open mini-player" title="Compact, always-on-top player" onClick={onMini}>Open mini-player</button>}
         {state.sleep && <span className="dim">{state.sleep.kind === "track" ? "Stops after this track." : `Stops in ${minutesLeft(state.sleep, Date.now())} minutes.`}</span>}
         </FilterDropdown>
@@ -154,6 +163,7 @@ export default function PlayerBar({ engine, onMini, miniBusy }: { engine: Player
         </button>
       </div>
     </section>
+    {(state.error || state.notice) && !fullscreen.expanded && <PlaybackDetails engine={engine} />}
     {fullscreen.error && <p className="player-window-error" role="alert">{fullscreen.error}</p>}
     </>
   );

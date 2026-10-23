@@ -70,7 +70,16 @@ works behind a proxy, and can check again if you installed the tools yourself. A
   Permanent deletion is available explicitly. Kaisu checks that copies still match before removal; companion files are kept.
 - **Full-screen player:** use the expand button in the player bar for large artwork, synced or plain lyrics, an Up next queue, and playback controls. Click a timed lyric to seek. Escape returns to the app without restarting the song. Online lyric lookup asks for consent.
 - Play music in Kaisu with a queue, shuffle, repeat, playback speed and a sleep timer. Long tracks remember your place. Speed, sleep and mini-player controls are grouped in Playback options.
+- **Gentle sleep timer:** choose a 10-, 30- or 60-second fade, or no fade. Stop at the deadline or finish the current song
+  and fade near its end. Your normal volume returns when the timer stops or is cancelled.
 - **Playback transitions:** Settings > Playback transitions enables next-track preloading (on by default) and optional crossfade, up to 12 seconds. Pause, mute and volume affect both songs during overlap. Short tracks use shorter fades; repeat-one and sleep-after-track do not overlap. Exact gapless timing depends on the audio format and system player.
+- Choose linear or equal-power crossfades. Consecutive numbered tracks on the same album can play without overlap.
+  If an incoming track fails during overlap, Kaisu restores the outgoing song when it can still play.
+- **Playback recovery:** failed tracks offer Retry, Locate file and Skip. Optional automatic skipping stops when no
+  untried tracks remain, including when repeat is enabled. Loading and buffering time out with a readable recovery message.
+- **Audio output and details:** choose an available output in Settings > Playback or Playback options. Permission and
+  platform support determine which devices are available. A disconnected device falls back to the system default while
+  its preference is retained. Playback details show the file, format, sample rate, bitrate, bit depth and decoder errors when available.
 - **Mini-player:** use Playback options > Open mini-player for a compact always-on-top window with playback, seek and volume controls.
   Return to the full window without restarting playback.
 - Read saved lyrics or choose to look them up online. Measure loudness to make loud songs quieter during playback.

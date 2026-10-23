@@ -121,7 +121,7 @@ describe("quality", () => {
 
 describe("toPlayerTrack", () => {
   it("hands the player what it shows", () => {
-    expect(toPlayerTrack(LIB[0])).toEqual({ path: LIB[0].path, title: "Da Funk", artist: "Daft Punk", album: "Homework", duration: 200 });
+    expect(toPlayerTrack(LIB[0])).toMatchObject({ path: LIB[0].path, title: "Da Funk", artist: "Daft Punk", album: "Homework", duration: 200, trackNumber: 1, format: "MP3", sampleRate: 44100, bitrate: 192 });
     expect(toPlayerTrack(t({ title: "z", duration: 0 }))).toMatchObject({ artist: undefined, album: undefined, duration: undefined });
   });
 });

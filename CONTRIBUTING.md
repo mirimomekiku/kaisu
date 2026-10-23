@@ -75,8 +75,17 @@ a guarded native shell operation; other platforms use the `trash` crate. Never f
   validate Host, and recheck current folder scope on every request. The webview asset protocol remains for previews.
 - `round19` verifies native select sizing and Downloads/History context menus in every layout. `round20` covers the full-screen
   player, shared audio/transport, native-window lifecycle, focus, lyrics/consent and stale lookup results.
+- `round21` covers playlist folders, custom covers and drag order, waiting-download search/bulk edits, persistence,
+  sleep controls and minimum-window layouts. Engine tests cover timed fade-out and finish-current-song behavior.
+- `round22` covers delayed-source cancellation, retry/locate/skip, playback quality details, output-device persistence,
+  disconnect/reconnect fallback and switching errors. Engine tests additionally cover bounded automatic skipping,
+  stale decoder events, loading timeouts, equal-power/album transitions and crossfade rollback.
+- Output routing uses the [Audio Output Devices API](https://developer.mozilla.org/en-US/docs/Web/API/HTMLMediaElement/setSinkId),
+  applying the sink to both active and preloaded decks. Device permission prompts are only opened by a user action;
+  the app never requests microphone access to enumerate speakers.
 - The proxy is passed explicitly to every yt-dlp call and to the setup downloads.
 - Search sources are a short list in `search.rs` and `lib/sources.ts`; add one only after checking it returns results.
+
 
 ## Releases
 

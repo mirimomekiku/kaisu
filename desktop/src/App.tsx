@@ -57,6 +57,8 @@ import { loadHistory, loadQueue, loadSettings, type HistoryItem, type ViewMode }
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { usePlaylists } from "./hooks/usePlaylists";
 import { relocateTrack } from "./lib/relocation";
+import { useAudioOutput, PlaybackServicesContext } from "./hooks/useAudioOutput";
+import { toPlayerTrack } from "./lib/library";
 
 const isFinishedStatus = (status: string) => status === "completed" || status === "error" || status === "cancelled";
 
@@ -86,6 +88,8 @@ export default function App() {
   useAutoClear(note, setNote, 4500);
 
   const { settings, settingsRef, settingsLoaded, changeSettings, changeSettingsGuarded, ensureLyricsConsent, applyLoaded } = useAppSettings(confirm);
+  const audioOutput = useAudioOutput(player, settings, settingsLoaded, changeSettings);
+  useEffect(() => { if (settingsLoaded) player.setPlaybackPolicy(settings.skipUnavailableTracks, settings.crossfadeCurve, settings.preserveAlbumTransitions); }, [player, settingsLoaded, settings.skipUnavailableTracks, settings.crossfadeCurve, settings.preserveAlbumTransitions]);
   useEffect(() => { if (settingsLoaded) player.setTransitions(settings.gaplessPlayback, settings.crossfadeSeconds); }, [player, settingsLoaded, settings.gaplessPlayback, settings.crossfadeSeconds]);
   const { history, historyRef, setHistory, updateHistory } = useHistoryStore();
   const onRelocated = (from: string, to: string) => relocateTrack({
@@ -162,6 +166,11 @@ export default function App() {
 
   // The music library: what was found last time, then what has changed since.
   const library = useLibrary({ ready: files.ready, historyCount: history.length, historyKey: history.map((h) => `${h.path}:${h.timestamp}`).join("\n"), showFlash });
+  useEffect(() => { player.updateTrackDetails(library.tracks.map(toPlayerTrack)); }, [player, library.tracks, playerLoaded]);
+  const locatePlayback = async (path: string) => {
+    const found = await library.management.locate(path);
+    if (found) { onRelocated(found.from, found.track.path); if (player.current?.path === found.track.path && player.getState().error) player.retry(); }
+  };
   useLoudness({ engine: player, enabled: settings.levelVolume, tracks: library.tracks, measure: library.measure });
 
   const copyText = useCallback(
@@ -439,6 +448,7 @@ export default function App() {
     <MusicPreferencesContext.Provider value={musicPreferences}>
     <PlayerContext.Provider value={player}>
     <MediaActionsContext.Provider value={mediaDialogs.actions}>
+    <PlaybackServicesContext.Provider value={{ output: audioOutput, locate: locatePlayback }}>
     {mini.mini ? <MiniPlayer engine={player} onRestore={() => void mini.change(false)} busy={mini.busy} error={flash?.error ? flash.text : undefined} /> : <>
     <div className="app">
       <Toolbar
@@ -688,6 +698,7 @@ export default function App() {
       )}
     </div>
     </>}
+    </PlaybackServicesContext.Provider>
     </MediaActionsContext.Provider>
     </PlayerContext.Provider>
     </MusicPreferencesContext.Provider>

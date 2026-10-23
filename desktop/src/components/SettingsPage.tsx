@@ -13,6 +13,7 @@ import ScheduleEditor from "./ScheduleEditor";
 import SiteRulesEditor from "./SiteRulesEditor";
 import { LAYOUT_LABEL, NAME_LABEL, checkCustomName, previewPath } from "../lib/output";
 import { ACCENTS, type Accent, type Mode, type Settings, type SubtitleMode, type Theme } from "../lib/storage";
+import AudioOutputPicker from "./AudioOutputPicker";
 
 export type EngineState =
   | { kind: "idle" }
@@ -61,6 +62,8 @@ const SETTINGS_SECTIONS: Record<string, { section: string; keywords: string }> =
   Downloads: { section: "Downloads", keywords: "folder output name layout audio mp3 quality cover lyrics subtitles speed concurrent" },
   "Saved presets": { section: "Downloads", keywords: "preset format choices" },
   "Playback transitions": { section: "Playback", keywords: "music audio gapless crossfade player" },
+  "Playback recovery": { section: "Playback", keywords: "skip failed unavailable retry missing" },
+  "Audio output": { section: "Playback", keywords: "speakers headphones device output" },
   "Move downloads": { section: "Automation", keywords: "move copy external drive destination" },
   "Clean up": { section: "Automation", keywords: "delete trash older days cleanup" },
   "Site rules": { section: "Automation", keywords: "site channel format destination rules" },
@@ -732,9 +735,13 @@ export default function SettingsPage({ settings, effectiveOutDir, engine, engine
       </Group>
 
       <Group title="Playback transitions" hint="Preload the next queued song to reduce gaps. Exact transitions depend on the audio format and system player.">
+        <Row label="Fade curve"><select className="field" aria-label="Crossfade curve" value={settings.crossfadeCurve} onChange={(e) => onChange({ crossfadeCurve: e.target.value as Settings["crossfadeCurve"] })}><option value="linear">Linear</option><option value="equalPower">Equal power</option></select></Row>
+        <div className="pref-row"><label><input type="checkbox" aria-label="Preserve album transitions" checked={settings.preserveAlbumTransitions} onChange={(e) => onChange({ preserveAlbumTransitions: e.target.checked })} /> Avoid crossfade between consecutive numbered tracks on the same album</label></div>
         <div className="pref-row"><label className="flex items-center gap-2"><input type="checkbox" aria-label="Gapless playback" checked={settings.gaplessPlayback} onChange={(e) => onChange({ gaplessPlayback: e.target.checked })} />Gapless playback (preload next track)</label></div>
         <Row label="Crossfade" hint="Optional overlap between songs. Short tracks use a shorter fade. Sleep after this track and repeat-one play without overlap."><select className="field" aria-label="Crossfade duration" disabled={!settings.gaplessPlayback} value={settings.crossfadeSeconds} onChange={(e) => onChange({ crossfadeSeconds: Number(e.target.value) })}>{[0, 1, 2, 3, 4, 5, 6, 8, 10, 12].map((n) => <option key={n} value={n}>{n === 0 ? "Off" : `${n} seconds`}</option>)}</select></Row>
       </Group>
+      <Group title="Playback recovery" hint="Automatic skipping stops once every remaining file has failed. Files being edited are kept out of playback."><div className="pref-row"><label><input type="checkbox" aria-label="Skip unavailable tracks automatically" checked={settings.skipUnavailableTracks} onChange={(e) => onChange({ skipUnavailableTracks: e.target.checked })} /> Skip unavailable tracks automatically</label></div></Group>
+      <Group title="Audio output"><AudioOutputPicker /></Group>
       <Group title="Helpers">
         <div className="pref-row">
           <label className="flex items-center gap-2">

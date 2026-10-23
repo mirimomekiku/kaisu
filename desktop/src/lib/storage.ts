@@ -69,6 +69,11 @@ export interface Settings {
   levelVolume: boolean;
   gaplessPlayback: boolean;
   crossfadeSeconds: number;
+  crossfadeCurve: "linear" | "equalPower";
+  preserveAlbumTransitions: boolean;
+  skipUnavailableTracks: boolean;
+  audioOutputId: string;
+  audioOutputLabel: string;
   watchClipboard: boolean;
   closeMode: CloseMode;
   theme: Theme;
@@ -159,6 +164,11 @@ export const DEFAULT_SETTINGS: Settings = {
   levelVolume: false,
   gaplessPlayback: true,
   crossfadeSeconds: 0,
+  crossfadeCurve: "linear",
+  preserveAlbumTransitions: true,
+  skipUnavailableTracks: false,
+  audioOutputId: "",
+  audioOutputLabel: "System default",
   watchClipboard: true,
   closeMode: "downloads",
   theme: "aqua",
@@ -225,6 +235,11 @@ export async function loadSettings(): Promise<Settings> {
     if (saved?.subtitles === true && saved.subtitleMode === undefined) merged.subtitleMode = "embed";
     merged.gaplessPlayback = merged.gaplessPlayback !== false;
     merged.crossfadeSeconds = Math.min(12, Math.max(0, Number(merged.crossfadeSeconds) || 0));
+    merged.crossfadeCurve = merged.crossfadeCurve === "equalPower" ? "equalPower" : "linear";
+    merged.preserveAlbumTransitions = merged.preserveAlbumTransitions !== false;
+    merged.skipUnavailableTracks = merged.skipUnavailableTracks === true;
+    merged.audioOutputId = typeof merged.audioOutputId === "string" ? merged.audioOutputId.slice(0, 1024) : "";
+    merged.audioOutputLabel = typeof merged.audioOutputLabel === "string" ? merged.audioOutputLabel.slice(0, 200) : "System default";
     merged.cleanupPermanent = merged.cleanupPermanent === true;
     merged.lyricsConsent = merged.lyricsConsent === true;
     merged.siteRules = sanitizeSiteRules(saved?.siteRules);
@@ -335,6 +350,9 @@ const asTrack = (t: unknown): Track | null => {
     artist: typeof r.artist === "string" ? r.artist : undefined,
     album: typeof r.album === "string" ? r.album : undefined,
     duration: typeof r.duration === "number" && Number.isFinite(r.duration) ? r.duration : undefined,
+    albumArtist: typeof r.albumArtist === "string" ? r.albumArtist.slice(0, 1000) : undefined,
+    format: typeof r.format === "string" ? r.format.slice(0, 40) : undefined,
+    ...Object.fromEntries((["trackNumber", "discNumber", "sampleRate", "bitrate", "bitDepth"] as const).map((key) => [key, typeof r[key] === "number" && Number.isFinite(r[key]) && r[key]! > 0 && r[key]! <= 1e7 ? r[key] : undefined])),
   };
 };
 

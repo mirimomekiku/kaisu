@@ -739,3 +739,251 @@ it("a pending source cannot reopen a file after it is released for editing", asy
   engine.play([A]); const release = engine.releaseFiles([A.path]); resolve("late-source"); await settleTransitions();
   expect(audio.src).toBe(""); expect(audio.playCalls).toBe(0); expect(engine.getState().playing).toBe(false); release(); engine.dispose();
 });
+
+it("removing a loading track discards its late source and leaves the replacement ready to resume", async () => {
+  let resolve!: (src: string) => void;
+  const { engine, audio } = make({}, (t) => t === A ? new Promise<string>((r) => { resolve = r; }) : Promise.resolve("source-for-B"));
+  try {
+    engine.play([A, { ...B, duration: 42 }]);
+    engine.remove(0);
+    resolve("source-for-A"); await settleTransitions();
+    expect(engine.current?.path).toBe(B.path);
+    expect(audio.src).toBe(""); expect(audio.playCalls).toBe(0);
+    expect(engine.getState()).toMatchObject({ playing: false, loading: false, error: null, duration: 42 });
+    expect(engine.getTime()).toEqual({ position: 0, duration: 42 });
+    engine.resume(); await settleTransitions();
+    expect(audio.src).toBe("source-for-B"); expect(audio.playCalls).toBe(1);
+    expect(engine.getState()).toMatchObject({ playing: true, loading: false });
+  } finally { engine.dispose(); }
+});
+
+it("releasing only the current file cancels a pending crossfade and preserves its resume position", async () => {
+  const { engine, audios, ready } = seamless(3);
+  let releaseFile: (() => void) | undefined;
+  try {
+    engine.play([A, B]); await settleTransitions(); ready(audios[0]); ready(audios[1]);
+    let releasePlay!: () => void; const play = audios[1].play.bind(audios[1]);
+    audios[1].play = async () => { await play(); await new Promise<void>((r) => { releasePlay = r; }); };
+    audios[0].currentTime = 8; audios[0].fire("timeupdate"); await settleTransitions();
+    releaseFile = engine.releaseFiles([A.path]); releasePlay(); await settleTransitions();
+    expect(engine.current?.path).toBe(A.path);
+    expect(engine.getState()).toMatchObject({ playing: false, loading: false });
+    expect(audios.every((a) => a.paused && a.src === "")).toBe(true);
+    engine.resume(); await settleTransitions(); expect(engine.getState().playing).toBe(false);
+    releaseFile(); releaseFile = undefined;
+    engine.resume(); await settleTransitions(); ready(audios[0]);
+    expect(engine.current?.path).toBe(A.path); expect(audios[0].currentTime).toBe(8);
+    expect(engine.getState().playing).toBe(true);
+  } finally { releaseFile?.(); engine.dispose(); }
+});
+
+describe("playback cancellation and recovery", () => {
+  it("does not surface a pending play rejection after the user pauses", async () => {
+    const { engine, audio } = make(); let reject!: (error: Error) => void;
+    audio.play = () => new Promise<void>((_, r) => { reject = r; });
+    try {
+      engine.play([A]); await flush(); engine.pause(); reject(new Error("decoder cancelled")); await flush();
+      expect(engine.getState()).toMatchObject({ phase: "paused", error: null, loading: false });
+    } finally { engine.dispose(); }
+  });
+  it("keeps an explicit seek to zero while a long track is still loading", async () => {
+    let release!: (src: string) => void;
+    const { engine, audio } = make({ [A.path]: { t: 50, d: 900, at: 1 } }, () => new Promise<string>((r) => { release = r; }));
+    try {
+      engine.play([{ ...A, duration: 900 }]); engine.seek(0); release("source"); await flush(); audio.loaded(900);
+      expect(audio.currentTime).toBe(0); expect(engine.getTime().position).toBe(0);
+    } finally { engine.dispose(); }
+  });
+  it("normalizes malformed restored controls and queue indices", () => {
+    const { engine, audio } = make();
+    try {
+      engine.restore([A, B], NaN, Infinity); engine.applySettings({ volume: NaN, rate: Infinity, repeat: "off", shuffle: false });
+      engine.jump(0.5); engine.remove(NaN); engine.move(NaN, 1);
+      expect(engine.getState()).toMatchObject({ index: 0, volume: 1, rate: 1 }); expect(engine.getTime().position).toBe(0);
+      expect(audio.volume).toBe(1); expect(audio.playbackRate).toBe(1);
+    } finally { engine.dispose(); }
+  });
+  it("pauses an unresolved source, ignores its late result and resumes explicitly", async () => {
+    let release!: (src: string) => void; let count = 0;
+    const { engine, audio } = make({}, () => ++count === 1 ? new Promise<string>((r) => { release = r; }) : Promise.resolve("fresh-source"));
+    try {
+      engine.play([A]); expect(engine.getState().phase).toBe("loading");
+      engine.pause(); release("stale-source"); await flush();
+      expect(audio.src).toBe(""); expect(audio.playCalls).toBe(0); expect(engine.getState().phase).toBe("paused");
+      engine.resume(); await flush(); expect(audio.src).toBe("fresh-source"); expect(engine.getState().phase).toBe("playing");
+    } finally { engine.dispose(); }
+  });
+  it("ignores an old play rejection after another track starts", async () => {
+    const { engine, audio } = make(); let reject!: (reason: Error) => void;
+    const play = audio.play.bind(audio); audio.play = () => new Promise<void>((_, r) => { reject = r; });
+    try {
+      engine.play([A, B]); await flush(); audio.play = play;
+      engine.jump(1); await flush(); reject(new Error("old decoder failure")); await flush();
+      expect(engine.current?.path).toBe(B.path); expect(engine.getState()).toMatchObject({ phase: "playing", error: null });
+    } finally { engine.dispose(); }
+  });
+  it("isolates decoder events from the old native audio element", async () => {
+    const { engine, audios } = seamless();
+    try {
+      engine.setTransitions(false, 0); engine.play([A, B]); await settleTransitions();
+      const old = audios[0]; engine.jump(1); await settleTransitions();
+      old.fire("error"); old.fire("waiting"); old.finish();
+      expect(engine.current?.path).toBe(B.path); expect(engine.getState()).toMatchObject({ phase: "playing", error: null });
+    } finally { engine.dispose(); }
+  });
+  it("times out stalled loading with recovery details", async () => {
+    vi.useFakeTimers(); const { engine } = make({}, () => new Promise<string>(() => {}));
+    try { engine.play([A]); vi.advanceTimersByTime(30000); expect(engine.getState()).toMatchObject({ phase: "failed", loading: false }); expect(engine.getState().errorDetails).toMatch(/30 seconds/); }
+    finally { engine.dispose(); }
+  });
+  it("shows buffering and rejects invalid control values", async () => {
+    const { engine, audio } = make();
+    try {
+      engine.play([A]); await flush(); audio.loaded(120); audio.fire("waiting"); expect(engine.getState().phase).toBe("buffering");
+      engine.setVolume(NaN); engine.setRate(Infinity); engine.seek(NaN);
+      expect(audio.volume).toBe(1); expect(audio.playbackRate).toBe(1); expect(audio.currentTime).toBe(0);
+      engine.pause(); audio.fire("playing"); expect(audio.paused).toBe(true); expect(engine.getState().phase).toBe("paused");
+    } finally { engine.dispose(); }
+  });
+  it("stops at the first failure by default and can retry after a drive returns", async () => {
+    let missing = true;
+    const { engine } = make({}, async (track) => { if (missing) throw new Error("Drive disconnected"); return track.path; });
+    try {
+      engine.play([A, B]); await flush(); expect(engine.current?.path).toBe(A.path); expect(engine.getState().phase).toBe("failed");
+      missing = false; engine.retry(); await flush(); expect(engine.getState().phase).toBe("playing");
+    } finally { engine.dispose(); }
+  });
+  it("automatically skips failures once per path and stops even with repeat enabled", async () => {
+    const attempted: string[] = [];
+    const { engine } = make({}, async (track) => { attempted.push(track.path); throw new Error("Missing file"); });
+    try {
+      engine.setPlaybackPolicy(true, "linear", true); engine.setRepeat("all"); engine.play([A, B, C]); await flush();
+      expect(attempted).toEqual([A.path, B.path, C.path]); expect(engine.getState().phase).toBe("failed"); expect(engine.getState().notice).toMatch(/no playable tracks/);
+    } finally { engine.dispose(); }
+  });
+  it("does not skip sleep-after-track", async () => {
+    const attempted: string[] = [];
+    const { engine } = make({}, async (track) => { attempted.push(track.path); throw new Error("Missing"); });
+    try { engine.setPlaybackPolicy(true, "linear", true); engine.setSleep("track"); engine.play([A, B]); await flush(); expect(attempted).toEqual([A.path]); }
+    finally { engine.dispose(); }
+  });
+  it("does not automatically skip a permission refusal", async () => {
+    const { engine, audio, resolved } = make();
+    audio.play = async () => { throw Object.assign(new Error("Permission denied"), { name: "NotAllowedError" }); };
+    try {
+      engine.setPlaybackPolicy(true, "linear", true); engine.play([A, B]); await flush();
+      expect(resolved).toEqual([A.path]); expect(engine.getState()).toMatchObject({ phase: "failed", error: "Press play to start the music." });
+    } finally { engine.dispose(); }
+  });
+});
+
+describe("safer crossfades and audio outputs", () => {
+  it("offers equal-power gains while preserving separate volume and loudness", async () => {
+    vi.useFakeTimers(); const { engine, audios, ready, advance } = seamless(2);
+    try {
+      engine.setPlaybackPolicy(false, "equalPower", true); engine.setVolume(0.5);
+      engine.play([A, B]); await settleTransitions(); ready(audios[0]); ready(audios[1]);
+      audios[0].currentTime = 8; audios[0].fire("timeupdate"); await settleTransitions();
+      audios[0].currentTime = 9; audios[1].currentTime = 1; advance(1000); vi.advanceTimersByTime(40);
+      expect(audios[0].volume).toBeCloseTo(Math.SQRT1_2 / 2); expect(audios[1].volume).toBeCloseTo(Math.SQRT1_2 / 2);
+    } finally { engine.dispose(); }
+  });
+  it("keeps consecutive tracks on the same album preloaded without overlapping", async () => {
+    const { engine, audios, ready } = seamless(3);
+    try {
+      engine.play([{ ...A, album: "Live", albumArtist: "Band", trackNumber: 1 }, { ...B, album: "Live", albumArtist: "Band", trackNumber: 2 }]); await settleTransitions(); ready(audios[0]); ready(audios[1]);
+      audios[0].currentTime = 8; audios[0].fire("timeupdate"); await settleTransitions(); expect(audios[1].playCalls).toBe(0);
+      audios[0].finish(); await settleTransitions(); expect(engine.current?.path).toBe(B.path); expect(engine.getState().phase).toBe("playing");
+    } finally { engine.dispose(); }
+  });
+  it("restores the outgoing song if the incoming decoder fails during overlap", async () => {
+    const { engine, audios, ready, played } = seamless(3);
+    try {
+      engine.play([A, B]); await settleTransitions(); ready(audios[0]); ready(audios[1]);
+      audios[0].currentTime = 8; audios[0].fire("timeupdate"); await settleTransitions();
+      engine.updateTrackDetails([{ ...A, format: "MP3" }, B]); audios[1].fire("error");
+      expect(engine.current?.path).toBe(A.path); expect(engine.getState()).toMatchObject({ phase: "playing", error: null });
+      expect(audios[0].paused).toBe(false); expect(audios[0].volume).toBe(1); expect(audios[1].src).toBe(""); expect(played).not.toHaveBeenCalled();
+      audios[0].fire("timeupdate"); await settleTransitions(); expect(engine.current?.path).toBe(A.path);
+    } finally { engine.dispose(); }
+  });
+  it("routes preloaded decks and active overlaps to the selected output", async () => {
+    const { engine, audios, ready } = seamless(3);
+    const sinks = new Map<FakeAudio, string>();
+    const route = (audio: FakeAudio) => Object.assign(audio, { setSinkId: async (id: string) => { sinks.set(audio, id); } });
+    try {
+      route(audios[0]); await engine.setOutputDevice("headphones");
+      engine.play([A, B]); await settleTransitions(); route(audios[1]); ready(audios[0]); ready(audios[1]);
+      await engine.setOutputDevice("headphones"); expect(sinks.get(audios[1])).toBe("headphones");
+      audios[0].currentTime = 8; audios[0].fire("timeupdate"); await settleTransitions();
+      await engine.setOutputDevice("speakers"); expect(sinks.get(audios[0])).toBe("speakers"); expect(sinks.get(audios[1])).toBe("speakers");
+    } finally { engine.dispose(); }
+  });
+  it("falls back all decks when one device switch fails", async () => {
+    const { engine, audio } = make(); let sink = "";
+    Object.assign(audio, { setSinkId: async (id: string) => { if (id === "gone") throw new Error("Disconnected"); sink = id; } });
+    try {
+      await engine.setOutputDevice("speaker"); await expect(engine.setOutputDevice("gone")).rejects.toThrow("Disconnected");
+      expect(sink).toBe(""); expect(engine.getState().notice).toMatch(/system default/);
+    } finally { engine.dispose(); }
+  });
+  it("serializes rapid device switches so the latest choice wins", async () => {
+    const { engine, audio } = make(); let sink = ""; let release!: () => void;
+    Object.assign(audio, { setSinkId: async (id: string) => { if (id === "slow") await new Promise<void>((r) => { release = r; }); sink = id; } });
+    try {
+      const first = engine.setOutputDevice("slow"); await settleTransitions();
+      const last = engine.setOutputDevice("latest"); release(); await Promise.all([first, last]); expect(sink).toBe("latest");
+    } finally { engine.dispose(); }
+  });
+});
+
+describe("sleep fade-out", () => {
+  it("does not autoplay a source that resolves after the sleep deadline", async () => {
+    vi.useFakeTimers(); let resolve!: (src: string) => void;
+    const { engine, audio, advance } = make({}, () => new Promise<string>((r) => { resolve = r; }));
+    try {
+      engine.play([A]); engine.setSleep({ minutes: 1, fadeSeconds: 10 });
+      advance(60000); vi.advanceTimersByTime(60000); resolve("late-source"); await settleTransitions();
+      expect(audio.playCalls).toBe(0); expect(audio.src).toBe("");
+      expect(engine.getState()).toMatchObject({ playing: false, loading: false, sleep: null });
+    } finally { engine.dispose(); }
+  });
+  it("fades the output without changing saved volume and restores it after stopping", async () => {
+    vi.useFakeTimers();
+    const { engine, audio, advance } = make();
+    try {
+      engine.play([A]); await settleTransitions(); audio.loaded(120); engine.setVolume(0.6);
+      engine.setSleep({ minutes: 1, fadeSeconds: 20 });
+      advance(40000); vi.advanceTimersByTime(40000); expect(audio.volume).toBeCloseTo(0.6);
+      advance(10000); vi.advanceTimersByTime(10000); expect(audio.volume).toBeCloseTo(0.3);
+      expect(engine.getState().volume).toBe(0.6);
+      advance(10000); vi.advanceTimersByTime(10000);
+      expect(engine.getState()).toMatchObject({ sleep: null, playing: false, volume: 0.6 });
+      expect(audio.paused).toBe(true); expect(audio.volume).toBeCloseTo(0.6);
+      engine.resume(); await settleTransitions(); expect(audio.volume).toBeCloseTo(0.6);
+    } finally { engine.dispose(); }
+  });
+  it("finishes and fades the current song after the deadline without advancing the queue", async () => {
+    vi.useFakeTimers(); const { engine, audio, advance } = make();
+    try {
+      engine.play([A, B]); await settleTransitions(); audio.loaded(120);
+      engine.setSleep({ minutes: 1, fadeSeconds: 20, finishTrack: true });
+      audio.currentTime = 60; advance(60000); vi.advanceTimersByTime(60000);
+      expect(engine.getState().sleep).toMatchObject({ kind: "track", fadeSeconds: 20 });
+      expect(engine.getState().playing).toBe(true); expect(audio.volume).toBe(1);
+      audio.currentTime = 110; advance(100); vi.advanceTimersByTime(100); expect(audio.volume).toBeCloseTo(0.5);
+      audio.finish(); await settleTransitions();
+      expect(engine.current?.path).toBe(A.path); expect(engine.getState()).toMatchObject({ playing: false, sleep: null });
+    } finally { engine.dispose(); }
+  });
+  it("cancels a fade and cleans up timers when the queue is cleared", async () => {
+    vi.useFakeTimers(); const { engine, audio, advance } = make();
+    try {
+      engine.play([A]); await settleTransitions(); audio.loaded(120); engine.setSleep("track", 20);
+      audio.currentTime = 110; advance(100); vi.advanceTimersByTime(100); expect(audio.volume).toBeCloseTo(0.5);
+      engine.setSleep(null); expect(audio.volume).toBe(1);
+      engine.setSleep({ minutes: 1, fadeSeconds: 20 }); engine.clear();
+      expect(engine.getState().sleep).toBeNull(); expect(vi.getTimerCount()).toBe(0);
+    } finally { engine.dispose(); }
+  });
+});

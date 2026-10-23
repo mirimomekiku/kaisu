@@ -315,6 +315,8 @@ export async function invoke(cmd: string, args: any = {}): Promise<any> {
       w.__mock.leftovers = (w.__mock.leftovers ?? []).filter((l: any) => !args.paths.includes(l.path));
       return args.paths.map((path: string) => ({ path, ok: true, error: null }));
     case "play_in_app":
+      if (w.__mock.playDelay) await sleep(w.__mock.playDelay);
+      if ((w.__mock.playFailPaths ?? []).includes(args.path)) throw "The file has been moved or deleted.";
       if (w.__mock.playRefused) throw "That file isn't in a download folder.";
       return convertFileSrc(args.path);
     case "preview_clip":
