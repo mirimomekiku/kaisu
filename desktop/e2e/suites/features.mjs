@@ -53,6 +53,8 @@ await page.waitForTimeout(2500);
 await details(page).getByRole("button", { name: "Download again" }).click();
 await details(page).getByLabel("Clip start").fill("1:20");
 await details(page).getByLabel("Clip end").fill("2:45");
+// Navigating away resets clip options; match the original precise-cut profile.
+await details(page).getByLabel(/Cut exactly at these times/).check();
 await details(page).getByRole("button", { name: "Download clip" }).click();
 await dialog(page).waitFor();
 check("clip: the same section again IS a duplicate", await dialog(page).locator("text=You already downloaded this").count() === 1);
