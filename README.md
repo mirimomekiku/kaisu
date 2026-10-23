@@ -31,6 +31,14 @@ works behind a proxy, and can check again if you installed the tools yourself. A
 - **Search and bulk editing:** search Downloads by title, URL or folder. Select waiting downloads to change quality,
   audio format, destination or speed together. Running downloads are skipped; changing quality or destination may start a fresh file.
 - Queued and restored downloads use your current proxy settings. Proxy addresses and passwords are not saved with the queue.
+- **File already exists:** choose Keep both (a unique name), Skip existing (the old file is verified first) or Replace in Settings > Downloads.
+  Downloads of the same link with the same output choices are not queued twice.
+- **Shared limits (Advanced mode):** a total speed budget and a total fragment-connection budget are split between queue slots,
+  so idle slots leave bandwidth free. Changing them restarts running transfers, keeping their partial files.
+- **Stalls and retries:** a download with no progress shows a notice after 30 seconds and times out after two minutes (conversion
+  gets longer). Automatic retries use increasing, jittered delays, and a rate-limited website (HTTP 429) is paused for a cooldown.
+- **Private links and headers:** signed-link tokens and private headers are removed from the queue, history, recovery files, logs and
+  copied commands. Header values live in the system password store; a restored download that needs them asks for a fresh link.
 
 **Stay organised**
 - **Move to an external drive:** choose a drive or folder and Kaisu moves (or copies) finished downloads there by
