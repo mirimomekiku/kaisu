@@ -79,6 +79,10 @@ export interface AudioExtras {
 export type SearchSource = "youtube" | "soundcloud" | "youtube_music";
 
 export interface ExtraOptions {
+  credentials_required?: boolean;
+  collision?: "keep_both" | "skip" | "replace";
+  fragment_limit?: number;
+  managed_retries?: boolean;
   sponsorblock: SponsorBlock;
   cookies_from_browser: Browser | null;
   subs: SubtitleOptions | null;
@@ -111,6 +115,8 @@ export interface DownloadRequest {
 }
 
 export type DownloadEvent =
+  | { kind: "skipped"; path: string }
+  | { kind: "stalled"; seconds: number }
   | { kind: "progress"; pct: number | null; speed: number | null; eta: number | null }
   | { kind: "processing" }
   | { kind: "stage"; stage: "preparing" | "converting" | "extras" | "verifying" }
@@ -346,9 +352,10 @@ export function startDownload(req: DownloadRequest, onEvent: (e: DownloadEvent) 
 export const fetchThumbnail = (url: string) => invoke<ArrayBuffer>("fetch_thumbnail", { url, proxy: currentProxy });
 
 /** Passwords live in the system's credential store, not in the settings file. Rejects when there is no store. */
-export const secretSet = (name: "proxy-password", value: string) => invoke<void>("secret_set", { name, value });
-export const secretGet = (name: "proxy-password") => invoke<string | null>("secret_get", { name });
-export const secretDelete = (name: "proxy-password") => invoke<void>("secret_delete", { name });
+type SecretName = "proxy-password" | "download-custom-args";
+export const secretSet = (name: SecretName, value: string) => invoke<void>("secret_set", { name, value });
+export const secretGet = (name: SecretName) => invoke<string | null>("secret_get", { name });
+export const secretDelete = (name: SecretName) => invoke<void>("secret_delete", { name });
 
 export const checkSetup = () => invoke<SetupInfo>("check_setup");
 

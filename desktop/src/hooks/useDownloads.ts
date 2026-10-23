@@ -7,16 +7,23 @@ import {
   type ExtraOptions,
   type Preset,
 } from "../lib/api";
-import { isTransient, retryDelaySeconds } from "../lib/errors";
+import { isTransient, retryDelaySeconds, isRateLimited, retryAfterSeconds } from "../lib/errors";
 import { reorderWaiting } from "../lib/queueOrder";
-import { safeConcurrency, sanitizeDownloadQueue } from "../lib/downloadValidation";
-import { canonicalUrl, hostOf } from "../lib/links";
+import { sanitizeDownloadQueue } from "../lib/downloadValidation";
+import { hostOf } from "../lib/links";
+import { uniqueDownloads } from "../lib/downloadIdentity";
+export { sameDownload } from "../lib/downloadIdentity";
+import { networkAllocation } from "../lib/networkBudget";
+import { redactText } from "../lib/redact";
 import type { SavedDownload } from "../lib/storage";
 import { editWaitingDownloads, type QueueEdit } from "../lib/queueEdit";
 
 export type DownloadStatus = "queued" | "downloading" | "processing" | "paused" | "completed" | "error" | "cancelled";
 
 export interface DownloadItem {
+  cooldownUntil?: number;
+  skipped?: boolean;
+  stalledSeconds?: number;
   id: string;
   recoveryId?: string;
   estimatedBytes?: number;
@@ -74,10 +81,6 @@ const isFinished = (s: DownloadStatus) => s === "completed" || s === "error" || 
 let nextId = 0;
 const newId = () => `${Date.now().toString(36)}-${(nextId++).toString(36)}`;
 
-/** The same download means the same link, kind of file, and part of the video. */
-export const sameDownload = (a: { url: string; preset: Preset; clipKey?: string }, b: { url: string; preset: Preset; clipKey?: string }) =>
-  canonicalUrl(a.url) === canonicalUrl(b.url) && a.preset === b.preset && (a.clipKey ?? "") === (b.clipKey ?? "");
-
 export interface SchedulePolicy {
   /** Nothing should run right now (a pause rule is active). */
   blocked: boolean;
@@ -89,6 +92,8 @@ const NO_POLICY: SchedulePolicy = { blocked: false, limit: null };
 
 /** Download queue. Items wait as "queued" until a slot (`concurrency`) frees up; they can be paused and resumed. */
 export interface QueueLimits {
+  globalRate?: string;
+  fragments?: number;
   /** Tries again this many times after a network failure. */
   retries: number;
   /** Most running downloads from one website (0 = no limit). */
@@ -104,6 +109,10 @@ export function useDownloads(concurrency: number, onCompleted: (item: DownloadIt
   const [items, setItems] = useState<DownloadItem[]>([]);
   const started = useRef(new Set<string>());
   const runs = useRef(new Map<string, { nativeId: string; terminal: boolean }>());
+  const cooldowns = useRef(new Map<string, number>());
+  const resourceKey = JSON.stringify([concurrency, limits.globalRate ?? "", limits.fragments ?? 8]);
+  const resources = useRef(resourceKey);
+  const draining = useRef(false);
   const stop = useCallback((id: string) => { const run = runs.current.get(id); return run ? cancelDownload(run.nativeId) : Promise.resolve(); }, []);
   const pausing = useRef(new Set<string>());
   /** Downloads the schedule stopped (or restarted to change their speed limit); they carry on by themselves. */
@@ -126,8 +135,11 @@ export function useDownloads(concurrency: number, onCompleted: (item: DownloadIt
   const handleEvent = useCallback(
     (id: string, e: DownloadEvent) => {
       switch (e.kind) {
+        case "stalled":
+          patch(id, () => e.seconds > 0 ? { stalledSeconds: e.seconds, speed: null, eta: null } : { stalledSeconds: undefined });
+          break;
         case "stage":
-          patch(id, (it) => it.status === "paused" ? {} : { stage: e.stage, status: e.stage === "preparing" ? "downloading" : "processing", indeterminate: true, speed: null, eta: null });
+          patch(id, (it) => it.status === "paused" ? {} : { stalledSeconds: undefined, stage: e.stage, status: e.stage === "preparing" ? "downloading" : "processing", indeterminate: true, speed: null, eta: null });
           break;
         case "warning":
           warnings.current.set(id, e.message);
@@ -145,10 +157,11 @@ export function useDownloads(concurrency: number, onCompleted: (item: DownloadIt
         case "log":
           patch(id, (it) => ({ log: [...it.log, e.line].slice(-MAX_LOG_LINES) }));
           break;
+        case "skipped":
         case "done": {
           if (!e.path) { handleMissingOutput(id); break; }
           const done = itemsRef.current.find((it) => it.id === id);
-          patch(id, () => ({ status: "completed", progress: 100, speed: null, eta: null, path: e.path }));
+          patch(id, () => ({ skipped: e.kind === "skipped", status: "completed", progress: 100, speed: null, eta: null, path: e.path }));
           if (done && !isFinished(done.status)) onCompletedRef.current({ ...done, path: e.path, warning: warnings.current.get(id) ?? done.warning });
           warnings.current.delete(id);
           break;
@@ -176,11 +189,18 @@ export function useDownloads(concurrency: number, onCompleted: (item: DownloadIt
           pausing.current.delete(id);
           const it = itemsRef.current.find((x) => x.id === id);
           const attempt = (it?.attempt ?? 0) + 1;
+          const rateLimited = isRateLimited(e.message);
+          const wait = Math.max(retryDelaySeconds(attempt, Math.random()), rateLimited ? 60 : 0, retryAfterSeconds(e.message)) * 1000;
+          if (it && rateLimited) {
+            const host = hostOf(it.url), until = Math.max(cooldowns.current.get(hostOf(it.url)) ?? 0, Date.now() + wait);
+            cooldowns.current.set(host, until);
+            setItems((prev) => prev.map((item) => item.status === "queued" && hostOf(item.url) === host ? { ...item, cooldownUntil: until } : item));
+            setTimeout(() => setTick((n) => n + 1), wait + 50);
+          }
           if (it && attempt <= limitsRef.current.retries && isTransient(e.message)) {
             // A network hiccup: wait a little and go again, keeping what was downloaded.
-            const wait = retryDelaySeconds(attempt) * 1000;
             started.current.delete(id);
-            patch(id, () => ({ status: "queued", speed: null, eta: null, attempt, retryAt: Date.now() + wait, errorMsg: undefined }));
+            patch(id, () => ({ status: "queued", speed: null, eta: null, attempt, retryAt: Date.now() + wait, cooldownUntil: cooldowns.current.get(hostOf(it.url)), errorMsg: undefined }));
             setTimeout(() => setTick((n) => n + 1), wait + 50);
           } else {
             patch(id, () => ({ status: "error", speed: null, eta: null, errorMsg: e.message, retryAt: undefined }));
@@ -196,7 +216,14 @@ export function useDownloads(concurrency: number, onCompleted: (item: DownloadIt
   useEffect(() => {
     if (policy.blocked) return;
     const running = items.filter((it) => isActive(it.status)).length;
-    const free = Math.max(0, safeConcurrency(concurrency) - running);
+    if (resources.current !== resourceKey || (draining.current && running > 0)) return;
+    draining.current = false;
+    const allocation = networkAllocation(concurrency, limits.fragments, limits.globalRate);
+    if (allocation.error) {
+      if (items.some((item) => item.status === "queued")) setItems((prev) => prev.map((item) => item.status === "queued" ? { ...item, status: "error", errorMsg: `Total download speed: ${allocation.error}` } : item));
+      return;
+    }
+    const free = Math.max(0, allocation.slots - running);
     if (free === 0) return;
 
     // `items` is newest-first, so the oldest queued item is last. Items waiting to retry sit out until due, and
@@ -210,6 +237,7 @@ export function useDownloads(concurrency: number, onCompleted: (item: DownloadIt
       if (toStart.length >= free) break;
       if (it.status !== "queued" || started.current.has(it.id) || (it.retryAt ?? 0) > now) continue;
       const host = hostOf(it.url);
+      if ((cooldowns.current.get(host) ?? 0) > now) continue;
       if (siteLimit > 0 && (perHost.get(host) ?? 0) >= siteLimit) continue;
       perHost.set(host, (perHost.get(host) ?? 0) + 1);
       toStart.push(it);
@@ -226,17 +254,19 @@ export function useDownloads(concurrency: number, onCompleted: (item: DownloadIt
       runs.current.set(it.id, run);
       const receive = (e: DownloadEvent) => {
         if (runs.current.get(it.id) !== run || run.terminal) return;
-        if (["done", "error", "cancelled"].includes(e.kind)) run.terminal = true;
+        if (e.kind === "log") e = { ...e, line: redactText(e.line) };
+        if (e.kind === "error" || e.kind === "warning") e = { ...e, message: redactText(e.message) };
+        if (["done", "skipped", "error", "cancelled"].includes(e.kind)) run.terminal = true;
         handleEvent(it.id, e);
       };
       startDownload(
-        { id: run.nativeId, recovery_id: it.recoveryId ?? it.id, estimated_bytes: it.estimatedBytes, expected_volume: it.expectedVolume, url: it.url, preset: it.preset, out_dir: it.outDir, extra: policy.limit ? { ...it.extra, rate_limit: policy.limit } : it.extra },
+        { id: run.nativeId, recovery_id: it.recoveryId ?? it.id, estimated_bytes: it.estimatedBytes, expected_volume: it.expectedVolume, url: it.url, preset: it.preset, out_dir: it.outDir, extra: { ...it.extra, managed_retries: limits.retries > 0, fragment_limit: allocation.fragments, rate_limit: allocation.rate(policy.limit ?? it.extra.rate_limit) } },
         receive,
       ).catch((err) => receive({ kind: "error", message: errorText(err) })).finally(() => {
         if (runs.current.get(it.id) === run) runs.current.delete(it.id);
       });
     }
-  }, [items, concurrency, handleEvent, policy.blocked, policy.limit, limits.perSite, tick]);
+  }, [items, concurrency, handleEvent, policy.blocked, policy.limit, limits.perSite, limits.globalRate, limits.fragments, resourceKey, tick]);
 
   // The schedule changed. A pause rule stops what is running (and brings it back afterwards); a new speed limit
   // only takes effect when a download starts, so running ones are restarted to pick it up.
@@ -244,8 +274,11 @@ export function useDownloads(concurrency: number, onCompleted: (item: DownloadIt
   useEffect(() => {
     const before = lastPolicy.current;
     lastPolicy.current = policy;
-    if (before.blocked === policy.blocked && before.limit === policy.limit) return;
+    const changedResources = resources.current !== resourceKey;
+    resources.current = resourceKey;
+    if (before.blocked === policy.blocked && before.limit === policy.limit && !changedResources) return;
     const running = itemsRef.current.filter((it) => isActive(it.status));
+    if (changedResources) { draining.current = running.length > 0; setTick((n) => n + 1); }
     if (policy.blocked) {
       for (const it of running) {
         autoPaused.current.add(it.id);
@@ -272,12 +305,13 @@ export function useDownloads(concurrency: number, onCompleted: (item: DownloadIt
       pausing.current.add(it.id);
       stop(it.id).catch(() => pausing.current.delete(it.id));
     }
-  }, [policy]);
+  }, [policy, resourceKey]);
 
   const enqueue = useCallback((inputs: EnqueueInput | EnqueueInput[]) => {
-    const list = Array.isArray(inputs) ? inputs : [inputs];
+    const list = uniqueDownloads(Array.isArray(inputs) ? inputs : [inputs], itemsRef.current.filter((i) => !isFinished(i.status)));
     const created: DownloadItem[] = list.map((input) => ({
       ...input,
+      cooldownUntil: cooldowns.current.get(hostOf(input.url)),
       id: newId(),
       status: "queued",
       progress: 0,
@@ -287,7 +321,9 @@ export function useDownloads(concurrency: number, onCompleted: (item: DownloadIt
       log: [],
     }));
     // Newest first, but a batch keeps its own order (the first one added runs first).
-    setItems((prev) => [...created.slice().reverse(), ...prev]);
+    itemsRef.current = [...created.slice().reverse(), ...itemsRef.current];
+    setItems((prev) => [...uniqueDownloads(created, prev.filter((i) => !isFinished(i.status))).slice().reverse(), ...prev]);
+    return created.length;
   }, []);
 
   const cancel = useCallback(

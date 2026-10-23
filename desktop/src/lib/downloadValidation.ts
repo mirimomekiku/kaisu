@@ -32,6 +32,8 @@ export function sanitizeDownloadExtra(value: unknown): ExtraOptions {
   const subs = object(r.subs), meta = object(r.meta), cover = object(r.cover), audio = object(r.audio);
   const langs = Array.isArray(subs.langs) ? subs.langs.filter((v): v is string => typeof v === "string" && v.length <= 80).slice(0, 20) : [];
   return {
+    credentials_required: r.credentials_required === true,
+    collision: pick(r.collision, ["keep_both", "skip", "replace"] as const, "keep_both"),
     sponsorblock: pick(r.sponsorblock, ["off", "mark", "remove"], "off"),
     cookies_from_browser: r.cookies_from_browser == null ? null : pick(r.cookies_from_browser, ["firefox", "chrome", "chromium", "edge", "brave", "opera", "vivaldi"] as const, "firefox"),
     audio_format: pick(r.audio_format, ["mp3", "m4a", "opus", "flac", "wav"], "mp3"),

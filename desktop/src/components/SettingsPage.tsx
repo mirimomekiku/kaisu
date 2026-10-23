@@ -60,7 +60,7 @@ const SETTINGS_SECTIONS: Record<string, { section: string; keywords: string }> =
   Appearance: { section: "General", keywords: "theme accent dark light system colour" },
   "Notifications and background": { section: "General", keywords: "close tray notification background" },
   Helpers: { section: "General", keywords: "clipboard shortcuts tour duplicate volume loudness" },
-  Downloads: { section: "Downloads", keywords: "folder output name layout audio mp3 quality cover lyrics subtitles speed concurrent" },
+  Downloads: { section: "Downloads", keywords: "folder output name layout audio mp3 quality cover lyrics subtitles speed concurrent bandwidth total fragment connections collision replace skip retry" },
   "Saved presets": { section: "Downloads", keywords: "preset format choices" },
   "Playback transitions": { section: "Playback", keywords: "music audio gapless crossfade player" },
   "Playback recovery": { section: "Playback", keywords: "skip failed unavailable retry missing" },
@@ -322,7 +322,21 @@ export default function SettingsPage({ settings, effectiveOutDir, engine, engine
                 ))}
               </select>
             </Row>
-            <Row label="Speed limit" hint="For example 500K or 2M. Leave empty for no limit.">
+            <Row label="File already exists" hint="Keep both gives the new file a unique name. Replace overwrites the existing output.">
+              <select className="field" aria-label="Download file conflicts" value={settings.downloadConflict} onChange={(e) => onChange({ downloadConflict: e.target.value as Settings["downloadConflict"] })}>
+                <option value="keep_both">Keep both</option><option value="skip">Skip existing</option><option value="replace">Replace</option>
+              </select>
+            </Row>
+            <Row label="Total download speed" hint="Shared across queue slots, for example 2M. Idle slots leave bandwidth available for other apps.">
+              <input className="field mono" aria-label="Total download speed" value={settings.globalRateLimit} onChange={(e) => onChange({ globalRateLimit: e.target.value })} aria-invalid={!!checkSpeedLimit(settings.globalRateLimit)} placeholder="unlimited" />
+            </Row>
+            {checkSpeedLimit(settings.globalRateLimit) && <div role="alert">{checkSpeedLimit(settings.globalRateLimit)}</div>}
+            <Row label="Total fragment connections" hint="Caps combined fragment connections. Low values also reduce simultaneous downloads.">
+              <select className="field" aria-label="Total fragment connections" value={settings.fragmentBudget} onChange={(e) => onChange({ fragmentBudget: Number(e.target.value) })}>
+                {[1, 2, 4, 6, 8, 12, 16, 24].map((n) => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </Row>
+            <Row label="Speed limit" hint="Per download, for example 500K or 2M. Leave empty for no limit.">
               <input
                 value={settings.rateLimit}
                 onChange={(e) => onChange({ rateLimit: e.target.value })}
@@ -383,7 +397,7 @@ export default function SettingsPage({ settings, effectiveOutDir, engine, engine
                 <option value="both">Both</option>
               </select>
             </Row>
-            <Row label="Try again after network errors" hint="Waits 5, 15, then 45 seconds between tries and keeps what was downloaded.">
+            <Row label="Try again after network errors" hint="Uses increasing delays with jitter, preserves partial files, and pauses requests to rate-limited websites.">
               <select value={settings.autoRetries} onChange={(e) => onChange({ autoRetries: Number(e.target.value) })} className="field" aria-label="Automatic retries">
                 {[0, 1, 2, 3, 5].map((n) => (
                   <option key={n} value={n}>
@@ -490,6 +504,7 @@ export default function SettingsPage({ settings, effectiveOutDir, engine, engine
               Added to every download. Only the options in the list below are accepted, written exactly as yt-dlp spells them (<span className="mono">-R 3</span>, not{" "}
               <span className="mono">-R3</span>). Anything that runs programs, reads or writes files at a path you give, or changes where tools are found is not allowed.
             </p>
+            <p className="pref-hint mt-1.5 mb-0">App connection limits take priority. Automatic retries replace yt-dlp retries when enabled. Private headers use the system credential store and are omitted from recovery files.</p>
             <details className="mt-1.5">
               <summary className="cursor-default select-none">Allowed options</summary>
               <ul className="m-0 mt-1 p-0 list-none flex flex-wrap gap-x-3 gap-y-0.5 mono max-h-40 overflow-auto" aria-label="Allowed options">

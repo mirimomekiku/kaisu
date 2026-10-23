@@ -61,6 +61,7 @@ export function buildExtra(settings: Settings, formatId: string | null, ctx?: Ex
       }
     : SIMPLE_BASE;
   return {
+    collision: settings.downloadConflict ?? "keep_both",
     meta: ctx?.meta ?? null,
     cover: ctx?.cover !== undefined ? ctx.cover : advanced ? { mode: settings.coverMode } : null,
     lyrics: ctx?.lyrics !== undefined ? ctx.lyrics : advanced ? settings.lyricsMode : null,

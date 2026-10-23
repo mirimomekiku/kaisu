@@ -10,7 +10,7 @@ use keyring::{Entry, Error};
 const SERVICE: &str = "com.kaisu.app";
 
 /// Everything Kaisu ever stores here.
-const NAMES: &[&str] = &["proxy-password"];
+const NAMES: &[&str] = &["proxy-password", "download-custom-args"];
 
 fn explain(e: Error) -> String {
     format!("The system's password store isn't available: {e}")

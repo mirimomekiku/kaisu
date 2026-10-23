@@ -93,6 +93,7 @@ function dragProps(item: DownloadItem, h: Handlers) {
 function statusText(item: DownloadItem, advanced: boolean, position?: number): ReactNode {
   switch (item.status) {
     case "queued":
+      if ((item.cooldownUntil ?? 0) > Date.now()) return <span style={{ color: "#a56a00" }}>Website cooldown · waiting before another request</span>;
       return (item.retryAt ?? 0) > Date.now() ? (
         <span style={{ color: "#a56a00" }}>Trying again soon (attempt {(item.attempt ?? 0) + 1})…</span>
       ) : (
@@ -103,6 +104,7 @@ function statusText(item: DownloadItem, advanced: boolean, position?: number): R
     case "paused":
       return <span className="dim">Paused{item.progress > 0 ? ` at ${Math.round(item.progress)}%` : ""}</span>;
     case "downloading":
+      if (item.stalledSeconds) return <span style={{ color: "#a56a00" }}>No progress for {item.stalledSeconds}s · retry or resume after timeout</span>;
       if (item.stage === "preparing") return <span className="inline-flex items-center gap-1.5"><Loader2 className="w-3 h-3 animate-spin" />Preparing…</span>;
       return (
         <span className="inline-flex items-center gap-1.5">
@@ -114,6 +116,7 @@ function statusText(item: DownloadItem, advanced: boolean, position?: number): R
     case "processing":
       return <span style={{ color: "#a56a00" }}>{item.stage === "verifying" ? "Verifying…" : item.stage === "extras" ? "Adding extras…" : "Converting…"}</span>;
     case "completed":
+      if (item.skipped) return <span style={{ color: "#2f8a2b" }} title="The existing file was verified and kept.">Skipped existing</span>;
       return (
         <span className="inline-flex items-center gap-1" style={item.warning ? { color: "#a56a00" } : { color: "#2f8a2b" }} title={item.warning}>
           {item.warning ? <AlertTriangle className="w-3 h-3" /> : <Check className="w-3 h-3" />} {item.warning ? "Done, check it" : "Done"}

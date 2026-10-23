@@ -38,6 +38,6 @@ describe("retry rules", () => {
   });
 
   it("backs off", () => {
-    expect([1, 2, 3, 4, 9].map(retryDelaySeconds)).toEqual([5, 15, 45, 60, 60]);
+    expect([1, 2, 3, 4, 9].map((attempt) => retryDelaySeconds(attempt, 0.5))).toEqual([5, 15, 45, 60, 60]);
   });
 });

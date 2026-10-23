@@ -30,6 +30,7 @@ export default function DownloadRecoveryNotice({ ready, items, enqueue }: { read
     {available.length > 0 && <>
       <b>{available.length} interrupted download{available.length === 1 ? "" : "s"} can be recovered</b>
       <p>Recovery keeps the original link, format and destination. It reuses compatible partial files; unavailable or changed files may restart.</p>
+      {available.some((r) => r.request.extra.credentials_required) && <p>Private headers and signed-link credentials are omitted from recovery files. Those downloads need a fresh link and headers before they can run again.</p>}
       <ul>{available.map((r) => <li key={r.id}><span className="selectable">{r.request.url}</span><span className="dim"> → {r.request.out_dir}</span></li>)}</ul>
       <div className="flex gap-2 flex-wrap">
         <button className="btn small" disabled={busy} onClick={() => void recover()}>Recover original downloads</button>

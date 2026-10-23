@@ -25,6 +25,10 @@ import { clipKeyOf, clipLabel, formatBytes } from "../lib/format";
 import { matchSiteRule } from "../lib/siteRules";
 import type { HistoryItem, Settings } from "../lib/storage";
 import { sameDownload, type DownloadItem, type EnqueueInput } from "./useDownloads";
+import { uniqueDownloads } from "../lib/downloadIdentity";
+import { canonicalUrl } from "../lib/links";
+import { checkSpeedLimit } from "../lib/validate";
+import { networkAllocation } from "../lib/networkBudget";
 import type { Listing } from "./useSearchFlow";
 
 const LOW_DISK_BYTES = 2 * 1024 * 1024 * 1024;
@@ -65,7 +69,7 @@ interface Args {
   /** Where downloads are saved. */
   outDir: string;
   itemsRef: React.MutableRefObject<DownloadItem[]>;
-  enqueue: (inputs: EnqueueInput[]) => void;
+  enqueue: (inputs: EnqueueInput[]) => number;
   confirm: ReturnType<typeof useConfirm>;
   history: HistoryItem[];
   historyRef: React.MutableRefObject<HistoryItem[]>;
@@ -91,6 +95,8 @@ export function useDownloadActions(a: Args) {
    * disk, and warns when the drive is nearly full. Returns how many were added (0 if the user backed out).
    */
   const submitDownloads = async (asked: DownloadReq[], estimateBytes: number | null = null): Promise<number> => {
+    const budgetError = settingsRef.current.mode === "advanced" ? checkSpeedLimit(settingsRef.current.globalRateLimit) : null;
+    if (budgetError) { showFlash(`Total download speed: ${budgetError}`, true); return 0; }
     // Site rules (Advanced mode) change what is downloaded and where it goes, before anything is compared or queued.
     const rules = settingsRef.current.mode === "advanced" ? settingsRef.current.siteRules : [];
     const reqs = asked.map((r): DownloadReq => {
@@ -102,18 +108,24 @@ export function useDownloadActions(a: Args) {
       setErrorMessage("Could not determine a download folder. Choose one in Settings.");
       return 0;
     }
-    const keyOf = (r: DownloadReq) => ({ url: r.url, preset: r.preset, clipKey: clipKeyOf(r.clip ?? null) });
+    const keyOf = (r: DownloadReq) => ({ url: r.url, preset: r.preset, outDir: r.outDir ?? outDir, clipKey: clipKeyOf(r.clip ?? null), extra: buildExtra(settingsRef.current, r.formatId, { playlist: r.playlist, clip: r.clip, subs: r.subs, meta: r.meta, cover: r.cover, lyrics: r.lyrics, audio: r.audio, audioFormat: r.audioFormat }) });
 
     const live = itemsRef.current.filter((i) => !isFinishedStatus(i.status));
-    let todo = reqs.filter((r) => !live.some((i) => sameDownload(i, keyOf(r))));
+    let todo = uniqueDownloads(reqs.map((r) => ({ ...keyOf(r), request: r })), live).map((r) => r.request);
     if (todo.length === 0) {
       announce({ title: "Already in Downloads", subtitle: reqs.length === 1 ? reqs[0].title : `${reqs.length} items` });
       return 0;
     }
 
     if (settingsRef.current.warnDuplicates) {
-      const onDisk = (r: DownloadReq) =>
-        historyRef.current.find((h) => sameDownload({ url: h.url, preset: h.preset, clipKey: h.clip }, keyOf(r)) && h.path && existing[h.path] !== false);
+      const onDisk = (r: DownloadReq) => historyRef.current.find((h) => {
+        if (!h.path || existing[h.path] === false) return false;
+        if (h.profile !== undefined) return sameDownload({ url: h.url, preset: h.preset, clipKey: h.clip, profile: h.profile }, keyOf(r));
+        // Older history has no full output profile. Infer its audio format from the actual file.
+        const key = keyOf(r);
+        return !r.formatId && canonicalUrl(h.url) === canonicalUrl(r.url) && h.preset === r.preset && (h.clip ?? "") === (key.clipKey ?? "")
+          && (r.preset !== "audio" || h.path.toLowerCase().endsWith(`.${key.extra.audio_format}`));
+      });
       const dupes = todo.filter((r) => onDisk(r));
       if (dupes.length > 0) {
         if (todo.length === 1) {
@@ -179,11 +191,12 @@ export function useDownloadActions(a: Args) {
         }
       }
     } catch (err) { showFlash(errorText(err), true); return 0; }
-    enqueue(inputs);
+    const added = enqueue(inputs);
+    if (!added) { announce({ title: "Already in Downloads" }); return 0; }
     const ruled = todo.filter((r) => r.ruledBy);
     const what = todo.length === 1 ? todo[0].title : `${todo.length} items`;
     announce({ title: "Added to Downloads", subtitle: ruled.length > 0 ? `${what} · site rule for ${ruled[0].ruledBy}` : what });
-    return todo.length;
+    return added;
   };
 
   const queueDownload = (target: string, title: string, thumbnail: string, preset: Preset, formatId: string | null, playlist?: PlaylistCtx | null, channel?: string) =>
@@ -201,12 +214,15 @@ export function useDownloadActions(a: Args) {
   /** The command a choice would run, for Advanced mode's "Show the command". */
   const previewChoice = async (choice: DownloadChoice): Promise<string> => {
     if (!media) return "";
+    const current = settingsRef.current, advanced = current.mode === "advanced";
+    const allocation = networkAllocation(advanced ? current.concurrency : 2, advanced ? current.fragmentBudget : 8, advanced ? current.globalRateLimit : "");
+    const extra = buildExtra(current, choice.formatId, { clip: choice.clip, subs: choice.subs, meta: choice.meta, cover: choice.cover, lyrics: choice.lyrics, audio: choice.audio });
     return previewCommand({
       id: "preview",
       url: media.url,
       preset: choice.preset,
       out_dir: outDir || "~/Downloads",
-      extra: buildExtra(settings, choice.formatId, { clip: choice.clip, subs: choice.subs, meta: choice.meta, cover: choice.cover, lyrics: choice.lyrics, audio: choice.audio }),
+      extra: { ...extra, fragment_limit: allocation.fragments, rate_limit: allocation.rate(extra.rate_limit), managed_retries: advanced && current.autoRetries > 0 },
     });
   };
 

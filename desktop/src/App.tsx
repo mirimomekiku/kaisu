@@ -37,6 +37,8 @@ import { usePodcasts } from "./hooks/usePodcasts";
 import { MediaActionsContext, useMediaDialogs } from "./hooks/useMediaDialogs";
 import { useLoudness } from "./hooks/useLoudness";
 import { PlayerContext, useCreatePlayer, usePlayerState } from "./hooks/usePlayer";
+import { outputProfile } from "./lib/downloadIdentity";
+import { redactText } from "./lib/redact";
 import { useDownloads, sameDownload, type DownloadItem } from "./hooks/useDownloads";
 import { useDropLinks } from "./hooks/useDropLinks";
 import { useEngine } from "./hooks/useEngine";
@@ -114,10 +116,11 @@ export default function App() {
       session.current.completed += 1;
       session.current.lastDir = item.outDir;
       const entry: HistoryItem = {
+        profile: outputProfile(item.extra, item.preset),
         id: item.id,
-        url: item.url,
-        title: item.title,
-        thumbnail: item.thumbnail,
+        url: redactText(item.url),
+        title: redactText(item.title),
+        thumbnail: redactText(item.thumbnail),
         preset: item.preset,
         path: item.path,
         timestamp: Date.now(),
@@ -125,7 +128,7 @@ export default function App() {
         channel: item.channel,
         flag: item.warning,
       };
-      const rest = historyRef.current.filter((h) => !sameDownload({ url: h.url, preset: h.preset, clipKey: h.clip }, { url: entry.url, preset: entry.preset, clipKey: entry.clip }));
+      const rest = historyRef.current.filter((h) => !sameDownload({ url: h.url, preset: h.preset, clipKey: h.clip, profile: h.profile }, { url: entry.url, preset: entry.preset, clipKey: entry.clip, profile: entry.profile }));
       updateHistory([entry, ...rest]);
     },
     [historyRef, session, updateHistory],
@@ -135,7 +138,7 @@ export default function App() {
   const usableRules = useMemo(() => settings.schedule.filter((rule) => validateRule(rule) === null), [settings.schedule]);
   const schedule = useSchedule(usableRules, advanced);
   const policy = useMemo(() => ({ blocked: schedule.paused, limit: schedule.limit }), [schedule.paused, schedule.limit]);
-  const limits = useMemo(() => (advanced ? { retries: settings.autoRetries, perSite: settings.perSiteLimit } : { retries: 0, perSite: 0 }), [advanced, settings.autoRetries, settings.perSiteLimit]);
+  const limits = useMemo(() => (advanced ? { retries: settings.autoRetries, perSite: settings.perSiteLimit, globalRate: settings.globalRateLimit, fragments: settings.fragmentBudget } : { retries: 0, perSite: 0 }), [advanced, settings.autoRetries, settings.perSiteLimit, settings.globalRateLimit, settings.fragmentBudget]);
 
   const { items, enqueue, runNext, runLater, reorder, setRateLimit, editWaiting, cancel, pause, resume, pauseAll, resumeAll, retry, remove, clearFinished, restore, hasActive } = useDownloads(
     advanced ? settings.concurrency : 2,

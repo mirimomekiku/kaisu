@@ -4,6 +4,8 @@ export interface FriendlyError {
 }
 
 const RULES: Array<[RegExp, FriendlyError]> = [
+  [/saved download had private headers|signed link|credentials are not kept in recovery/i, { summary: "This download needs a fresh link or headers.", hint: "Paste the link again and re-enter any private headers in Advanced settings." }],
+  [/no progress for|download timed out/i, { summary: "The download stopped making progress.", hint: "Partial files were kept. Try again to resume, or check your connection." }],
   [
     /sign in to confirm|private video|login required|members-only|confirm your age|age.restricted|requires authentication/i,
     {
@@ -49,4 +51,9 @@ export function isTransient(message: string): boolean {
 }
 
 /** Seconds to wait before retry number `attempt` (1, 2, 3...): 5, 15, 45, then a minute. */
-export const retryDelaySeconds = (attempt: number) => [5, 15, 45][attempt - 1] ?? 60;
+export const retryDelaySeconds = (attempt: number, random = 0.5) => Math.round(([5, 15, 45][attempt - 1] ?? 60) * (0.8 + Math.max(0, Math.min(1, random)) * 0.4));
+export const isRateLimited = (message: string) => /http error 429|too many requests/i.test(message);
+export const retryAfterSeconds = (message: string) => {
+  const match = /retry-after\s*:\s*(\d+)/i.exec(message);
+  return match ? Math.min(3600, Number(match[1])) : 0;
+};

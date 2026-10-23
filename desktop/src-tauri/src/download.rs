@@ -101,6 +101,10 @@ impl Browser {
 #[derive(Deserialize, Serialize, Default)]
 #[serde(default)]
 pub struct ExtraOptions {
+    pub credentials_required: bool,
+    pub collision: CollisionPolicy,
+    pub fragment_limit: Option<u8>,
+    pub managed_retries: bool,
     pub sponsorblock: SponsorBlock,
     pub cookies_from_browser: Option<Browser>,
     /// Subtitle languages and where to put them.
@@ -131,6 +135,10 @@ pub struct ExtraOptions {
     pub clean_titles: bool,
 }
 
+#[derive(Deserialize, Serialize, Clone, Copy, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CollisionPolicy { #[default] KeepBoth, Skip, Replace }
+
 #[derive(Deserialize, Serialize)]
 pub struct DownloadRequest {
     pub id: String,
@@ -150,6 +158,8 @@ pub struct DownloadRequest {
 #[derive(Serialize, Clone)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum DownloadEvent {
+    Skipped { path: String },
+    Stalled { seconds: u64 },
     Progress { pct: Option<f32>, speed: Option<f64>, eta: Option<u64> },
     Stage { stage: String },
     Warning { message: String },
@@ -163,7 +173,99 @@ pub enum DownloadEvent {
     Error { message: String },
 }
 
-struct Active { job: Arc<proc::JobControl>, reserved: u64, destination: PathBuf }
+struct DownloadWatchdog {
+    idle: std::time::Instant,
+    stage: &'static str,
+    bytes: HashMap<String, f64>,
+    file_activity: Option<std::time::SystemTime>,
+    transfer_timeout: u64,
+}
+impl DownloadWatchdog {
+    fn new() -> Self { Self { idle: std::time::Instant::now(), stage: "preparation", bytes: HashMap::new(), file_activity: None, transfer_timeout: 120 } }
+    fn expired(&self) -> bool { self.idle.elapsed().as_secs() >= match self.stage { "conversion" => 1800, "transfer" => self.transfer_timeout, _ => 120 } }
+    fn poll_conversion(&mut self, output: &std::path::Path) {
+        if self.stage != "conversion" { return; }
+        let prefix = format!("{}.", output.file_stem().unwrap_or_default().to_string_lossy());
+        let newest = output.parent().and_then(|parent| std::fs::read_dir(parent).ok()).into_iter().flatten().flatten()
+            .filter(|entry| entry.file_name().to_string_lossy().starts_with(&prefix))
+            .filter_map(|entry| entry.metadata().ok()?.modified().ok()).max();
+        if newest > self.file_activity { self.file_activity = newest; self.idle = std::time::Instant::now(); }
+    }
+    fn observe(&mut self, line: &str) {
+        if line.starts_with("KAISU_PP|") {
+            // A postprocessor's repeated status lines cannot extend its stage deadline forever.
+            if self.stage != "conversion" { self.stage = "conversion"; self.idle = std::time::Instant::now(); }
+        } else if line.starts_with("KAISU|") {
+            let fields: Vec<_> = line.split('|').collect();
+            let bytes = fields.get(1).and_then(|v| v.parse::<f64>().ok()).filter(|v| v.is_finite() && *v >= 0.0);
+            let format = fields.get(6).copied().unwrap_or("");
+            if let Some(bytes) = bytes {
+                let previous = self.bytes.entry(format.into()).or_insert(-1.0);
+                if bytes > *previous {
+                    self.idle = std::time::Instant::now(); *previous = bytes;
+                }
+                self.stage = "transfer";
+            }
+        } else if line.starts_with("KAISU_META|") && self.stage == "preparation" {
+            self.idle = std::time::Instant::now();
+        }
+    }
+}
+
+/// Canonicalize existing ancestors to collapse symlinks/junctions, even for new subfolders.
+fn output_key(path: &std::path::Path) -> Result<String, String> {
+    let mut parent = path;
+    let mut missing = Vec::new();
+    while !parent.exists() {
+        missing.push(parent.file_name().ok_or("Invalid output filename.")?.to_os_string());
+        parent = parent.parent().ok_or("Invalid output destination.")?;
+    }
+    let mut canonical = std::fs::canonicalize(parent).map_err(|e| e.to_string())?;
+    for part in missing.into_iter().rev() { canonical.push(part); }
+    let key = crate::scope::plain_path(&canonical);
+    Ok(if cfg!(windows) { key.to_lowercase() } else { key })
+}
+
+fn reserve_output(downloads: &Downloads, req: &DownloadRequest, planned: &std::path::Path, owned: Option<&std::path::Path>) -> Result<(PathBuf, Option<PathBuf>), String> {
+    let base = owned.filter(|p| p.parent() == planned.parent()).unwrap_or(planned);
+    let mut candidate = base.to_path_buf();
+    // Audio extraction changes the extension after the download.
+    if matches!(req.preset, Preset::Audio) { candidate.set_extension(req.extra.audio_format.as_arg()); }
+    let original = candidate.clone();
+    let mut active = downloads.active.lock().map_err(|_| "Download state unavailable.")?;
+    for n in 0..1000 {
+        let stem_path = candidate.with_extension("");
+        let key = output_key(&stem_path)?;
+        let busy = active.iter().any(|(id, a)| id != &req.id && a.output.as_deref().is_some_and(|other| other == key || other.starts_with(&format!("{key}.")) || key.starts_with(&format!("{other}."))));
+        let stem = stem_path.file_name().ok_or("Invalid output filename.")?.to_string_lossy();
+        let prefix = format!("{stem}.");
+        let family: Vec<_> = std::fs::read_dir(candidate.parent().ok_or("Invalid output folder.")?).ok().into_iter().flatten().flatten().filter(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if cfg!(windows) { name.to_lowercase().starts_with(&prefix.to_lowercase()) } else { name.starts_with(&prefix) }
+        }).collect();
+        let collision = !family.is_empty();
+        let unsafe_family = family.iter().any(|e| e.file_type().map(|t| t.is_symlink() || t.is_dir()).unwrap_or(true));
+        if req.extra.collision == CollisionPolicy::Replace && unsafe_family {
+            return Err("An existing output or partial file is a link or directory. Choose Keep both to avoid writing through it.".into());
+        }
+        let own = !unsafe_family && owned.is_some_and(|p| p.with_extension("") == stem_path);
+        if !busy && (!collision || own || req.extra.collision == CollisionPolicy::Replace || (req.extra.collision == CollisionPolicy::Skip && candidate.is_file())) {
+            validate_planned_path(&candidate, &req.out_dir)?;
+            active.get_mut(&req.id).ok_or("Download is no longer active.")?.output = Some(key);
+            let existing = (req.extra.collision == CollisionPolicy::Skip && candidate.is_file()).then(|| candidate.clone());
+            return Ok((candidate, existing));
+        }
+        if req.extra.collision != CollisionPolicy::KeepBoth {
+            return Err(if busy { "Another download is writing this filename. Wait for it to finish or choose Keep both." } else { "Partial or sidecar files already use this filename. Choose Keep both or Replace." }.into());
+        }
+        let suffix = req.recovery_id.as_deref().unwrap_or(&req.id);
+        let name = format!("[{suffix}-{n}] {}.{}", original.file_stem().ok_or("Invalid output filename.")?.to_string_lossy(), original.extension().unwrap_or_default().to_string_lossy());
+        candidate = original.with_file_name(name);
+    }
+    Err("Could not find an unused output filename.".into())
+}
+
+struct Active { job: Arc<proc::JobControl>, reserved: u64, destination: PathBuf, output: Option<String> }
 
 #[derive(Default)]
 pub struct Downloads {
@@ -240,6 +342,11 @@ fn validate_rate_limit(limit: &str) -> Result<&str, String> {
     let ok = limit.len() <= 32 && limit.len() - digits.len() <= 1 && shape && digits.parse::<f64>().is_ok_and(|v| v.is_finite() && v * factor >= 1.0 && v * factor <= 1_000_000_000_000.0);
     if ok { Ok(limit) } else { Err("Speed limit must be between 1 byte/s and 1 TB/s, like 500K or 2M.".into()) }
 }
+fn rate_bytes(limit: &str) -> Result<u64, String> {
+    validate_rate_limit(limit)?;
+    let factor = match limit.as_bytes().last() { Some(b'K' | b'k') => 1024.0, Some(b'M' | b'm') => 1048576.0, _ => 1.0 };
+    Ok((limit.trim_end_matches(['K', 'k', 'M', 'm']).parse::<f64>().map_err(|_| "Invalid speed limit.")? * factor) as u64)
+}
 
 // ---- argument building ------------------------------------------------------------------
 
@@ -249,6 +356,12 @@ fn build_args(
     ffmpeg_dir: &std::path::Path,
     js_runtime: Option<&str>,
 ) -> Result<Vec<String>, String> {
+    if req.recovery_id.as_deref().is_some_and(|id| id.is_empty() || id.len() > 128 || !id.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_".contains(&b))) {
+        return Err("Invalid recovery ID.".into());
+    }
+    if req.extra.credentials_required || req.url.contains("[REDACTED]") || req.extra.custom_args.as_deref().is_some_and(|s| s.contains("[REDACTED]")) {
+        return Err("This saved download had private headers or a signed link. Paste a fresh link and re-enter its custom headers to download it again; credentials are not kept in recovery files.".into());
+    }
     if let Some(pl) = &req.extra.playlist {
         if pl.index == 0 || pl.index > pl.total || pl.total > 100000 || pl.title.len() > 4000 { return Err("Invalid playlist position or title.".into()); }
     }
@@ -362,6 +475,23 @@ fn build_args(
     if let Some(custom) = extra.custom_args.as_deref().filter(|c| !c.trim().is_empty()) {
         a.extend(parse_custom_args(custom)?);
     }
+    // App resource budgets win over custom options, including aliases and equals forms.
+    let fragments = extra.fragment_limit.unwrap_or(4);
+    if !(1..=24).contains(&fragments) { return Err("Fragment connection limit must be between 1 and 24.".into()); }
+    let fragments = extra.rate_limit.as_deref().filter(|s| !s.trim().is_empty()).map(|rate| rate_bytes(rate.trim()).map(|bytes| fragments.min(bytes.min(24) as u8))).transpose()?.unwrap_or(fragments);
+    a.extend(["--concurrent-fragments".into(), fragments.to_string()]);
+    if let Some(rate) = extra.rate_limit.as_deref().filter(|s| !s.trim().is_empty()) {
+        if extra.clip.is_some() { return Err("Speed limits cannot be enforced for clip transfers through ffmpeg. Clear the speed limits or download the full video.".into()); }
+        // yt-dlp applies its rate limiter independently inside each fragment HTTP transfer.
+        a.extend(["--limit-rate".into(), (rate_bytes(rate.trim())? / u64::from(fragments)).max(1).to_string()]);
+        a.extend(["--downloader".into(), "native".into()]);
+    }
+    if extra.managed_retries {
+        for flag in ["--retries", "--fragment-retries", "--extractor-retries", "--file-access-retries"] {
+            a.extend([flag.into(), "0".into()]);
+        }
+    }
+    a.extend(["--socket-timeout".into(), "30".into(), if extra.collision == CollisionPolicy::Replace { "--force-overwrites".into() } else { "--no-overwrites".into() }]);
     // Everything after `--` is a positional URL, never an option.
     a.push("--".into());
     a.push(url.to_string());
@@ -525,11 +655,15 @@ pub async fn start_download(
                 run_download(&app, &engine, &downloads, &req, &on_event).await
             } => result,
         }
-    }).await;
+    }).await.map_err(|message: String| net::redact_values(&message, &net::custom_header_values(req.extra.custom_args.as_deref())));
     drop(running);
     if job.is_cancelled() { let _ = on_event.send(DownloadEvent::Cancelled); return Ok(()); }
     match &result {
-        Ok(path) => { crate::download_manifest::complete(&app, &req); let _ = on_event.send(DownloadEvent::Done { path: path.clone() }); }
+        Ok(output) => {
+            crate::download_manifest::complete(&app, &req);
+            let event = match output { Some((path, true)) => DownloadEvent::Skipped { path: path.clone() }, _ => DownloadEvent::Done { path: output.as_ref().map(|(path, _)| path.clone()) } };
+            let _ = on_event.send(event);
+        }
         Err(message) => { let _ = on_event.send(DownloadEvent::Error { message: message.clone() }); }
     }
     result.map(|_| ())
@@ -541,7 +675,7 @@ async fn run_download(
     downloads: &Downloads,
     req: &DownloadRequest,
     on_event: &Channel<DownloadEvent>,
-) -> Result<Option<String>, String> {
+) -> Result<Option<(String, bool)>, String> {
     let url = validate_url(&req.url)?;
     check_destination_volume(req)?;
     tokio::fs::create_dir_all(&req.out_dir)
@@ -563,10 +697,62 @@ async fn run_download(
     let ytdlp = engine.ytdlp_path(app).await?;
     let (ffmpeg_dir, _) = engine::locate_ffmpeg(app).ok_or(NO_FFMPEG)?;
     let js = engine::locate_js_runtime(app).map(|rt| rt.arg());
-    let args = build_args(req, url, &ffmpeg_dir, js.as_deref())?;
+    let mut args = build_args(req, url, &ffmpeg_dir, js.as_deref())?;
     let proxy = net::proxy_option(req.extra.proxy.as_deref())?;
 
-    crate::download_manifest::save(app, req, None, None)?;
+    // Resolve the actual basename before any media/sidecar writes and reserve its entire family.
+    let mut planning = args.clone();
+    let at = planning.len() - 2;
+    planning.splice(at..at, ["--simulate".into(), "--print".into(), "KAISU_PLAN|%(filename)s".into(), "--print".into(), "KAISU_TRANSPORT|%(protocol)s|%(is_live)s".into()]);
+    let plan = proc::run_capture_proxied(&ytdlp, &planning.iter().map(String::as_str).collect::<Vec<_>>(), Duration::from_secs(90), proxy.as_deref()).await?;
+    let planned = plan.lines().find_map(|l| l.strip_prefix("KAISU_PLAN|")).ok_or("Could not resolve the output filename before downloading.")?;
+    let planned = PathBuf::from(planned.trim());
+    if let Some(transport) = plan.lines().find_map(|l| l.strip_prefix("KAISU_TRANSPORT|")) {
+        let (protocol, live) = transport.split_once('|').unwrap_or((transport, "NA"));
+        if req.extra.rate_limit.as_deref().is_some_and(|s| !s.trim().is_empty()) && (live == "True" || !protocol.split('+').all(|p| matches!(p, "http" | "https" | "http_dash_segments" | "m3u8" | "m3u8_native"))) {
+            return Err("This live stream or transfer protocol cannot enforce the speed limit. Clear the speed limits before downloading it.".into());
+        }
+        if req.extra.fragment_limit == Some(1) && protocol.contains("http_dash_segments_generator+") {
+            return Err("This stream needs at least two fragment connections. Increase Total fragment connections or select a combined video format.".into());
+        }
+        let protocols: Vec<_> = protocol.split('+').collect();
+        if protocols.iter().all(|p| *p == "http_dash_segments_generator") {
+            let streams = protocols.len();
+            let budget = usize::from(req.extra.fragment_limit.unwrap_or(4));
+            let effective = budget / streams * streams;
+            if effective == 0 { return Err("The selected streams need more fragment connections than this job's share. Increase Total fragment connections or reduce simultaneous downloads.".into()); }
+            // yt-dlp rounds workers up per parallel stream; round down before giving it the budget.
+            let at = args.len() - 2;
+            args.splice(at..at, ["--concurrent-fragments".into(), effective.to_string()]);
+        }
+        if protocols.iter().all(|p| matches!(*p, "http" | "https")) {
+            if let Some(rate) = req.extra.rate_limit.as_deref().filter(|s| !s.trim().is_empty()) {
+                // Plain HTTP streams are fetched sequentially, so they can use the full slot share.
+                let at = args.len() - 2;
+                args.splice(at..at, ["--limit-rate".into(), rate_bytes(rate.trim())?.to_string()]);
+            }
+        }
+    }
+    validate_planned_path(&planned, &req.out_dir)?;
+    let owned = crate::download_manifest::owned_path(app, req);
+    let (chosen, existing) = reserve_output(downloads, req, &planned, owned.as_deref())?;
+    if let Some(existing) = existing {
+        validate_output_file(&existing, &req.out_dir)?;
+        let probe = ffmpeg_dir.join(if cfg!(windows) { "ffprobe.exe" } else { "ffprobe" });
+        let verdict = meta::verify_file(&probe, &existing, None).await;
+        if !verdict.ok { return Err("The existing file failed verification. Choose Keep both or Replace to download it again.".into()); }
+        return Ok(Some((existing.display().to_string(), true)));
+    }
+    let stem = chosen.with_extension("").display().to_string().replace('%', "%%");
+    let at = args.len() - 2;
+    args.splice(at..at, [
+        "-o".into(), format!("{stem}.%(ext)s"),
+        "-o".into(), format!("chapter:{stem}.chapter-%(section_number)03d.%(ext)s"),
+        // The resolved basename was already trimmed during planning. Do not truncate its unique prefix a second time.
+        "--trim-filenames".into(), "10000".into(),
+    ]);
+    validate_planned_path(&chosen, &req.out_dir)?;
+    crate::download_manifest::save(app, req, Some(&chosen.display().to_string()), None)?;
     let mut child = proc::command_with_proxy(&ytdlp, proxy.as_deref()).args(&args).spawn().map_err(|e| format!("Failed to start yt-dlp: {e}"))?;
     let pid = child.id().ok_or("yt-dlp exited immediately")?;
     let job = proc::DOWNLOAD_JOB.with(Clone::clone);
@@ -575,11 +761,13 @@ async fn run_download(
     let stderr = child.stderr.take().ok_or("no stderr")?;
 
     let log_channel = on_event.clone();
+    let header_values = net::custom_header_values(req.extra.custom_args.as_deref());
+    let stderr_secrets = header_values.clone();
     let stderr_task = tokio::spawn(async move {
         let mut lines = BufReader::new(stderr).lines();
         let mut buf = String::new();
         while let Ok(Some(line)) = lines.next_line().await {
-            let line = net::redact_urls(&line);
+            let line = net::redact_values(&line, &stderr_secrets);
             let _ = log_channel.send(DownloadEvent::Log { line: line.clone() });
             buf.push_str(&line);
             buf.push('\n');
@@ -599,7 +787,29 @@ async fn run_download(
     let mut final_path: Option<String> = None;
     let mut tags: Option<(String, String, Option<f64>)> = None;
     let mut lines = BufReader::new(stdout).lines();
-    while let Ok(Some(line)) = lines.next_line().await {
+    let mut watchdog = DownloadWatchdog::new();
+    if let Some(rate) = req.extra.rate_limit.as_deref().filter(|s| !s.trim().is_empty()) {
+        // Very low intentional limits can legitimately take longer to fill yt-dlp's read buffer.
+        watchdog.transfer_timeout = 120.max(32768 / rate_bytes(rate.trim())?.max(1));
+    }
+    let mut timer = tokio::time::interval(Duration::from_secs(5));
+    loop {
+        let line = tokio::select! {
+            result = lines.next_line() => match result { Ok(Some(line)) => line, Ok(None) => break, Err(e) => return Err(format!("Could not read downloader output: {e}")) },
+            _ = timer.tick() => {
+                watchdog.poll_conversion(&chosen);
+                let idle = watchdog.idle.elapsed().as_secs();
+                if watchdog.expired() {
+                    return Err(format!("Download timed out: no progress for {idle} seconds during {}. Partial files were kept; retry to resume.", watchdog.stage));
+                }
+                if idle >= 30 && watchdog.stage != "conversion" {
+                    let _ = on_event.send(DownloadEvent::Stalled { seconds: idle });
+                }
+                continue;
+            }
+        };
+        watchdog.observe(&line);
+        if watchdog.idle.elapsed() < Duration::from_secs(1) { let _ = on_event.send(DownloadEvent::Stalled { seconds: 0 }); }
         if let Some(rest) = line.strip_prefix("KAISU|") {
             if let Some(ev) = progress.handle(&format!("KAISU|{rest}")) {
                 let _ = on_event.send(ev);
@@ -623,20 +833,20 @@ async fn run_download(
         } else if let Some(path) = line.strip_prefix("KAISU_DONE|") {
             final_path = Some(path.trim().to_string());
         } else if req.extra.verbose {
-            let _ = on_event.send(DownloadEvent::Log { line: net::redact_urls(&line) });
+            let _ = on_event.send(DownloadEvent::Log { line: net::redact_values(&line, &header_values) });
         }
     }
 
-    let status = child.wait().await.map_err(|e| format!("Failed to wait for yt-dlp: {e}"))?;
+    let status = tokio::time::timeout(Duration::from_secs(120), child.wait()).await.map_err(|_| "Download timed out while waiting for the downloader to exit.")?.map_err(|e| format!("Failed to wait for yt-dlp: {e}"))?;
     lease.reaped();
-    let stderr_text = stderr_task.await.unwrap_or_default();
+    let stderr_text = tokio::time::timeout(Duration::from_secs(5), stderr_task).await.ok().and_then(Result::ok).unwrap_or_default();
     drop(lease);
     if status.success() {
         let path = final_path.ok_or("The downloader exited without producing an output file.")?;
         let file = PathBuf::from(&path);
         validate_output_file(&file, &req.out_dir)?;
         finish_file(req, &ffmpeg_dir, file, tags, on_event).await?;
-        Ok(Some(path))
+        Ok(Some((path, false)))
     } else {
         Err(proc::clean_stderr(&stderr_text))
     }
@@ -731,7 +941,8 @@ fn preview_args(req: &DownloadRequest, ffmpeg_dir: &std::path::Path, runtime: Op
         let at = args.len() - 2;
         args.splice(at..at, ["--proxy".to_string(), net::redact_urls(&proxy)]);
     }
-    Ok(args)
+    let values = net::custom_header_values(req.extra.custom_args.as_deref());
+    Ok(args.into_iter().map(|arg| net::redact_values(&arg, &values)).collect())
 }
 fn command_line(executable: &str, args: &[String], powershell: bool) -> String {
     let prefix = if powershell && executable != "yt-dlp" { "& " } else { "" };
@@ -754,7 +965,7 @@ impl Downloads {
         let mut active = self.active.lock().map_err(|_| "Download state unavailable.")?;
         if active.contains_key(id) { return Err("That download attempt is already running.".into()); }
         if self.early_cancel.lock().map_err(|_| "Download state unavailable.")?.remove(id).is_some() { job.cancel(); }
-        active.insert(id.into(), Active { job: job.clone(), reserved, destination });
+        active.insert(id.into(), Active { job: job.clone(), reserved, destination, output: None });
         Ok(job)
     }
     fn cancel(&self, id: &str) -> Result<(), String> {
@@ -922,6 +1133,106 @@ mod tests {
     use super::*;
     use std::path::Path;
 
+    #[test]
+    fn reservations_protect_final_partial_and_overlapping_sidecar_families() {
+        let root = std::env::temp_dir().join(format!("kaisu-reservations-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let downloads = Downloads::default();
+        let mut a = req(Preset::Audio); a.out_dir = root.clone();
+        downloads.begin(&a.id, root.clone(), 0).unwrap();
+        let first = reserve_output(&downloads, &a, &root.join("Song.webm"), None).unwrap().0;
+        assert_eq!(first, root.join("Song.mp3"));
+        let mut b = req(Preset::Best); b.id = "2".into(); b.out_dir = root.clone();
+        downloads.begin(&b.id, root.clone(), 0).unwrap();
+        let other = reserve_output(&downloads, &b, &root.join("Song.mp3.mp4"), None).unwrap().0;
+        assert_ne!(other, root.join("Song.mp3.mp4"));
+        b.extra.collision = CollisionPolicy::Replace;
+        assert!(reserve_output(&downloads, &b, &root.join("Song.mp4"), None).is_err());
+        // Both case variants must map to the same reservation on Windows.
+        if cfg!(windows) { assert!(reserve_output(&downloads, &b, &root.join("song.mp4"), None).is_err()); }
+        drop(ActiveGuard { downloads: &downloads, id: &a.id });
+        assert_eq!(reserve_output(&downloads, &b, &root.join("Song.mp4"), None).unwrap().0, root.join("Song.mp4"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn existing_outputs_follow_policy_and_owned_partials_can_resume() {
+        let root = std::env::temp_dir().join(format!("kaisu-collision-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let downloads = Downloads::default(); let mut r = req(Preset::Audio); r.out_dir = root.clone();
+        downloads.begin(&r.id, root.clone(), 0).unwrap();
+        std::fs::write(root.join("Song.mp3.part"), b"partial").unwrap();
+        let chosen = reserve_output(&downloads, &r, &root.join("Song.webm"), None).unwrap().0;
+        assert_ne!(chosen, root.join("Song.mp3"));
+        let owned = root.join("Song.webm");
+        assert_eq!(reserve_output(&downloads, &r, &owned, Some(&owned)).unwrap().0, root.join("Song.mp3"));
+        r.extra.collision = CollisionPolicy::Skip;
+        assert!(reserve_output(&downloads, &r, &owned, None).is_err());
+        std::fs::write(root.join("Song.mp3"), b"finished").unwrap();
+        assert_eq!(reserve_output(&downloads, &r, &owned, None).unwrap().1, Some(root.join("Song.mp3")));
+        r.extra.collision = CollisionPolicy::Replace;
+        assert!(reserve_output(&downloads, &r, &owned, None).unwrap().1.is_none());
+        assert_eq!(std::fs::read(root.join("Song.mp3.part")).unwrap(), b"partial");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn output_aliases_share_locks_and_replace_refuses_symlinks() {
+        let root = std::env::temp_dir().join(format!("kaisu-alias-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(root.join("real")).unwrap();
+        std::os::unix::fs::symlink(root.join("real"), root.join("alias")).unwrap();
+        assert_eq!(output_key(&root.join("real/Song")).unwrap(), output_key(&root.join("alias/Song")).unwrap());
+        let downloads = Downloads::default(); let mut r = req(Preset::Audio); r.out_dir = root.join("real"); r.extra.collision = CollisionPolicy::Replace;
+        downloads.begin(&r.id, r.out_dir.clone(), 0).unwrap();
+        std::fs::write(root.join("other.mp3"), b"keep").unwrap();
+        std::os::unix::fs::symlink(root.join("other.mp3"), r.out_dir.join("Song.mp3.part")).unwrap();
+        assert!(reserve_output(&downloads, &r, &r.out_dir.join("Song.webm"), None).is_err());
+        assert_eq!(std::fs::read(root.join("other.mp3")).unwrap(), b"keep");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn watchdog_requires_increasing_bytes_and_allows_longer_conversion() {
+        let mut watch = DownloadWatchdog::new();
+        watch.observe("KAISU|100|1000|NA|10|10|video");
+        watch.observe("KAISU|50|1000|NA|10|10|audio");
+        watch.idle = std::time::Instant::now() - Duration::from_secs(121);
+        watch.observe("KAISU|100|1000|NA|10|10|video");
+        watch.observe("KAISU|50|1000|NA|10|10|audio");
+        assert!(watch.expired(), "zero-progress chatter must not keep a job alive");
+        watch.observe("KAISU|101|1000|NA|10|10|video"); assert!(!watch.expired());
+        watch.observe("KAISU_PP|started");
+        watch.idle = std::time::Instant::now() - Duration::from_secs(121);
+        assert!(!watch.expired());
+        watch.idle = std::time::Instant::now() - Duration::from_secs(1801);
+        assert!(watch.expired());
+    }
+
+    #[test]
+    fn budgets_and_app_retry_policy_override_custom_arguments() {
+        let mut r = req(Preset::Audio);
+        r.extra.custom_args = Some("--concurrent-fragments=24 --limit-rate=100M --retries infinite --fragment-retries infinite".into());
+        r.extra.fragment_limit = Some(2); r.extra.rate_limit = Some("2M".into()); r.extra.managed_retries = true;
+        let a = args(&r).unwrap();
+        let last = |name: &str| a.windows(2).rev().find(|w| w[0] == name).unwrap()[1].clone();
+        assert_eq!(last("--concurrent-fragments"), "2");
+        assert_eq!(last("--limit-rate"), "1048576");
+        assert_eq!(last("--retries"), "0"); assert_eq!(last("--fragment-retries"), "0");
+        r.extra.fragment_limit = Some(0); assert!(args(&r).is_err());
+        r.extra.fragment_limit = Some(1); r.extra.credentials_required = true; assert!(args(&r).is_err());
+    }
+
+    #[test]
+    fn previews_hide_arbitrary_header_and_signed_link_values() {
+        let mut r = req(Preset::Best);
+        r.url = "https://cdn.example/video?v=public&token=signed-secret".into();
+        r.extra.custom_args = Some("--add-headers 'X-Download-Secret: arbitrary-secret'".into());
+        let preview = preview_command(r).unwrap();
+        assert!(!preview.contains("arbitrary-secret")); assert!(!preview.contains("signed-secret"));
+        assert!(preview.contains("v=public"));
+    }
+
     fn shell_quote(arg: &str) -> String { shell_quote_for(arg, cfg!(windows)) }
     fn preview_command(req: DownloadRequest) -> Result<String, String> {
         Ok(command_line("yt-dlp", &preview_args(&req, Path::new("<ffmpeg folder>"), None)?, cfg!(windows)))
@@ -1087,7 +1398,7 @@ mod tests {
     #[test]
     fn a_finished_download_leaves_the_running_list_however_the_function_ends() {
         let downloads = Downloads::default();
-        downloads.active.lock().unwrap().insert("a".into(), Active { job: Arc::new(proc::JobControl::default()), reserved: 0, destination: PathBuf::new() });
+        downloads.active.lock().unwrap().insert("a".into(), Active { job: Arc::new(proc::JobControl::default()), reserved: 0, destination: PathBuf::new(), output: None });
         assert!(!downloads.is_idle());
         {
             let _running = ActiveGuard { downloads: &downloads, id: "a" };

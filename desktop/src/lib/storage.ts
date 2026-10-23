@@ -1,4 +1,5 @@
 import { sanitizeMusicPreferences, type MusicPreferences } from "./musicPreferences";
+import { persistedDownload, redactText, sensitiveCustomArgs, REDACTED } from "./redact";
 import { sanitizeDownloadQueue, safeConcurrency } from "./downloadValidation";
 import { defaultEqualizer, sanitizeEqualizer, type EqualizerSettings } from "./equalizer";
 import { load, type Store } from "@tauri-apps/plugin-store";
@@ -54,6 +55,9 @@ export interface Settings {
   lyricsMode: LyricsMode;
   /** The user agreed to send the artist and title of a song to a lyrics service (LRCLIB) to look its lyrics up. */
   lyricsConsent: boolean;
+  globalRateLimit: string;
+  fragmentBudget: number;
+  downloadConflict: "keep_both" | "skip" | "replace";
   rateLimit: string;
   customArgs: string;
   verbose: boolean;
@@ -115,6 +119,7 @@ export interface Settings {
 }
 
 export interface HistoryItem {
+  profile?: string;
   id: string;
   url: string;
   title: string;
@@ -154,6 +159,9 @@ export const DEFAULT_SETTINGS: Settings = {
   coverMode: "default",
   lyricsMode: "off",
   lyricsConsent: false,
+  globalRateLimit: "",
+  fragmentBudget: 8,
+  downloadConflict: "keep_both",
   rateLimit: "",
   customArgs: "",
   verbose: true,
@@ -229,6 +237,9 @@ export async function loadSettings(): Promise<Settings> {
     const merged: Settings = { ...DEFAULT_SETTINGS, ...saved };
     merged.presets = sanitizePresets(saved?.presets);
     merged.concurrency = safeConcurrency(merged.concurrency);
+    merged.globalRateLimit = typeof merged.globalRateLimit === "string" ? merged.globalRateLimit : "";
+    merged.fragmentBudget = Math.max(1, Math.min(24, Math.round(Number(merged.fragmentBudget) || 8)));
+    if (!["keep_both", "skip", "replace"].includes(merged.downloadConflict)) merged.downloadConflict = "keep_both";
     merged.autoRetries = Math.min(5, Math.max(0, Math.round(Number(merged.autoRetries) || 0)));
     merged.perSiteLimit = Math.min(6, Math.max(0, Math.round(Number(merged.perSiteLimit) || 0)));
     if (!["system", "aqua", "graphite", "dark"].includes(merged.theme)) merged.theme = "aqua";
@@ -253,7 +264,10 @@ export async function loadSettings(): Promise<Settings> {
     merged.lyricsConsent = merged.lyricsConsent === true;
     merged.siteRules = sanitizeSiteRules(saved?.siteRules);
     merged.proxy = typeof merged.proxy === "string" ? merged.proxy : "";
-    const inFile = splitProxyPassword(merged.proxy).password !== null;
+    if (merged.customArgs === REDACTED) {
+      try { merged.customArgs = await secretGet("download-custom-args") ?? ""; } catch { merged.customArgs = ""; }
+    }
+    const inFile = splitProxyPassword(merged.proxy).password !== null || sensitiveCustomArgs(merged.customArgs);
     merged.proxy = await restoreProxyPassword(merged.proxy);
     if (inFile) await saveSettings(merged); // an older file kept the password in plain text; move it into the store now
     return merged;
@@ -311,7 +325,15 @@ let saving: Promise<void> = Promise.resolve();
 export function saveSettings(settings: Settings): Promise<void> {
   saving = saving.then(async () => {
     try {
-      await (await getStore()).set("settings", await withoutSecrets(settings));
+      let safe = await withoutSecrets(settings);
+      if (sensitiveCustomArgs(settings.customArgs)) {
+        try { await secretSet("download-custom-args", settings.customArgs); }
+        catch { console.warn("Custom header credentials will need to be entered again after restart; the credential store is unavailable."); }
+        safe = { ...safe, customArgs: REDACTED };
+      } else {
+        try { await secretDelete("download-custom-args"); } catch { /* No plaintext fallback. */ }
+      }
+      await (await getStore()).set("settings", safe);
     } catch (e) {
       console.warn("Could not save settings", e);
     }
@@ -323,7 +345,9 @@ export async function loadHistory(): Promise<HistoryItem[]> {
   try {
     const items = (await (await getStore()).get<HistoryItem[]>("history")) ?? [];
     // Entries saved before audio formats existed used the preset name "audio_mp3".
-    return items.map((h) => ((h.preset as string) === "audio_mp3" ? { ...h, preset: "audio" as Preset } : h));
+    const safe = items.map((h) => ({ ...h, preset: (h.preset as string) === "audio_mp3" ? "audio" as Preset : h.preset, url: redactText(h.url), title: redactText(h.title), thumbnail: redactText(h.thumbnail), profile: h.profile ? redactText(h.profile) : h.profile, flag: h.flag ? redactText(h.flag) : h.flag }));
+    if (JSON.stringify(items) !== JSON.stringify(safe)) await saveHistory(safe);
+    return safe;
   } catch (e) {
     console.warn("Could not read history", e);
     return [];
@@ -332,7 +356,7 @@ export async function loadHistory(): Promise<HistoryItem[]> {
 
 export async function saveHistory(history: HistoryItem[]) {
   try {
-    await (await getStore()).set("history", history.slice(0, MAX_HISTORY));
+    await (await getStore()).set("history", history.slice(0, MAX_HISTORY).map((item) => ({ ...item, url: redactText(item.url), title: redactText(item.title), thumbnail: redactText(item.thumbnail), profile: item.profile ? redactText(item.profile) : item.profile, flag: item.flag ? redactText(item.flag) : item.flag })));
   } catch (e) {
     console.warn("Could not save history", e);
   }
@@ -481,8 +505,8 @@ export async function loadQueue(): Promise<SavedDownload[]> {
     const store = await getStore();
     const raw = await store.get<unknown>("queue");
     const saved = Array.isArray(raw) ? raw : [];
-    const queue = sanitizeDownloadQueue(saved);
-    if (saved.some((item) => item && typeof item === "object" && item.extra?.proxy != null)) {
+    const queue = queueWithoutProxy(sanitizeDownloadQueue(saved));
+    if (JSON.stringify(saved) !== JSON.stringify(queue)) {
       try {
         await store.set("queue", queue);
         // Finish the migration before returning: old credentials must not remain on disk.
@@ -506,7 +530,7 @@ export async function saveQueue(queue: SavedDownload[]) {
 
 /** Network credentials belong to current settings, never to a saved download. */
 export function queueWithoutProxy(queue: SavedDownload[]): SavedDownload[] {
-  return queue.map((item) => ({ ...item, extra: { ...item.extra, proxy: null } }));
+  return queue.map(persistedDownload);
 }
 
 export async function loadMusicPreferences(): Promise<MusicPreferences> {
