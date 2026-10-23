@@ -179,7 +179,7 @@ pub fn split_args(input: &str) -> Result<Vec<String>, String> {
     while let Some(c) = chars.next() {
         match (quote, c) {
             (Some(q), c) if c == q => quote = None,
-            (Some('"'), '\\') if matches!(chars.peek(), Some('"') | Some('\\')) => cur.push(chars.next().unwrap()),
+            (Some('"'), '\\') if matches!(chars.peek(), Some('"') | Some('\\')) => cur.extend(chars.next()),
             (Some(_), c) => cur.push(c),
             (None, '"' | '\'') => {
                 quote = Some(c);

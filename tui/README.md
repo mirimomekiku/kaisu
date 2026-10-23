@@ -1,6 +1,6 @@
 # Kaisu TUI
 
-See the [root README](../README.md#terminal-ui). Quick start:
+See the [root README](../README.md#the-terminal-version). Quick start:
 
 ```bash
 node ../scripts/fetch-binaries.mjs   # once, for ffmpeg

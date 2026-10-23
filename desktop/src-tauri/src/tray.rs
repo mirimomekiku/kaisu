@@ -5,7 +5,7 @@
 //! `set_tray_status`, and we decide here, in Rust, so closing works even if the page is busy.
 
 use std::sync::{
-    Mutex,
+    Mutex, MutexGuard,
     atomic::{AtomicBool, AtomicU32, Ordering},
 };
 use std::time::Duration;
@@ -18,6 +18,11 @@ use tauri::{
 };
 
 use crate::download::Downloads;
+
+/// A poisoned lock only means another thread panicked; the tray state is plain data and still usable.
+fn locked<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 #[derive(Deserialize, Clone, Copy, PartialEq, Eq, Default, Debug)]
 #[serde(rename_all = "snake_case")]
@@ -132,7 +137,7 @@ pub fn init(app: &AppHandle) {
         builder.build(app)?;
 
         let state = app.state::<TrayState>();
-        *state.status_item.lock().unwrap() = Some(status);
+        *locked(&state.status_item) = Some(status);
         state.available.store(true, Ordering::SeqCst);
         Ok(())
     };
@@ -145,7 +150,7 @@ pub fn init(app: &AppHandle) {
 pub fn on_window_event(window: &Window, event: &WindowEvent) {
     if let WindowEvent::CloseRequested { api, .. } = event {
         let state = window.state::<TrayState>();
-        let mode = *state.mode.lock().unwrap();
+        let mode = *locked(&state.mode);
         if should_hide(mode, state.busy.load(Ordering::SeqCst), state.available.load(Ordering::SeqCst)) {
             api.prevent_close();
             let _ = window.hide();
@@ -172,10 +177,10 @@ pub fn set_tray_status(app: AppHandle, state: State<'_, TrayState>, active: u32,
     let playing = playing.unwrap_or(false);
     let busy = active + queued + u32::from(playing);
     state.busy.store(busy, Ordering::SeqCst);
-    *state.mode.lock().unwrap() = mode;
+    *locked(&state.mode) = mode;
 
     let text = status_text(active, queued, paused, playing);
-    if let Some(item) = state.status_item.lock().unwrap().as_ref() {
+    if let Some(item) = locked(&state.status_item).as_ref() {
         let _ = item.set_text(&text);
     }
     if let Some(tray) = app.tray_by_id("main") {
@@ -188,7 +193,7 @@ pub fn set_tray_status(app: AppHandle, state: State<'_, TrayState>, active: u32,
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_secs(3));
             let st = handle.state::<TrayState>();
-            if should_quit_when_idle(*st.mode.lock().unwrap(), st.busy.load(Ordering::SeqCst), st.hidden_by_close.load(Ordering::SeqCst)) {
+            if should_quit_when_idle(*locked(&st.mode), st.busy.load(Ordering::SeqCst), st.hidden_by_close.load(Ordering::SeqCst)) {
                 quit(&handle);
             }
         });
