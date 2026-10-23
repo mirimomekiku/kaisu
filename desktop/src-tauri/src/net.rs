@@ -95,9 +95,12 @@ pub fn redact_values(text: &str, values: &[String]) -> String {
     for value in values { safe = safe.replace(value, "[REDACTED]"); }
     redact_urls(&safe)
 }
+/// Names whose values are secret. Checked against `testdata/download-validation.json`, which the frontend reads too.
+const SECRET_KEY_PARTS: [&str; 8] = ["token", "signature", "password", "credential", "secret", "apikey", "api_key", "api-key"];
+const SECRET_KEY_EXACT: [&str; 12] = ["auth", "authorization", "authkey", "auth_key", "auth-key", "sig", "key", "hmac", "policy", "session", "sessionid", "session_id"];
 fn secret_query_key(key: &str) -> bool {
     let decoded = url::form_urlencoded::parse(format!("{key}=").as_bytes()).next().map(|(k, _)| k.to_lowercase()).unwrap_or_default();
-    ["token", "auth", "signature", "api_key", "apikey", "api-key", "credential", "password", "policy", "session"].iter().any(|k| decoded.contains(k)) || ["sig", "key", "hmac"].contains(&decoded.as_str())
+    SECRET_KEY_PARTS.iter().any(|k| decoded.contains(k)) || SECRET_KEY_EXACT.contains(&decoded.as_str())
 }
 fn redact_tokens(text: &str) -> String {
     let mut out = String::new();
@@ -138,6 +141,17 @@ pub async fn test_proxy(app: AppHandle, engine: State<'_, Engine>, proxy: String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn secret_key_lists_match_the_shared_cases() {
+        let cases: serde_json::Value = serde_json::from_str(include_str!("../../testdata/download-validation.json")).unwrap();
+        let keys = &cases["secretKeys"];
+        let list = |v: &serde_json::Value| v.as_array().unwrap().iter().map(|k| k.as_str().unwrap().to_string()).collect::<Vec<_>>();
+        assert_eq!(list(&keys["parts"]), SECRET_KEY_PARTS);
+        assert_eq!(list(&keys["exact"]), SECRET_KEY_EXACT);
+        for key in list(&keys["redact"]) { let safe = redact_urls(&format!("https://x/a?v=1&{key}=private")); assert!(safe.contains("[REDACTED]") && !safe.contains("private") && safe.contains("v=1"), "{key}: {safe}"); }
+        for key in list(&keys["keep"]) { assert!(redact_urls(&format!("https://x/a?{key}=public")).contains(&format!("{key}=public")), "{key}"); }
+    }
 
     #[test]
     fn redacts_headers_signed_queries_and_contextual_custom_header_values() {

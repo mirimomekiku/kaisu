@@ -17,5 +17,13 @@
     ["1.", false], ["1.2.3K", false], ["1e9", false], ["Infinity", false],
     ["999999999999999999999999999999999999999999999999", false],
     ["1000000000001", false], ["0.1", false], ["1G", false]
-  ]
+  ],
+  "timeouts": { "stallNoticeSeconds": 30, "defaultSeconds": 120, "conversionSeconds": 1800, "readBufferBytes": 32768 },
+  "secretKeys": {
+    "parts": ["token", "signature", "password", "credential", "secret", "apikey", "api_key", "api-key"],
+    "exact": ["auth", "authorization", "authkey", "auth_key", "auth-key", "sig", "key", "hmac", "policy", "session", "sessionid", "session_id"],
+    "redact": ["token", "access_token", "oauth_token", "X-Amz-Signature", "X-Amz-Credential", "X-Amz-Security-Token", "sig", "key", "hmac", "Policy", "session", "auth", "api_key", "x-api-key", "password", "%74oken"],
+    "keep": ["v", "list", "index", "t", "author", "authority", "policy_name", "sessions", "keyword", "monkey", "monkeys", "signal", "id", "format"]
+  },
+  "retry": { "delays": [5, 15, 45], "afterLast": 60, "rateLimitCooldown": 60, "maxRetryAfter": 3600 }
 }

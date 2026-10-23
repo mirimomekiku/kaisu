@@ -50,10 +50,12 @@ export function isTransient(message: string): boolean {
   return TRANSIENT.test(message) && !PERMANENT.test(message);
 }
 
-/** Seconds to wait before retry number `attempt` (1, 2, 3...): 5, 15, 45, then a minute. */
-export const retryDelaySeconds = (attempt: number, random = 0.5) => Math.round(([5, 15, 45][attempt - 1] ?? 60) * (0.8 + Math.max(0, Math.min(1, random)) * 0.4));
+/** Retry timing. Checked against `testdata/download-validation.json`. */
+export const RETRY = { delays: [5, 15, 45], afterLast: 60, rateLimitCooldown: 60, maxRetryAfter: 3600 } as const;
+/** Seconds to wait before retry number `attempt` (1, 2, 3...): 5, 15, 45, then a minute, with some jitter. */
+export const retryDelaySeconds = (attempt: number, random = 0.5) => Math.round((RETRY.delays[attempt - 1] ?? RETRY.afterLast) * (0.8 + Math.max(0, Math.min(1, random)) * 0.4));
 export const isRateLimited = (message: string) => /http error 429|too many requests/i.test(message);
 export const retryAfterSeconds = (message: string) => {
   const match = /retry-after\s*:\s*(\d+)/i.exec(message);
-  return match ? Math.min(3600, Number(match[1])) : 0;
+  return match ? Math.min(RETRY.maxRetryAfter, Number(match[1])) : 0;
 };

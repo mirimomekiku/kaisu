@@ -173,6 +173,13 @@ pub enum DownloadEvent {
     Error { message: String },
 }
 
+/// Download timing. The same numbers are checked against `testdata/download-validation.json`, which the
+/// frontend's retry settings are checked against too.
+const STALL_NOTICE_SECS: u64 = 30;
+const DEFAULT_TIMEOUT_SECS: u64 = 120;
+const CONVERSION_TIMEOUT_SECS: u64 = 1800;
+const READ_BUFFER_BYTES: u64 = 32768;
+
 struct DownloadWatchdog {
     idle: std::time::Instant,
     stage: &'static str,
@@ -181,8 +188,8 @@ struct DownloadWatchdog {
     transfer_timeout: u64,
 }
 impl DownloadWatchdog {
-    fn new() -> Self { Self { idle: std::time::Instant::now(), stage: "preparation", bytes: HashMap::new(), file_activity: None, transfer_timeout: 120 } }
-    fn expired(&self) -> bool { self.idle.elapsed().as_secs() >= match self.stage { "conversion" => 1800, "transfer" => self.transfer_timeout, _ => 120 } }
+    fn new() -> Self { Self { idle: std::time::Instant::now(), stage: "preparation", bytes: HashMap::new(), file_activity: None, transfer_timeout: DEFAULT_TIMEOUT_SECS } }
+    fn expired(&self) -> bool { self.idle.elapsed().as_secs() >= match self.stage { "conversion" => CONVERSION_TIMEOUT_SECS, "transfer" => self.transfer_timeout, _ => DEFAULT_TIMEOUT_SECS } }
     fn poll_conversion(&mut self, output: &std::path::Path) {
         if self.stage != "conversion" { return; }
         let prefix = format!("{}.", output.file_stem().unwrap_or_default().to_string_lossy());
@@ -790,7 +797,7 @@ async fn run_download(
     let mut watchdog = DownloadWatchdog::new();
     if let Some(rate) = req.extra.rate_limit.as_deref().filter(|s| !s.trim().is_empty()) {
         // Very low intentional limits can legitimately take longer to fill yt-dlp's read buffer.
-        watchdog.transfer_timeout = 120.max(32768 / rate_bytes(rate.trim())?.max(1));
+        watchdog.transfer_timeout = DEFAULT_TIMEOUT_SECS.max(READ_BUFFER_BYTES / rate_bytes(rate.trim())?.max(1));
     }
     let mut timer = tokio::time::interval(Duration::from_secs(5));
     loop {
@@ -802,7 +809,7 @@ async fn run_download(
                 if watchdog.expired() {
                     return Err(format!("Download timed out: no progress for {idle} seconds during {}. Partial files were kept; retry to resume.", watchdog.stage));
                 }
-                if idle >= 30 && watchdog.stage != "conversion" {
+                if idle >= STALL_NOTICE_SECS && watchdog.stage != "conversion" {
                     let _ = on_event.send(DownloadEvent::Stalled { seconds: idle });
                 }
                 continue;
@@ -1257,6 +1264,15 @@ mod tests {
         let cases: serde_json::Value = serde_json::from_str(include_str!("../../testdata/download-validation.json")).unwrap();
         for case in cases["urls"].as_array().unwrap() { assert_eq!(validate_url(case[0].as_str().unwrap()).is_ok(), case[1].as_bool().unwrap(), "{case}"); }
         for case in cases["rates"].as_array().unwrap() { assert_eq!(validate_rate_limit(case[0].as_str().unwrap()).is_ok(), case[1].as_bool().unwrap(), "{case}"); }
+    }
+    #[test]
+    fn timeouts_match_the_shared_values() {
+        let cases: serde_json::Value = serde_json::from_str(include_str!("../../testdata/download-validation.json")).unwrap();
+        let t = &cases["timeouts"];
+        assert_eq!(t["stallNoticeSeconds"].as_u64(), Some(STALL_NOTICE_SECS));
+        assert_eq!(t["defaultSeconds"].as_u64(), Some(DEFAULT_TIMEOUT_SECS));
+        assert_eq!(t["conversionSeconds"].as_u64(), Some(CONVERSION_TIMEOUT_SECS));
+        assert_eq!(t["readBufferBytes"].as_u64(), Some(READ_BUFFER_BYTES));
     }
     #[test]
     fn early_cancel_and_duplicate_attempts_are_safe() {
