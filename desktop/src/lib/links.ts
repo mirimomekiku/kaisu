@@ -60,7 +60,6 @@ export function playlistOf(link: string): { id: string; url: string } | null {
   }
 }
 
-const NOISE_PARAMS = new Set(["list", "index", "t", "start", "si", "feature", "pp", "ab_channel", "utm_source", "utm_medium", "utm_campaign", "fbclid", "gclid", "app"]);
 
 /**
  * The same video can be linked many ways (youtu.be/x, m.youtube.com/watch?v=x&t=30s, a playlist link...). This
@@ -70,20 +69,19 @@ export function canonicalUrl(link: string): string {
   try {
     const u = new URL(link.trim());
     const host = u.hostname.toLowerCase().replace(/^(www|m|music)\./, "");
-    if (host === "youtu.be") {
+    if (host === "youtu.be" && !u.port) {
       const id = u.pathname.split("/")[1];
       return id ? `https://youtube.com/watch?v=${id}` : link;
     }
-    if (host === "youtube.com") {
+    if (host === "youtube.com" && !u.port) {
       const shorts = /^\/(shorts|live|embed)\/([\w-]{6,})/.exec(u.pathname);
       if (shorts) return `https://youtube.com/watch?v=${shorts[2]}`;
       const v = u.searchParams.get("v");
       if (u.pathname === "/watch" && v) return `https://youtube.com/watch?v=${v}`;
     }
-    const keep = [...u.searchParams.entries()].filter(([k]) => !NOISE_PARAMS.has(k.toLowerCase())).sort(([a], [b]) => a.localeCompare(b));
-    const query = keep.length ? `?${new URLSearchParams(keep).toString()}` : "";
-    const path = u.pathname.length > 1 ? u.pathname.replace(/\/+$/, "") : "";
-    return `${u.protocol}//${host}${path}${query}`;
+    // Unknown sites keep their host, port, path and query semantics intact.
+    u.hash = "";
+    return u.toString();
   } catch {
     return link;
   }
@@ -92,7 +90,8 @@ export function canonicalUrl(link: string): string {
 /** The website part of a link ("youtube.com"), used to limit how many downloads hit one site at once. */
 export function hostOf(link: string): string {
   try {
-    return new URL(link).hostname.toLowerCase().replace(/^(www|m|music)\./, "");
+    const host = new URL(link).hostname.toLowerCase().replace(/^(www|m|music)\./, "");
+    return host === "youtu.be" ? "youtube.com" : host;
   } catch {
     return "";
   }

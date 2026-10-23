@@ -60,9 +60,9 @@ describe("canonical links", () => {
       expect(canonicalUrl(link), link).toBe(want);
   });
 
-  it("keeps different videos apart and ignores tracking", () => {
+  it("keeps different videos apart and preserves unknown sites' query semantics", () => {
     expect(canonicalUrl("https://youtube.com/watch?v=aaaaaaaaaaa")).not.toBe(canonicalUrl("https://youtube.com/watch?v=bbbbbbbbbbb"));
-    expect(canonicalUrl("https://vimeo.com/123/?utm_source=x")).toBe("https://vimeo.com/123");
+    expect(canonicalUrl("https://vimeo.com/123/?utm_source=x")).toBe("https://vimeo.com/123/?utm_source=x");
     expect(canonicalUrl("not a link")).toBe("not a link");
   });
 
