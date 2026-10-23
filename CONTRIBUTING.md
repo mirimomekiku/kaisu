@@ -135,5 +135,5 @@ There is no CI: releases are built on a developer machine. Versions are 0.0.x un
    ```
 
    The result is `desktop/src-tauri/target/x86_64-pc-windows-msvc/release/desktop.exe`.
-3. Tag and publish: `git tag v0.0.3 && git push origin v0.0.3`, then
-   `gh release create v0.0.3 desktop/src-tauri/target/x86_64-pc-windows-msvc/release/desktop.exe#kaisu-windows-x64.exe --prerelease --generate-notes`.
+3. Tag and publish: `git tag v0.0.4 && git push origin v0.0.4`, then
+   `gh release create v0.0.4 desktop/src-tauri/target/x86_64-pc-windows-msvc/release/desktop.exe#kaisu-windows-x64.exe --prerelease --generate-notes`.
