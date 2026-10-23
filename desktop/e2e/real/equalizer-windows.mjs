@@ -43,8 +43,11 @@ try {
   await page.locator(".toolbar, .setup-bg").first().waitFor({ timeout: 30000 });
   await page.evaluate(async (music) => window.__TAURI_INTERNALS__.invoke("set_managed_folders", { download: music, moved: "", siteFolders: [] }), music);
   const url = await page.evaluate(async (path) => window.__TAURI_INTERNALS__.invoke("play_in_app", { path }), audioPath);
-  const response = await fetch(url); check("native stream is CORS-readable", response.headers.get("access-control-allow-origin") === "*");
+  const origin = await page.evaluate(() => location.origin);
+  const response = await fetch(url, { headers: { Origin: origin } }); check("native stream is CORS-readable by the app's own origin", response.headers.get("access-control-allow-origin") === origin);
   assert.equal(response.status, 200); assert.equal((await response.arrayBuffer()).byteLength, wav.length);
+  const foreign = await fetch(url, { headers: { Origin: "https://example.com" } });
+  check("native stream refuses another origin", foreign.status === 403 && foreign.headers.get("access-control-allow-origin") === null);
   const cdp = await page.context().newCDPSession(page);
   const injected = await cdp.send("Runtime.evaluate", { expression: output.find((item) => item.type === "chunk").code });
   if (injected.exceptionDetails) throw new Error(injected.exceptionDetails.text);
