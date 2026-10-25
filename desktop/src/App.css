@@ -379,6 +379,7 @@ a,
   height: 100%;
   object-fit: cover;
 }
+.artwell .art.album-art img { object-fit:contain; }
 .artwell .cap {
   padding: 4px 8px 5px;
   font-size: 10.5px;
@@ -1908,3 +1909,103 @@ select.field:disabled, select.source-select:disabled { opacity:.6; }
 .progress i.download-indeterminate { width: 30% !important; animation: download-pulse 1.4s ease-in-out infinite alternate; }
 @keyframes download-pulse { from { transform: translateX(0); } to { transform: translateX(230%); } }
 @media (prefers-reduced-motion: reduce) { .progress i.download-indeterminate { animation: none; } }
+
+.saved-source { border: 1px solid var(--border, #b4b4b4); border-radius: 5px; }
+
+.seek-surface { position:relative; display:flex; flex:1; align-items:center; min-width:0; height:24px; }
+.seek-surface .pb-seek { width:100%; min-width:0; position:relative; z-index:1; }
+.seek-waveform { position:absolute; inset:0; width:100%; height:100%; color:var(--blue-3,#548cbe); pointer-events:none; }
+.seek-surface.has-waveform .pb-seek { background:transparent; opacity:.8; }
+.seek-surface.has-waveform input[type=range]::-webkit-slider-runnable-track { background:transparent; }
+.wave-loop-marker { stroke:var(--ink); stroke-width:2px; }
+.waveform-status { position:absolute; left:4px; bottom:-9px; font-size:8px; color:var(--ink-2); white-space:nowrap; }
+.loop-seek-label { position:absolute; top:-9px; right:2px; font-size:8px; color:var(--ink-2); pointer-events:none; }
+.full-seek .seek-surface { height:40px; }
+.ab-controls { border:1px solid var(--hairline); border-radius:5px; padding:8px; min-width:0; display:flex; flex-direction:column; gap:8px; }
+.ab-controls legend { font-weight:600; padding:0 4px; }
+.session-history { padding:12px 0; min-width:0; }
+.session-list { list-style:none; padding:0; margin:0; max-height:420px; overflow:auto; }
+.session-item { display:flex; flex-direction:column; gap:8px; padding:12px 0; border-bottom:1px solid var(--hairline); }
+.full-options { flex-wrap:wrap; }
+
+/* Keep artwork and track text within the remaining height as playback tools wrap. */
+.full-record { display:grid; grid-template-rows:minmax(0,1fr) auto; align-content:stretch; justify-content:stretch; }
+.full-record .full-cover { width:auto; height:100%; max-height:420px; max-width:100%; justify-self:center; align-self:center; }
+.full-record .full-track { justify-self:center; }
+
+.smart-options { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; }
+.smart-options label, .cleanup-controls label { display:flex; flex-direction:column; gap:5px; min-width:0; }
+.smart-options .field, .cleanup-controls .field { width:100%; min-width:0; }
+.smart-preview { border:1px solid var(--hairline); border-radius:8px; padding:0 12px; }
+.smart-preview ol { padding-left:24px; overflow-wrap:anywhere; }
+.cleanup { display:flex; flex-direction:column; gap:12px; }
+.cleanup p { margin:0; }
+.cleanup-summary { display:flex; gap:20px; flex-wrap:wrap; }
+.cleanup-controls { display:flex; flex-wrap:wrap; gap:10px; border:0; padding:0; margin:0; }
+.cleanup-controls label { flex:1 1 150px; }
+.cleanup-results { list-style:none; padding:0; margin:0; }
+.cleanup-row { display:flex; flex-direction:column; gap:7px; padding:12px 0; border-bottom:1px solid var(--hairline); }
+.cleanup-song { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.cleanup-song input { flex-shrink:0; }
+.cleanup-song b, .cleanup-song span { overflow-wrap:anywhere; }
+@media(max-width:600px) { .smart-options { grid-template-columns:1fr; } }
+
+/* User customization. Defaults retain the existing sizes and palette. */
+:root { --ui-font-size:12px; --sidebar-width:198px; }
+html, body, #root { font-size:var(--ui-font-size); }
+.sidebar { width:min(var(--sidebar-width), 30vw); }
+.sidebar nav { min-height:0; overflow:auto; padding-bottom:8px; }
+.sidebar .source > span:first-of-type { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.source, .field, .btn, .pref-row, .itable, .row-card, .library .lib-row { font-size:var(--ui-font-size); }
+.source { min-height:calc(var(--ui-font-size) + 10px); }
+.field, .btn { min-height:calc(var(--ui-font-size) + 12px); }
+.library .lib-row { min-height:calc(var(--ui-font-size) + 16px); }
+html[data-density="compact"] .settings-page .pref-row { padding-top:7px; padding-bottom:7px; }
+html[data-density="compact"] .source { min-height:calc(var(--ui-font-size) + 7px); height:auto; padding-top:2px; padding-bottom:2px; }
+html[data-density="compact"] .library .song-list .lib-row { min-height:calc(var(--ui-font-size) + 12px); height:calc(var(--ui-font-size) + 16px); }
+html[data-density="compact"] .itable td { padding-top:3px; padding-bottom:3px; }
+html[data-density="compact"] .row-card { padding-top:6px; padding-bottom:6px; }
+html[data-artwork-shape="square"] :is(.thumb, .album-cover, .full-cover, .full-cover img, .mini-cover, .mini-cover img, .playlist-cover, .artwell .art) { border-radius:0; }
+html[data-artwork-shape="circle"] :is(.thumb, .album-cover, .full-cover, .full-cover img, .mini-cover, .mini-cover img, .playlist-cover, .artwell .art) { border-radius:50%; overflow:hidden; }
+html[data-artwork-shape="circle"] .artwell .art { aspect-ratio:1; margin:10px; }
+html[data-reduced-motion="true"] *, html[data-reduced-motion="true"] *::before, html[data-reduced-motion="true"] *::after { animation-duration:.01ms !important; animation-iteration-count:1 !important; transition-duration:.01ms !important; scroll-behavior:auto !important; }
+@media(prefers-reduced-motion:reduce) { *, *::before, *::after { animation-duration:.01ms !important; animation-iteration-count:1 !important; transition-duration:.01ms !important; scroll-behavior:auto !important; } }
+.customization-controls { padding:12px; display:flex; flex-direction:column; gap:12px; min-width:0; }
+.customization-controls p { margin:0; line-height:1.5; }
+.customization-option { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; }
+.customization-option .field { max-width:100%; }
+.customization-option input[type="range"] { flex:1; max-width:240px; min-width:80px; }
+.sidebar-editor-list { padding:0; margin:0; list-style:none; }
+.sidebar-editor-list li { display:flex; justify-content:space-between; gap:12px; align-items:center; padding:6px 0; border-bottom:1px solid var(--hairline); }
+.pin-options { display:flex; flex-direction:column; gap:8px; padding:10px 0; max-height:220px; overflow:auto; }
+.pin-options label { overflow-wrap:anywhere; }
+.theme-color-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.theme-color-grid label { display:flex; flex-direction:column; gap:5px; min-width:0; }
+.theme-color-grid input[type="color"] { width:40px; flex:none; height:30px; padding:2px; }
+.theme-color-grid .field { width:100%; min-width:0; font-family:var(--mono); }
+.theme-preview { display:grid; grid-template-columns:minmax(80px,1fr) 2fr; border:1px solid; border-radius:6px; overflow:hidden; min-width:0; }
+.theme-preview > aside, .theme-preview > div { padding:14px; overflow-wrap:anywhere; }
+.theme-preview > aside { border-right:1px solid; }
+@media(max-width:760px) { .theme-color-grid { grid-template-columns:1fr; } }
+/* Custom palettes use real colors rather than the legacy whole-page theme filters. */
+html[data-custom-theme="true"] { filter:none; --dark-img:none; --accent-rotate:0deg; }
+html[data-custom-theme="true"] :is(img, video, .thumb svg) { filter:none !important; }
+html[data-custom-theme="true"] :is(.sidebar, .btn.primary, .field:focus, .searchfield input:focus, .itable tbody tr.sel, .row-card.sel, .seg.blue > button[aria-checked="true"], .selbar, a, .link, input[type="checkbox"], input[type="radio"], .drop-overlay) { filter:none; }
+html[data-custom-theme="true"] :is(.toolbar, .titlebar, .statusbar, .sheet-head, .sheet-foot, .panel-title, .playerbar, .full-header, .full-transport, .mini-header, .mini-player, .qp-head, .lib-bar, .lib-head, .itable thead th, .artwell, .artwell .cap) { background:var(--window); color:var(--ink); border-color:var(--edge); box-shadow:none; text-shadow:none; }
+html[data-custom-theme="true"] :is(.panel, .sheet, .ctx, .library, .full-player, .queuepanel, .row-card, .filter-dropdown, .searchfield input, .field, .lib-search, .lib-search input, .lcd) { background:var(--paper); color:var(--ink); border-color:var(--edge); text-shadow:none; }
+html[data-custom-theme="true"] .sidebar { background:var(--custom-sidebar); border-color:var(--edge); box-shadow:none; }
+html[data-custom-theme="true"] :is(.source, .source svg, .source-header, .lcd-title, .lcd-sub, .full-heading b, .artwell .cap) { color:var(--ink); text-shadow:none; }
+html[data-custom-theme="true"] :is(.btn, .seg > button, .kbd) { background:var(--window); color:var(--ink); border-color:var(--edge); text-shadow:none; box-shadow:none; }
+html[data-custom-theme="true"] :is(.btn.primary, .source[aria-current="page"], .seg > button[aria-checked="true"], .itable tbody tr.sel, .row-card.sel, .library .song-list .lib-row[data-selected="true"]) { background:var(--blue-3); color:var(--ink-inv); text-shadow:none; box-shadow:none; }
+html[data-custom-theme="true"] .source[aria-current="page"] svg { color:var(--ink-inv); }
+html[data-custom-theme="true"] :is(.itable tbody tr:nth-child(even), .library [role="listitem"].lib-row:nth-child(even), .library .album-track:nth-child(even)) { background:var(--stripe); }
+html[data-custom-theme="true"] :is(.library [role="listitem"].lib-row:hover, .library .album-track:hover, .ctx button:hover, .btn:hover:not(:disabled)) { background:var(--window); color:var(--ink); }
+html[data-custom-theme="true"] .library .song-list .lib-row[data-selected="true"] { background:var(--select-2); color:var(--ink-inv); }
+html[data-custom-theme="true"] ::-webkit-scrollbar-track, html[data-custom-theme="true"] ::-webkit-scrollbar-corner { background:var(--window); border-color:var(--edge); }
+html[data-custom-theme="true"] ::-webkit-scrollbar-thumb { background:var(--edge); border:3px solid var(--window); }
+.sidebar nav { flex:1; }
+.sidebar .artwell { flex:none; }
+html[data-custom-theme="true"] :is(select.source-select, .track-rating select) { background:var(--paper); color:var(--ink); border-color:var(--edge); }
+html[data-custom-theme="true"] :is(select.field, select.source-select, .track-rating select) { appearance:auto; -webkit-appearance:auto; padding-right:9px; }
+html[data-custom-theme="true"] .playerbar .pb-sub { color:var(--ink-2); }
+html[data-custom-theme="true"] input[type="range"], html[data-custom-theme="true"] input[type="checkbox"], html[data-custom-theme="true"] input[type="radio"] { accent-color:var(--blue-3); }

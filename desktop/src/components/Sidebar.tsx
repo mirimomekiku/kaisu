@@ -1,10 +1,16 @@
-import { Download, Film, History as HistoryIcon, Library as LibraryIcon, Podcast, Search, Settings as SettingsIcon, type LucideIcon } from "lucide-react";
+import { Bookmark, Download, Film, History as HistoryIcon, Library as LibraryIcon, ListMusic, Podcast, Search, Settings as SettingsIcon, type LucideIcon } from "lucide-react";
+import { defaultSidebar, NAV_LABELS, type SidebarOptions } from "../lib/customization";
 import Picture from "./Picture";
 import { FEATURES } from "../lib/features";
 
-export type Page = "search" | "downloads" | "history" | "library" | "podcasts" | "settings";
+export type Page = "search" | "downloads" | "history" | "library" | "podcasts" | "settings" | "sources";
 
 interface Props {
+  options?: SidebarOptions;
+  playlists: Array<{ id: string; name: string }>;
+  sources: Array<{ id: string; title: string }>;
+  onPlaylist: (id: string) => void;
+  onSource: (id: string) => void;
   page: Page;
   onNavigate: (page: Page) => void;
   /** Downloads currently running, and how many are in the list in total. */
@@ -13,8 +19,8 @@ interface Props {
   historyCount: number;
   /** Songs in the music library. */
   songCount: number;
-  /** The video currently open in the inspector, shown as artwork at the bottom. */
-  art: { src: string | null; caption: string } | null;
+  /** Selected video artwork, or the current song's loaded album cover. */
+  art: { src: string | null; caption: string; kind?: "video" | "album" } | null;
 }
 
 function Item({ icon: Icon, label, page, current, count, hot, onNavigate }: {
@@ -36,29 +42,29 @@ function Item({ icon: Icon, label, page, current, count, hot, onNavigate }: {
 }
 
 /** The iTunes-style "source list": navigation on top, current artwork at the bottom. */
-export default function Sidebar({ page, onNavigate, active, total, historyCount, songCount, art }: Props) {
+export default function Sidebar({ options = defaultSidebar(), playlists, sources, onPlaylist, onSource, page, onNavigate, active, total, historyCount, songCount, art }: Props) {
   return (
     <aside className="sidebar" aria-label="Sidebar">
       <nav aria-label="Sections">
-        <div className="source-header">Download</div>
-        <Item icon={Search} label="Search" page="search" current={page} onNavigate={onNavigate} />
-        <Item icon={Download} label="Downloads" page="downloads" current={page} count={active || total} hot={active > 0} onNavigate={onNavigate} />
-        <Item icon={HistoryIcon} label="History" page="history" current={page} count={historyCount} onNavigate={onNavigate} />
-        <div className="source-header">Music</div>
-        <Item icon={LibraryIcon} label="Library" page="library" current={page} count={songCount} onNavigate={onNavigate} />
-        {FEATURES.podcasts && <Item icon={Podcast} label="Podcasts" page="podcasts" current={page} onNavigate={onNavigate} />}
-        <div className="source-header">Kaisu</div>
-        <Item icon={SettingsIcon} label="Settings" page="settings" current={page} onNavigate={onNavigate} />
+        <div className="source-header">Sections</div>
+        {options.order.filter((key) => !options.hidden.includes(key) && (key !== "podcasts" || FEATURES.podcasts)).map((key) => {
+          const icons = { search: Search, downloads: Download, sources: Bookmark, history: HistoryIcon, library: LibraryIcon, podcasts: Podcast, settings: SettingsIcon };
+          const count = key === "downloads" ? active || total : key === "history" ? historyCount : key === "library" ? songCount : undefined;
+          return <Item key={key} icon={icons[key]} label={NAV_LABELS[key]} page={key} current={page} count={options.showCounts ? count : undefined} hot={key === "downloads" && active > 0} onNavigate={onNavigate} />;
+        })}
+        {(options.playlistPins.some((id) => playlists.some((p) => p.id === id)) || options.sourcePins.some((id) => sources.some((p) => p.id === id))) && <div className="source-header">Pinned</div>}
+        {options.playlistPins.flatMap((id) => { const p = playlists.find((p) => p.id === id); return p ? [<button key={`playlist-${id}`} className="source" aria-label={`Open pinned playlist ${p.name}`} title={p.name} onClick={() => onPlaylist(id)}><ListMusic className="w-3.5 h-3.5" /><span className="truncate">{p.name}</span></button>] : []; })}
+        {options.sourcePins.flatMap((id) => { const p = sources.find((p) => p.id === id); return p ? [<button key={`source-${id}`} className="source" aria-label={`Open pinned source ${p.title}`} title={p.title} onClick={() => onSource(id)}><Bookmark className="w-3.5 h-3.5" /><span className="truncate">{p.title}</span></button>] : []; })}
       </nav>
 
-      <div className="artwell" aria-label="Artwork">
-        <div className="art">
+      {options.showArtwork && <div className="artwell" aria-label="Artwork">
+        <div className={`art${art?.kind === "album" ? " album-art" : ""}`}>
           <Picture url={art?.src} fallback={<Film className="w-9 h-9 opacity-60" />} />
         </div>
         <div className="cap truncate" title={art?.caption}>
           {art?.caption ?? "No video selected"}
         </div>
-      </div>
+      </div>}
     </aside>
   );
 }

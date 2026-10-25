@@ -79,6 +79,8 @@ export interface AudioExtras {
 export type SearchSource = "youtube" | "soundcloud" | "youtube_music";
 
 export interface ExtraOptions {
+  /** Local library destinations; these do not change the output artifact. */
+  library_playlist_ids?: string[];
   credentials_required?: boolean;
   collision?: "keep_both" | "skip" | "replace";
   fragment_limit?: number;
@@ -243,7 +245,8 @@ export interface FileInfo {
 }
 export const fileInfo = (paths: string[]) => invoke<FileInfo[]>("file_info", { paths });
 /** Writes an exported history file the user chose in a save dialog (.csv or .json only). */
-export const exportText = (path: string, contents: string) => invoke<void>("export_text", { path, contents });
+/** Asks where to save in a native dialog and writes the file there; resolves to the saved path, or null if cancelled. */
+export const exportText = (title: string, defaultName: string, extension: "csv" | "json" | "m3u8", contents: string) => invoke<string | null>("export_text", { title, defaultName, extension, contents });
 export interface FolderCheck {
   exists: boolean;
   free: number;
@@ -322,7 +325,7 @@ export const cancelPower = () => invoke<void>("cancel_power");
 export const setTrayStatus = (active: number, queued: number, paused: number, mode: CloseMode, playing: boolean) =>
   invoke<void>("set_tray_status", { active, queued, paused, mode, playing });
 export const trayAvailable = () => invoke<boolean>("tray_available");
-export const quitApp = () => invoke<void>("quit_app");
+export const quitApp = async () => { const { flushStorage } = await import("./storage"); await flushStorage(); await invoke<void>("quit_app"); };
 
 export const getEngineInfo = () => invoke<EngineInfo>("get_engine_info");
 export const updateEngine = () => invoke<UpdateResult>("update_engine", { proxy: currentProxy });
@@ -399,6 +402,8 @@ export const libraryAddFolder = () => invoke<MusicFolder[]>("library_add_folder"
 export const libraryRemoveFolder = (path: string) => invoke<MusicFolder[]>("library_remove_folder", { path });
 export interface RelocatedTrack { from: string; track: LibTrack }
 export const libraryLocate = (path: string) => invoke<RelocatedTrack | null>("library_locate", { path });
+export interface MissingRemoval { path: string; ok: boolean; error: string | null }
+export const libraryForgetMissing = (paths: string[]) => invoke<MissingRemoval[]>("library_forget_missing", { paths });
 export interface DuplicateGroup { hash: string; size: number; paths: string[] }
 export interface DuplicateScan { groups: DuplicateGroup[]; skipped: number }
 export function libraryDuplicates(onProgress: (done: number, total: number) => void) {
@@ -510,3 +515,7 @@ export const downloadRecovery = () => folderRegistration.then(() => invoke<Downl
 export const discardDownloadRecovery = (ids: string[]) => invoke<void>("discard_download_recovery", { ids });
 
 export const preflightDownloads = (requests: DownloadRequest[]) => invoke<Array<{ folder: string; free: number; needed: number; estimated: boolean }>>("preflight_downloads", { requests });
+
+export interface MediaWaveform { duration: number; peaks: number[] }
+export const mediaWaveform = (id: string, path: string) => invoke<MediaWaveform>("media_waveform", { id, path });
+export const cancelWaveform = (id: string) => invoke<void>("cancel_waveform", { id });

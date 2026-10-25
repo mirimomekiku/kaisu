@@ -1,12 +1,16 @@
+import { useSeekShortcuts } from "./hooks/useSeekControls";
 import { MusicPreferencesContext, useCreateMusicPreferences } from "./hooks/useMusicPreferences";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, Loader2 } from "lucide-react";
+import { useSavedSources } from "./hooks/useSavedSources";
+import StorageNotice from "./components/StorageNotice";
 import AppBanners from "./components/AppBanners";
-import LibraryPage from "./components/LibraryPage";
-import PodcastsPage from "./components/PodcastsPage";
 import { FEATURES } from "./lib/features";
 import MiniPlayer from "./components/MiniPlayer";
 import { useMiniPlayer } from "./hooks/useMiniPlayer";
+import { useListeningSessions } from "./hooks/useListeningSessions";
+import { usePlaybackProfiles } from "./hooks/usePlaybackProfiles";
+import { PlaybackToolsContext } from "./hooks/usePlaybackTools";
 import { useListening } from "./hooks/useListening";
 import PlayerBar from "./components/PlayerBar";
 import DownloadRecoveryNotice from "./components/DownloadRecoveryNotice";
@@ -14,10 +18,8 @@ import QueueUndoNotice from "./components/QueueUndo";
 import { useConfirm } from "./components/ConfirmDialog";
 import DownloadsPage from "./components/DownloadsPage";
 import { QUEUE_VIEWS } from "./components/DownloadRow";
-import HistoryView, { HISTORY_VIEWS } from "./components/HistoryView";
-import SearchPage from "./components/SearchPage";
-import { SEARCH_VIEWS } from "./components/SearchResults";
-import SettingsPage from "./components/SettingsPage";
+import HistoryView from "./components/HistoryView";
+import { HISTORY_VIEWS, SEARCH_VIEWS } from "./lib/viewOptions";
 import SetupScreen from "./components/SetupScreen";
 import ShortcutsDialog from "./components/ShortcutsDialog";
 import Sidebar, { type Page } from "./components/Sidebar";
@@ -57,13 +59,20 @@ import { lcdState } from "./lib/lcdState";
 import { checkPresetName, presetId, type FormatPreset } from "./lib/presets";
 import { validateRule } from "./lib/schedule";
 import { knownSource, sourceLabel } from "./lib/sources";
-import { loadHistory, loadQueue, loadSettings, type HistoryItem, type ViewMode } from "./lib/storage";
-import { save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { loadHistory, loadQueue, loadSettings, saveQueue, type HistoryItem, type ViewMode } from "./lib/storage";
+import { useDownloadPlaylists } from "./hooks/useDownloadPlaylists";
 import { usePlaylists } from "./hooks/usePlaylists";
 import { relocateTrack } from "./lib/relocation";
 import { useAudioOutput, PlaybackServicesContext } from "./hooks/useAudioOutput";
 import { toPlayerTrack } from "./lib/library";
 import { EqualizerContext } from "./components/Equalizer";
+
+const SavedSourcesPage = lazy(() => import("./components/SavedSourcesPage"));
+const LibraryPage = lazy(() => import("./components/LibraryPage"));
+const PodcastsPage = lazy(() => import("./components/PodcastsPage"));
+
+const SearchPage = lazy(() => import("./components/SearchPage"));
+const SettingsPage = lazy(() => import("./components/SettingsPage"));
 
 const isFinishedStatus = (status: string) => status === "completed" || status === "error" || status === "cancelled";
 
@@ -72,9 +81,11 @@ export default function App() {
   const musicPreferences = useCreateMusicPreferences();
   const listening = useListening();
   const playlists = usePlaylists();
+  const [playlistTarget, setPlaylistTarget] = useState("");
   const [playerLoaded, setPlayerLoaded] = useState(false);
-  const player = useCreatePlayer(listening.record, listening.recordTime, () => setPlayerLoaded(true));
+  const player = useCreatePlayer(listening.record, listening.recordTime, (notice) => { setPlayerLoaded(true); if (notice) setFlash({ text: notice, error: false }); });
   const playerState = usePlayerState(player);
+  const currentTrack = playerState.queue[playerState.index];
   const [page, setPage] = useState<Page>("search");
   const [defaultDir, setDefaultDir] = useState("");
   const [flash, setFlash] = useState<{ text: string; error: boolean } | null>(null);
@@ -83,6 +94,7 @@ export default function App() {
   const [queueLoaded, setQueueLoaded] = useState(false);
   const [restoredCount, setRestoredCount] = useState(0);
   const [tourOpen, setTourOpen] = useState(false);
+  const [playlistShortcut, setPlaylistShortcut] = useState<{ id: string; serial: number } | null>(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const searchInput = useRef<HTMLInputElement>(null);
   const session = useSessionStats();
@@ -93,15 +105,18 @@ export default function App() {
   useAutoClear(note, setNote, 4500);
 
   const { settings, settingsRef, settingsLoaded, changeSettings, changeSettingsGuarded, ensureLyricsConsent, applyLoaded } = useAppSettings(confirm);
+  const listeningSessions = useListeningSessions(player, playerLoaded);
+  const playbackProfiles = usePlaybackProfiles(player, settings, settingsLoaded && playerLoaded, changeSettings);
+  useEffect(() => { if (settingsLoaded) player.setResumeLongTracks(settings.resumeLongTracks); }, [player, settingsLoaded, settings.resumeLongTracks]);
   const audioOutput = useAudioOutput(player, settings, settingsLoaded, changeSettings);
   useEffect(() => { if (settingsLoaded) player.processing?.configure(settings.equalizer); }, [player, settingsLoaded, settings.equalizer]);
   useEffect(() => { if (settingsLoaded) player.setPlaybackPolicy(settings.skipUnavailableTracks, settings.crossfadeCurve, settings.preserveAlbumTransitions); }, [player, settingsLoaded, settings.skipUnavailableTracks, settings.crossfadeCurve, settings.preserveAlbumTransitions]);
   useEffect(() => { if (settingsLoaded) player.setTransitions(settings.gaplessPlayback, settings.crossfadeSeconds); }, [player, settingsLoaded, settings.gaplessPlayback, settings.crossfadeSeconds]);
   const { history, historyRef, setHistory, updateHistory } = useHistoryStore();
-  const onRelocated = (from: string, to: string) => relocateTrack({
+  const onRelocated = (from: string, to: string) => { listeningSessions.relocate(from, to); relocateTrack({
     player, listening, preferences: musicPreferences, playlists,
     history: (oldPath, newPath) => updateHistory(historyRef.current.map((h) => h.path === oldPath ? { ...h, path: newPath } : h)),
-  }, from, to);
+  }, from, to); };
   const setup = useEngine({ settingsLoaded, settingsRef, changeSettings });
   const { engine } = setup;
 
@@ -116,6 +131,7 @@ export default function App() {
       session.current.completed += 1;
       session.current.lastDir = item.outDir;
       const entry: HistoryItem = {
+        pendingPlaylistIds: item.preset === "audio" ? item.extra.library_playlist_ids : undefined,
         profile: outputProfile(item.extra, item.preset),
         id: item.id,
         url: redactText(item.url),
@@ -140,7 +156,7 @@ export default function App() {
   const policy = useMemo(() => ({ blocked: schedule.paused, limit: schedule.limit }), [schedule.paused, schedule.limit]);
   const limits = useMemo(() => (advanced ? { retries: settings.autoRetries, perSite: settings.perSiteLimit, globalRate: settings.globalRateLimit, fragments: settings.fragmentBudget } : { retries: 0, perSite: 0 }), [advanced, settings.autoRetries, settings.perSiteLimit, settings.globalRateLimit, settings.fragmentBudget]);
 
-  const { items, enqueue, runNext, runLater, reorder, setRateLimit, editWaiting, cancel, pause, resume, pauseAll, resumeAll, retry, remove, clearFinished, restore, hasActive } = useDownloads(
+  const { items, enqueue, snapshotQueue, attachPlaylist, runNext, runLater, reorder, setRateLimit, editWaiting, cancel, pause, resume, pauseAll, resumeAll, retry, remove, clearFinished, restore, hasActive } = useDownloads(
     advanced ? settings.concurrency : 2,
     handleCompleted,
     policy,
@@ -149,6 +165,12 @@ export default function App() {
   const itemsRef = useRef(items);
   itemsRef.current = items;
   useQueuePersistence(items, queueLoaded);
+  useDownloadPlaylists(playlists, history, historyRef, updateHistory, showFlash);
+  const pendingPlaylists = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const item of items) if (item.status !== "completed" && item.status !== "cancelled") for (const id of item.extra.library_playlist_ids ?? []) counts[id] = (counts[id] ?? 0) + 1;
+    return counts;
+  }, [items]);
 
   const flow = useSearchFlow({ settings, settingsLoaded, settingsRef, engineReady: !!engine?.ready, setPage });
   useAutoClear(flow.batchNotice, flow.setBatchNotice, 7000);
@@ -197,6 +219,8 @@ export default function App() {
     outDir: effectiveOutDir,
     itemsRef,
     enqueue,
+    playlistTarget, attachPlaylist,
+    persistQueue: async () => { if (!queueLoaded) throw new Error("The saved queue has not loaded yet."); if (!(await saveQueue(snapshotQueue()))) throw new Error("Could not save the queue."); },
     confirm,
     history,
     historyRef,
@@ -212,6 +236,8 @@ export default function App() {
     setChecked: flow.setChecked,
     setBatchNotice: flow.setBatchNotice,
   });
+
+  const savedSources = useSavedSources(files.ready && !!engine?.ready, actions.submitDownloads, showFlash);
 
   const podcastsReady = FEATURES.podcasts && files.ready && !!engine?.ready;
   const podcasts = usePodcasts({ ready: podcastsReady, outDir: effectiveOutDir, submitDownloads: actions.submitDownloads, showFlash });
@@ -272,13 +298,8 @@ export default function App() {
 
   const exportHistory = async (rows: HistoryRow[], format: "csv" | "json") => {
     try {
-      const target = await saveDialog({
-        title: "Export history",
-        defaultPath: `kaisu-history.${format}`,
-        filters: [{ name: format.toUpperCase(), extensions: [format] }],
-      });
-      if (!target) return;
-      await exportText(target, format === "csv" ? historyToCsv(rows) : historyToJson(rows));
+      const saved = await exportText("Export history", `kaisu-history.${format}`, format, format === "csv" ? historyToCsv(rows) : historyToJson(rows));
+      if (!saved) return;
       setNote({ title: "History exported", subtitle: `${rows.length} item${rows.length === 1 ? "" : "s"}` });
     } catch (e) {
       showFlash(errorText(e), true);
@@ -329,6 +350,7 @@ export default function App() {
     onNothing: () => showFlash("That doesn't contain a link Kaisu can use.", true),
   });
   const clipboard = useClipboardOffer(settingsLoaded && settings.watchClipboard && !!engine?.ready, url);
+  useSeekShortcuts(player, settings.seekPreferences);
   useShortcuts({
     page,
     hasResults: !!search,
@@ -456,6 +478,7 @@ export default function App() {
     <PlayerContext.Provider value={player}>
     <MediaActionsContext.Provider value={mediaDialogs.actions}>
     <PlaybackServicesContext.Provider value={{ output: audioOutput, locate: locatePlayback }}>
+    <PlaybackToolsContext.Provider value={{ profiles: playbackProfiles, sessions: listeningSessions, playlists, waveformEnabled: settingsLoaded && settings.waveformSeek, seekPreferences: settings.seekPreferences }}>
     <EqualizerContext.Provider value={{ settings: settings.equalizer, ready: settingsLoaded, change: (equalizer) => changeSettings({ equalizer }) }}>
     {mini.mini ? <MiniPlayer engine={player} onRestore={() => void mini.change(false)} busy={mini.busy} error={flash?.error ? flash.text : undefined} /> : <>
     <div className="app">
@@ -475,6 +498,7 @@ export default function App() {
         busy={flow.searching || flow.loadingInfo}
       />
 
+      <StorageNotice />
       <AppBanners
         toolsMissing={!!engine && !engine.ready}
         onFixTools={() => setup.setSetupRequested(true)}
@@ -544,19 +568,36 @@ export default function App() {
       <DownloadRecoveryNotice ready={files.ready} items={items} enqueue={enqueue} />
       <div className="app-body">
         <Sidebar
+          options={settings.sidebar}
+          playlists={playlists.playlists}
+          sources={savedSources.sources}
+          onPlaylist={(id) => { setPlaylistShortcut({ id, serial: Date.now() }); setPage("library"); }}
+          onSource={(id) => { const source = savedSources.sources.find((p) => p.id === id); if (source) flow.submitLink(source.url); }}
           page={page}
           onNavigate={setPage}
           active={activeDownloads.length}
           total={items.length}
           historyCount={history.length}
           songCount={library.tracks.length}
-          art={{ src: visibleMedia?.thumbnail ?? null, caption: visibleMedia?.title ?? "No video selected" }}
+          art={visibleMedia
+            ? { src: visibleMedia.thumbnail ?? null, caption: visibleMedia.title, kind: "video" }
+            : currentTrack?.cover
+              ? { src: currentTrack.cover, caption: currentTrack.title, kind: "album" }
+              : null}
         />
 
         <main className="content" aria-label={page}>
+          <Suspense fallback={<div className="p-4" role="status">Opening view…</div>}>
           {FEATURES.podcasts && page === "podcasts" && <PodcastsPage api={podcasts} ready={podcastsReady} />}
+          {page === "sources" && <SavedSourcesPage api={savedSources} playlists={playlists} ready={files.ready && !!engine?.ready} onOpen={flow.submitLink} />}
           {page === "search" && (
             <SearchPage
+              onSaveSource={search && (search.kind === "playlist" || search.kind === "channel") && search.sourceUrl ? async () => {
+                if (await savedSources.save(search.sourceUrl!, { title: search.title ?? "Saved source", uploader: null, kind: search.kind === "channel" ? "channel" : "playlist", total: search.total ?? null, entries: search.items })) setPage("sources");
+              } : undefined}
+              playlists={playlists}
+              playlistTarget={playlistTarget}
+              onPlaylistTarget={setPlaylistTarget}
               flow={flow}
               actions={actions}
               settings={settings}
@@ -624,10 +665,11 @@ export default function App() {
             />
           )}
 
-          {page === "library" && <LibraryPage tracks={library.tracks} management={library.management} listening={listening.stats} playlists={playlists} onRelocated={onRelocated} unmeasuredCount={library.unmeasuredCount} scanning={library.scanning} loaded={library.loaded} onScan={() => void library.scan()} onReveal={revealDownloaded} onEditTags={async (paths, edit) => { const release = player.releaseFiles(paths); try { const results = await library.editTags(paths, edit); if (edit.artwork) player.invalidateCovers(results.filter((r) => r.ok).map((r) => r.path)); return results; } finally { release(); } }} analysing={library.analysing} onAnalyse={() => void library.analyse()} onStopAnalysing={library.stopAnalysing} announce={setNote} flash={showFlash} />}
+          {page === "library" && <LibraryPage playlistShortcut={playlistShortcut} onPlaylistShortcutHandled={() => setPlaylistShortcut(null)} pendingPlaylists={pendingPlaylists} tracks={library.tracks} management={library.management} listening={listening.stats} playlists={playlists} onRelocated={onRelocated} unmeasuredCount={library.unmeasuredCount} scanning={library.scanning} loaded={library.loaded} onScan={() => void library.scan()} onReveal={revealDownloaded} onEditTags={async (paths, edit) => { const release = player.releaseFiles(paths); try { const results = await library.editTags(paths, edit); if (edit.artwork) player.invalidateCovers(results.filter((r) => r.ok).map((r) => r.path)); return results; } finally { release(); } }} analysing={library.analysing} onAnalyse={() => void library.analyse()} onStopAnalysing={library.stopAnalysing} announce={setNote} flash={showFlash} />}
 
           {page === "settings" && (
             <SettingsPage
+              customizationLists={{ playlists: playlists.playlists, sources: savedSources.sources }}
               settings={settings}
               effectiveOutDir={effectiveOutDir}
               engine={engine}
@@ -646,6 +688,7 @@ export default function App() {
               trayAvailable={trayOk}
             />
           )}
+          </Suspense>
         </main>
       </div>
 
@@ -709,6 +752,7 @@ export default function App() {
     </div>
     </>}
     </EqualizerContext.Provider>
+    </PlaybackToolsContext.Provider>
     </PlaybackServicesContext.Provider>
     </MediaActionsContext.Provider>
     </PlayerContext.Provider>

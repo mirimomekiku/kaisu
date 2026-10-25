@@ -1,3 +1,4 @@
+mod waveform;
 mod artwork;
 mod custom_args;
 mod download;
@@ -73,6 +74,7 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .manage(waveform::Waveforms::default())
         .manage(Engine::default())
         .manage(download::Downloads::default())
         .manage(tray::TrayState::default())
@@ -90,6 +92,7 @@ pub fn run() {
         })
         .on_window_event(|window, event| tray::on_window_event(window, event))
         .invoke_handler(tauri::generate_handler![
+            waveform::media_waveform, waveform::cancel_waveform,
             get_engine_info,
             update_engine,
             default_download_dir,
@@ -132,6 +135,7 @@ pub fn run() {
             duplicates::library_remove_duplicates,
             mini::set_mini_mode,
             library::library_scan,
+            library::library_forget_missing,
             library::library_cover,
             lyrics::lyrics_read,
             tags::library_edit_tags,
@@ -156,12 +160,14 @@ pub fn run() {
             tray::tray_available,
             tray::show_main_window,
             tray::quit_app,
+            tray::finish_exit,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {
             // Never leave yt-dlp / ffmpeg running after Kaisu is gone.
             if let tauri::RunEvent::Exit = event {
+                app.state::<waveform::Waveforms>().cancel_all();
                 app.state::<download::Downloads>().kill_all();
             }
         });
