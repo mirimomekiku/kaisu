@@ -64,6 +64,11 @@ export interface Settings extends CustomizationValues {
   lyricsMode: LyricsMode;
   /** The user agreed to send the artist and title of a song to a lyrics service (LRCLIB) to look its lyrics up. */
   lyricsConsent: boolean;
+  /** Look for a newer Kaisu release (once a day) by reading the public releases page. Nothing is downloaded or installed. */
+  appUpdateChecks: boolean;
+  appUpdateLastCheck: number;
+  /** The release the user dismissed, so the same one is not announced again. */
+  appUpdateDismissed: string;
   globalRateLimit: string;
   fragmentBudget: number;
   downloadConflict: "keep_both" | "skip" | "replace";
@@ -172,6 +177,9 @@ export const DEFAULT_SETTINGS: Settings = {
   coverMode: "default",
   lyricsMode: "off",
   lyricsConsent: false,
+  appUpdateChecks: true,
+  appUpdateLastCheck: 0,
+  appUpdateDismissed: "",
   globalRateLimit: "",
   fragmentBudget: 8,
   downloadConflict: "keep_both",

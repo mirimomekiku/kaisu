@@ -217,25 +217,30 @@ async fn download_to(client: &reqwest::Client, url: &str, dest: &Path, progress:
     Ok(hasher.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
 
-/// The latest yt-dlp release tag, read from the `/releases/latest` redirect (not rate limited).
-pub async fn latest_tag(proxy: Option<&str>) -> Result<String, String> {
+/// The last path segment of a repository's `/releases/latest` redirect (not rate limited). Callers check its shape.
+pub(crate) async fn latest_release_segment(releases_url: &str, proxy: Option<&str>) -> Result<String, String> {
     let client = with_proxy(
         reqwest::Client::builder().user_agent("kaisu").timeout(Duration::from_secs(20)).redirect(reqwest::redirect::Policy::none()),
         proxy,
     )?
     .build()
     .map_err(|e| format!("HTTP client error: {e}"))?;
-    let res = client.get(format!("{YTDLP_BASE}/latest")).send().await.map_err(net_err)?;
+    let res = client.get(format!("{releases_url}/latest")).send().await.map_err(net_err)?;
     let location = res
         .headers()
         .get(reqwest::header::LOCATION)
         .and_then(|v| v.to_str().ok())
         .ok_or("GitHub did not report a latest release")?;
-    let tag = location.rsplit('/').next().unwrap_or_default();
+    Ok(location.trim_end_matches('/').rsplit('/').next().unwrap_or_default().to_string())
+}
+
+/// The latest yt-dlp release tag.
+pub async fn latest_tag(proxy: Option<&str>) -> Result<String, String> {
+    let tag = latest_release_segment(YTDLP_BASE, proxy).await?;
     if tag.is_empty() || !tag.chars().all(|c| c.is_ascii_digit() || c == '.') {
         return Err(format!("Unexpected release tag: {tag:?}"));
     }
-    Ok(tag.to_string())
+    Ok(tag)
 }
 
 // ---- installers -------------------------------------------------------------------

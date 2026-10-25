@@ -42,6 +42,31 @@ fn delete(service: &str, name: &str) -> Result<(), String> {
     }
 }
 
+/// Whether the system's credential store works, so Settings can say where passwords are really kept.
+#[derive(serde::Serialize, Debug, PartialEq)]
+pub struct SecretStatus {
+    pub available: bool,
+    /// The store's name on this system.
+    pub store: &'static str,
+    pub detail: Option<String>,
+}
+
+fn store_name() -> &'static str {
+    if cfg!(windows) { "Windows Credential Manager" } else if cfg!(target_os = "macos") { "Keychain" } else { "Secret Service" }
+}
+
+fn status(service: &str) -> SecretStatus {
+    match get(service, "proxy-password") {
+        Ok(_) => SecretStatus { available: true, store: store_name(), detail: None },
+        Err(detail) => SecretStatus { available: false, store: store_name(), detail: Some(detail) },
+    }
+}
+
+#[tauri::command]
+pub async fn secret_status() -> SecretStatus {
+    tauri::async_runtime::spawn_blocking(|| status(SERVICE)).await.unwrap_or_else(|e| SecretStatus { available: false, store: store_name(), detail: Some(e.to_string()) })
+}
+
 #[tauri::command]
 pub async fn secret_set(name: String, value: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || set(SERVICE, &name, &value)).await.map_err(|e| e.to_string())?
@@ -60,6 +85,13 @@ pub async fn secret_delete(name: String) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_status_names_the_store_and_explains_a_failure() {
+        let s = status(&format!("com.kaisu.app.test-status-{}", std::process::id()));
+        assert!(!s.store.is_empty());
+        assert_eq!(s.available, s.detail.is_none());
+    }
 
     #[test]
     fn only_known_names_are_allowed() {

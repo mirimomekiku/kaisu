@@ -13,6 +13,8 @@ interface Props {
   restored: { count: number; onResume: () => void; onRemove: () => void; onLater: () => void } | null;
   /** A link found on the clipboard. */
   clipboard: { link: string; onLookUp: () => void; onDismiss: () => void } | null;
+  /** A newer Kaisu release exists. Kaisu never installs it by itself. */
+  appUpdate: { version: string; onOpen: () => void; onDismiss: () => void } | null;
   flash: { text: string; error: boolean } | null;
   onDismissFlash: () => void;
   /** Unfinished downloads (`.part` files) found in the download folder. */
@@ -20,7 +22,7 @@ interface Props {
 }
 
 /** The strips under the toolbar: things that need attention but aren't part of any one page. */
-export default function AppBanners({ toolsMissing, onFixTools, countdown, onCancelCountdown, restored, clipboard, flash, onDismissFlash, leftovers }: Props) {
+export default function AppBanners({ toolsMissing, onFixTools, countdown, onCancelCountdown, restored, clipboard, appUpdate, flash, onDismissFlash, leftovers }: Props) {
   return (
     <>
       {toolsMissing && (
@@ -29,6 +31,16 @@ export default function AppBanners({ toolsMissing, onFixTools, countdown, onCanc
           <span>Some helper tools are missing, so downloads may not work properly.</span>
           <button onClick={onFixTools} className="link border-0 bg-transparent p-0" style={{ font: "inherit" }}>
             Fix now
+          </button>
+        </div>
+      )}
+
+      {appUpdate && (
+        <div role="status" className="banner" aria-label="Kaisu update available">
+          <span>Kaisu {appUpdate.version} is available.</span>
+          <button className="btn small primary" onClick={appUpdate.onOpen}>See what's new</button>
+          <button className="row-btn" aria-label="Dismiss this update notice" title="Dismiss" onClick={appUpdate.onDismiss}>
+            <X className="w-3 h-3" />
           </button>
         </div>
       )}

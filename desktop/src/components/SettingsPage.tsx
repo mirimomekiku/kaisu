@@ -3,6 +3,9 @@ import { ProfileSettings } from "./PlaybackTools";
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { AlertTriangle, FolderOpen, Keyboard, RefreshCw, Route, Wrench } from "lucide-react";
+import { AUDIO_FORMAT_IDS, AUDIO_FORMAT_LABEL, lossyEncodeNote } from "../lib/audioFormats";
+import CredentialStoreStatus from "./CredentialStoreStatus";
+import type { AppUpdateStatus } from "../hooks/useAppUpdate";
 import { allowedCustomOptions, checkCustomArgs, checkFolder, errorText, testProxy, type AudioFormat, type CustomOption, type Browser, type CloseMode, type Component, type EngineInfo, type Layout, type NameStyle, type SponsorBlock } from "../lib/api";
 import type { ScheduleState } from "../lib/schedule";
 import { SUBTITLE_MODE_LABEL } from "../lib/subtitles";
@@ -31,6 +34,8 @@ interface Props {
   engineState: EngineState;
   onChange: (patch: Partial<Settings>) => void;
   onCheckUpdate: () => void;
+  /** Looking for a newer Kaisu release (never installs it). */
+  appUpdate: { status: AppUpdateStatus; checkNow: () => void; onOpen: (url: string) => void };
   onOpenSetup: () => void;
   onRevealEngine: () => void;
   onShowShortcuts: () => void;
@@ -45,13 +50,7 @@ interface Props {
 }
 
 const BROWSERS: Browser[] = ["firefox", "chrome", "chromium", "edge", "brave", "opera", "vivaldi"];
-const AUDIO_FORMATS: Array<[AudioFormat, string]> = [
-  ["mp3", "MP3 (most compatible)"],
-  ["m4a", "M4A / AAC"],
-  ["opus", "Opus (small, high quality)"],
-  ["flac", "FLAC (lossless)"],
-  ["wav", "WAV (uncompressed)"],
-];
+const AUDIO_FORMATS: Array<[AudioFormat, string]> = AUDIO_FORMAT_IDS.map((id) => [id, AUDIO_FORMAT_LABEL[id]]);
 
 const MODE_TEXT: Record<Mode, string> = {
   simple: "Paste a link or search, choose video or audio, and download. Plain-language messages and no clutter.",
@@ -119,7 +118,7 @@ function componentLine(name: string, c: Component | undefined) {
   return `${name} ${c.version ?? "ready"}${c.source ? ` (${c.source})` : ""}`;
 }
 
-export default function SettingsPage({ customizationLists, settings, effectiveOutDir, engine, engineState, onChange, onCheckUpdate, onOpenSetup, onRevealEngine, onShowShortcuts, onShowTour, scheduleState, moveStatus, cleanup, trayAvailable }: Props) {
+export default function SettingsPage({ customizationLists, settings, effectiveOutDir, engine, engineState, onChange, onCheckUpdate, appUpdate, onOpenSetup, onRevealEngine, onShowShortcuts, onShowTour, scheduleState, moveStatus, cleanup, trayAvailable }: Props) {
   const [section, setSection] = useState("General");
   const [query, setQuery] = useState("");
   // Is the download folder usable? Checked whenever it changes, so a problem shows up here and not mid-download.
@@ -331,6 +330,8 @@ export default function SettingsPage({ customizationLists, settings, effectiveOu
                 ))}
               </select>
             </Row>
+            {lossyEncodeNote(settings.audioFormat) && <div className="pref-hint" role="note">{lossyEncodeNote(settings.audioFormat)}</div>}
+            {settings.audioFormat === "original" && <div className="pref-hint" role="note">The site's own audio file is kept as it is (usually Opus or M4A). Normalize loudness, trim silence and audio quality need conversion, so they are skipped for these downloads.</div>}
             <Row label="File already exists" hint="Keep both gives the new file a unique name. Replace overwrites the existing output.">
               <select className="field" aria-label="Download file conflicts" value={settings.downloadConflict} onChange={(e) => onChange({ downloadConflict: e.target.value as Settings["downloadConflict"] })}>
                 <option value="keep_both">Keep both</option><option value="skip">Skip existing</option><option value="replace">Replace</option>
@@ -589,8 +590,9 @@ export default function SettingsPage({ customizationLists, settings, effectiveOu
             </p>
           )}
           <p className="pref-hint mt-1.5 mb-0">
-            http, https, socks4 and socks5 are supported. If it needs a login, it is part of the address (user:password@host). The password is kept in your system's password store, not in Kaisu's settings file, and is hidden here until you edit the box.
+            http, https, socks4 and socks5 are supported. If it needs a login, it is part of the address (user:password@host).
           </p>
+          <CredentialStoreStatus />
         </div>
       </Group>
 
@@ -851,6 +853,29 @@ export default function SettingsPage({ customizationLists, settings, effectiveOu
             <input type="checkbox" checked={settings.autoUpdate} onChange={(e) => onChange({ autoUpdate: e.target.checked })} />
             Keep the downloader up to date automatically
           </label>
+        </div>
+        <div className="pref-row">
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={settings.appUpdateChecks} onChange={(e) => onChange({ appUpdateChecks: e.target.checked })} />
+            Tell me when a new version of Kaisu is out
+          </label>
+          <span className="dim text-[11px]">Once a day Kaisu reads the version number on its public releases page. It never downloads or installs anything.</span>
+        </div>
+        <div className="pref-row">
+          <div className="min-w-0" role="status">
+            {appUpdate.status.kind === "checking" && "Checking…"}
+            {appUpdate.status.kind === "current" && `Kaisu ${appUpdate.status.version} is the newest version.`}
+            {appUpdate.status.kind === "available" && `Kaisu ${appUpdate.status.update.latest} is available (you have ${appUpdate.status.update.current}).`}
+            {appUpdate.status.kind === "error" && <span style={{ color: "#b3261e" }}>{appUpdate.status.message}</span>}
+            {appUpdate.status.kind === "idle" && <span className="dim">Kaisu itself is updated by downloading a new file from the releases page.</span>}
+          </div>
+          <div className="flex items-center gap-2">
+            {appUpdate.status.kind === "available" && <button onClick={() => appUpdate.status.kind === "available" && appUpdate.onOpen(appUpdate.status.update.url)} className="btn small primary">Open releases page</button>}
+            <button onClick={appUpdate.checkNow} disabled={appUpdate.status.kind === "checking"} className="btn small">
+              <RefreshCw className={`w-3 h-3 ${appUpdate.status.kind === "checking" ? "animate-spin" : ""}`} />
+              Check Kaisu for updates
+            </button>
+          </div>
         </div>
       </Group>
     </div>

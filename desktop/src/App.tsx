@@ -3,7 +3,9 @@ import { MusicPreferencesContext, useCreateMusicPreferences } from "./hooks/useM
 import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, Loader2 } from "lucide-react";
 import { useSavedSources } from "./hooks/useSavedSources";
+import { audioFormatName } from "./lib/audioFormats";
 import StorageNotice from "./components/StorageNotice";
+import { useAppUpdate } from "./hooks/useAppUpdate";
 import AppBanners from "./components/AppBanners";
 import { FEATURES } from "./lib/features";
 import MiniPlayer from "./components/MiniPlayer";
@@ -51,7 +53,7 @@ import { useSchedule } from "./hooks/useSchedule";
 import { SEARCH_PAGE_SIZE, useSearchFlow } from "./hooks/useSearchFlow";
 import { useShortcuts } from "./hooks/useShortcuts";
 import { useTrayBridge } from "./hooks/useTrayBridge";
-import { checkSetup, defaultDownloadDir, errorText, exportText, openFolder, revealEngine, type SearchSource } from "./lib/api";
+import { checkSetup, defaultDownloadDir, errorText, exportText, openFolder, openUrl, revealEngine, type SearchSource } from "./lib/api";
 import { defaultSubs } from "./lib/extra";
 import { formatBytes } from "./lib/format";
 import { historyToCsv, historyToJson, type HistoryRow } from "./lib/history";
@@ -119,6 +121,7 @@ export default function App() {
   }, from, to); };
   const setup = useEngine({ settingsLoaded, settingsRef, changeSettings });
   const { engine } = setup;
+  const appUpdate = useAppUpdate(settingsLoaded, settingsRef, changeSettings);
 
   const mode = settings.mode;
   const advanced = mode === "advanced";
@@ -504,6 +507,7 @@ export default function App() {
         onFixTools={() => setup.setSetupRequested(true)}
         countdown={countdown}
         onCancelCountdown={cancelCountdown}
+        appUpdate={appUpdate.status.kind === "available" && appUpdate.status.update.latest ? { version: appUpdate.status.update.latest, onOpen: () => openUrl(appUpdate.status.kind === "available" ? appUpdate.status.update.url : "").catch((e) => showFlash(errorText(e), true)), onDismiss: appUpdate.dismiss } : null}
         restored={
           restoredCount > 0 && pausedCount > 0
             ? {
@@ -646,7 +650,7 @@ export default function App() {
               onSortChange={(historySort, historySortDesc) => changeSettings({ historySort, historySortDesc })}
               view={settings.viewHistory}
               advanced={advanced}
-              audioLabel={advanced ? settings.audioFormat.toUpperCase() : "MP3"}
+              audioLabel={advanced ? audioFormatName(settings.audioFormat) : "MP3"}
               onOpen={openDownloaded}
               onReveal={revealDownloaded}
               onCopyPath={copyPath}
@@ -682,6 +686,7 @@ export default function App() {
               }
               onOpenSetup={() => setup.setSetupRequested(true)}
               onRevealEngine={() => revealEngine().catch((e) => showFlash(errorText(e), true))}
+              appUpdate={{ status: appUpdate.status, checkNow: appUpdate.checkNow, onOpen: (url) => openUrl(url).catch((e) => showFlash(errorText(e), true)) }}
               onShowShortcuts={() => setShortcutsOpen(true)}
               onShowTour={() => setTourOpen(true)}
               scheduleState={schedule}

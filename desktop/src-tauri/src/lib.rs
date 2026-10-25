@@ -1,3 +1,4 @@
+mod app_update;
 mod waveform;
 mod artwork;
 mod custom_args;
@@ -101,6 +102,7 @@ pub fn run() {
             files::file_exists,
             files::file_info,
             files::export_text,
+            app_update::check_app_update,
             files::open_file,
             files::reveal_file,
             files::reveal_engine,
@@ -112,6 +114,7 @@ pub fn run() {
             thumbs::fetch_thumbnail,
             secrets::secret_set,
             secrets::secret_get,
+            secrets::secret_status,
             secrets::secret_delete,
             links::classify_link,
             links::get_playlist,

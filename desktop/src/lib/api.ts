@@ -3,7 +3,7 @@ import type { TagEditRequest } from "./tagEdit";
 import { checkDownloadUrl, checkSpeedLimit } from "./validate";
 
 export type Preset = "best" | "p1080" | "p720" | "audio";
-export type AudioFormat = "mp3" | "m4a" | "opus" | "flac" | "wav";
+export type AudioFormat = "mp3" | "m4a" | "opus" | "flac" | "wav" | "original";
 export type SponsorBlock = "off" | "mark" | "remove";
 export type Browser = "firefox" | "chrome" | "chromium" | "edge" | "brave" | "opera" | "vivaldi";
 
@@ -288,6 +288,9 @@ export interface DeleteResult {
 export const deleteFiles = (paths: string[], includeMoved: boolean, permanent = false, includeLibrary = false) => invoke<DeleteResult[]>("delete_files", { paths, includeMoved, permanent, includeLibrary });
 export const openFile = (path: string) => invoke<void>("open_file", { path });
 export const revealFile = (path: string) => invoke<void>("reveal_file", { path });
+export interface AppUpdate { current: string; latest: string | null; newer: boolean; url: string }
+/** Reads the newest Kaisu release number from the public releases page. Never downloads or installs anything. */
+export const checkAppUpdate = () => invoke<AppUpdate>("check_app_update", { proxy: currentProxy });
 export const openUrl = (url: string) => invoke<void>("open_url", { url });
 export const revealEngine = () => invoke<void>("reveal_engine");
 
@@ -358,6 +361,9 @@ export const fetchThumbnail = (url: string) => invoke<ArrayBuffer>("fetch_thumbn
 type SecretName = "proxy-password" | "download-custom-args";
 export const secretSet = (name: SecretName, value: string) => invoke<void>("secret_set", { name, value });
 export const secretGet = (name: SecretName) => invoke<string | null>("secret_get", { name });
+export interface SecretStatus { available: boolean; store: string; detail: string | null }
+/** Whether the system credential store works, and what it is called here. */
+export const secretStatus = () => invoke<SecretStatus>("secret_status");
 export const secretDelete = (name: SecretName) => invoke<void>("secret_delete", { name });
 
 export const checkSetup = () => invoke<SetupInfo>("check_setup");
