@@ -106,10 +106,27 @@ pub fn file_info(paths: Vec<String>) -> Vec<FileInfo> {
 
 const MAX_EXPORT_BYTES: usize = 20 * 1024 * 1024;
 
-/// Saves exported history to a place the user picked. Only .csv, .json and playlists (.m3u/.m3u8), only absolute paths, never over a folder.
+/// Asks the user where to save an export and writes it there. The dialog is opened here, so the webview cannot choose the
+/// path itself: it can only offer a name and contents. Only .csv, .json and playlists (.m3u/.m3u8). Returns the saved path,
+/// or nothing if the user cancelled.
 #[tauri::command]
-pub fn export_text(path: String, contents: String) -> Result<(), String> {
-    write_export(Path::new(&path), &contents)
+pub async fn export_text(app: AppHandle, title: String, default_name: String, extension: String, contents: String) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let extension = extension.to_ascii_lowercase();
+    if !["csv", "json", "m3u", "m3u8"].contains(&extension.as_str()) {
+        return Err("Exports are saved as .csv, .json or .m3u8.".into());
+    }
+    if contents.len() > MAX_EXPORT_BYTES {
+        return Err("That export is too large.".into());
+    }
+    let name = Path::new(&default_name).file_name().and_then(|n| n.to_str()).unwrap_or("export").to_string();
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog().file().set_title(title.chars().take(100).collect::<String>()).set_file_name(name).add_filter(extension.to_uppercase(), &[extension.as_str()]).blocking_save_file()
+    }).await.map_err(|e| e.to_string())?;
+    let Some(picked) = picked else { return Ok(None) };
+    let path = picked.into_path().map_err(|e| e.to_string())?;
+    write_export(&path, &contents)?;
+    Ok(Some(path.display().to_string()))
 }
 
 fn write_export(p: &Path, contents: &str) -> Result<(), String> {

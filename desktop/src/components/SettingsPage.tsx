@@ -1,3 +1,5 @@
+import { AppearanceControls, SidebarEditor, SeekSettings, ThemeEditor, CustomizationPresets } from "./CustomizationSettings";
+import { ProfileSettings } from "./PlaybackTools";
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { AlertTriangle, FolderOpen, Keyboard, RefreshCw, Route, Wrench } from "lucide-react";
@@ -22,6 +24,7 @@ export type EngineState =
   | { kind: "message"; text: string; error?: boolean };
 
 interface Props {
+  customizationLists: { playlists: Array<{ id: string; name: string }>; sources: Array<{ id: string; title: string }> };
   settings: Settings;
   effectiveOutDir: string;
   engine: EngineInfo | null;
@@ -57,11 +60,17 @@ const MODE_TEXT: Record<Mode, string> = {
 
 const SETTINGS_SECTIONS: Record<string, { section: string; keywords: string }> = {
   Interface: { section: "General", keywords: "mode simple advanced" },
-  Appearance: { section: "General", keywords: "theme accent dark light system colour" },
+  Appearance: { section: "Customization", keywords: "theme accent dark light system colour appearance font text size density spacing artwork motion" },
+  "Sidebar editor": { section: "Customization", keywords: "navigation reorder hide pins playlists sources width counts artwork sidebar" },
+  "Theme editor": { section: "Customization", keywords: "custom palette colors theme contrast preview import export" },
+  "Customization presets": { section: "Customization", keywords: "save layout appearance sidebar theme study compact restore reset presets" },
+  "Seek preferences": { section: "Playback", keywords: "seek forward backward intervals wheel mouse fine shift shortcuts" },
   "Notifications and background": { section: "General", keywords: "close tray notification background" },
   Helpers: { section: "General", keywords: "clipboard shortcuts tour duplicate volume loudness" },
   Downloads: { section: "Downloads", keywords: "folder output name layout audio mp3 quality cover lyrics subtitles speed concurrent bandwidth total fragment connections collision replace skip retry" },
   "Saved presets": { section: "Downloads", keywords: "preset format choices" },
+  "Playback tools": { section: "Playback", keywords: "waveform seek loop resume profiles speed practice sessions history" },
+  "Playback profiles": { section: "Playback", keywords: "music spoken practice speed presets equalizer resume" },
   "Playback transitions": { section: "Playback", keywords: "music audio gapless crossfade player" },
   "Playback recovery": { section: "Playback", keywords: "skip failed unavailable retry missing" },
   "Audio output": { section: "Playback", keywords: "speakers headphones device output" },
@@ -110,7 +119,7 @@ function componentLine(name: string, c: Component | undefined) {
   return `${name} ${c.version ?? "ready"}${c.source ? ` (${c.source})` : ""}`;
 }
 
-export default function SettingsPage({ settings, effectiveOutDir, engine, engineState, onChange, onCheckUpdate, onOpenSetup, onRevealEngine, onShowShortcuts, onShowTour, scheduleState, moveStatus, cleanup, trayAvailable }: Props) {
+export default function SettingsPage({ customizationLists, settings, effectiveOutDir, engine, engineState, onChange, onCheckUpdate, onOpenSetup, onRevealEngine, onShowShortcuts, onShowTour, scheduleState, moveStatus, cleanup, trayAvailable }: Props) {
   const [section, setSection] = useState("General");
   const [query, setQuery] = useState("");
   // Is the download folder usable? Checked whenever it changes, so a problem shows up here and not mid-download.
@@ -191,7 +200,7 @@ export default function SettingsPage({ settings, effectiveOutDir, engine, engine
       </div>
 
       <div className="settings-navigation">
-        <label>Section<select className="field" aria-label="Settings section" value={section} onChange={(e) => { setSection(e.target.value); setQuery(""); }}>{["General", "Downloads", "Playback", "Automation", "Network & advanced", "Engine", "All settings"].map((s) => <option key={s}>{s}</option>)}</select></label>
+        <label>Section<select className="field" aria-label="Settings section" value={section} onChange={(e) => { setSection(e.target.value); setQuery(""); }}>{["General", "Customization", "Downloads", "Playback", "Automation", "Network & advanced", "Engine", "All settings"].map((s) => <option key={s}>{s}</option>)}</select></label>
         <label className="settings-search">Find a setting<input className="field" type="search" aria-label="Find a setting" placeholder="Try “audio”, “folder” or “proxy”" value={query} onChange={(e) => setQuery(e.target.value)} /></label>
         {query && <button className="btn small" onClick={() => setQuery("")}>Clear search</button>}
       </div>
@@ -710,7 +719,7 @@ export default function SettingsPage({ settings, effectiveOutDir, engine, engine
 
       <Group title="Appearance">
         <Row label="Theme" hint="Aqua is the classic look. Graphite is colourless. Dark is easier on the eyes at night.">
-          <select value={settings.theme} onChange={(e) => onChange({ theme: e.target.value as Theme })} className="field" aria-label="Theme">
+          <select value={settings.theme} onChange={(e) => onChange({ theme: e.target.value as Theme, customTheme: { ...settings.customTheme, enabled: false } })} className="field" aria-label="Theme">
             <option value="aqua">Aqua</option>
             <option value="graphite">Graphite</option>
             <option value="dark">Dark</option>
@@ -718,7 +727,7 @@ export default function SettingsPage({ settings, effectiveOutDir, engine, engine
           </select>
         </Row>
         <Row label="Accent colour" hint={settings.theme === "graphite" ? "Graphite has no colour, so this shows in the other themes." : "The colour of buttons, selections and progress bars."}>
-          <select value={settings.accent} onChange={(e) => onChange({ accent: e.target.value as Accent })} className="field" aria-label="Accent colour">
+          <select value={settings.accent} onChange={(e) => onChange({ accent: e.target.value as Accent, customTheme: { ...settings.customTheme, enabled: false } })} className="field" aria-label="Accent colour">
             {ACCENTS.map((a) => (
               <option key={a} value={a}>
                 {a[0].toUpperCase() + a.slice(1)}
@@ -726,7 +735,12 @@ export default function SettingsPage({ settings, effectiveOutDir, engine, engine
             ))}
           </select>
         </Row>
+        <AppearanceControls settings={settings} onChange={onChange} />
       </Group>
+      <Group title="Sidebar editor"><SidebarEditor settings={settings} onChange={onChange} {...customizationLists} /></Group>
+      <Group title="Theme editor"><ThemeEditor settings={settings} onChange={onChange} /></Group>
+      <Group title="Customization presets"><CustomizationPresets settings={settings} onChange={onChange} /></Group>
+      <Group title="Seek preferences"><SeekSettings settings={settings} onChange={onChange} /></Group>
 
       <Group title="Saved presets" hint="Named download choices. Make one from a video's details, then pick it in one click.">
         {settings.presets.length === 0 ? (
@@ -751,6 +765,11 @@ export default function SettingsPage({ settings, effectiveOutDir, engine, engine
         )}
       </Group>
 
+      <Group title="Playback profiles"><ProfileSettings /></Group>
+      <Group title="Playback tools" hint="A–B looping and session history are available from Playback options in the player.">
+        <div className="pref-row"><label><input type="checkbox" aria-label="Waveform seek bar" checked={settings.waveformSeek} onChange={(e) => onChange({ waveformSeek: e.target.checked })} /> Show waveform in the seek bar</label><p className="dim m-0">Off by default. When enabled, Kaisu analyzes the playing file locally and caches a small waveform. No audio is uploaded. Unavailable waveforms use the regular seek bar.</p></div>
+        <div className="pref-row"><label><input type="checkbox" aria-label="Remember long-track positions" checked={settings.resumeLongTracks} onChange={(e) => onChange({ resumeLongTracks: e.target.checked })} /> Remember and resume long-track positions</label></div>
+      </Group>
       <Group title="Playback transitions" hint="Preload the next queued song to reduce gaps. Exact transitions depend on the audio format and system player.">
         <Row label="Fade curve"><select className="field" aria-label="Crossfade curve" value={settings.crossfadeCurve} onChange={(e) => onChange({ crossfadeCurve: e.target.value as Settings["crossfadeCurve"] })}><option value="linear">Linear</option><option value="equalPower">Equal power</option></select></Row>
         <div className="pref-row"><label><input type="checkbox" aria-label="Preserve album transitions" checked={settings.preserveAlbumTransitions} onChange={(e) => onChange({ preserveAlbumTransitions: e.target.checked })} /> Avoid crossfade between consecutive numbered tracks on the same album</label></div>

@@ -1,3 +1,5 @@
+import { applyCustomization } from "../lib/customizationDom";
+import { PROFILE_SETTINGS } from "../lib/playbackProfiles";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { useConfirm } from "../components/ConfirmDialog";
 import { setLyricsConsent, setProxy } from "../lib/api";
@@ -29,7 +31,10 @@ export function useAppSettings(confirm: ReturnType<typeof useConfirm>) {
     document.documentElement.dataset.accent = settings.accent;
   }, [settings.accent]);
 
+  useEffect(() => { applyCustomization(document.documentElement, settings); }, [settings.appearance, settings.sidebar, settings.customTheme]);
+
   const changeSettings = useCallback((patch: Partial<Settings>) => {
+    if (patch.activePlaybackProfile === undefined && PROFILE_SETTINGS.some((key) => key in patch)) patch = { ...patch, activePlaybackProfile: "" };
     const next = { ...settingsRef.current, ...patch };
     if (patch.proxy !== undefined) setProxy(patch.proxy);
     if (patch.lyricsConsent !== undefined) setLyricsConsent(patch.lyricsConsent);

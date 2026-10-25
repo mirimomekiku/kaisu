@@ -24,4 +24,11 @@ describe("sanitizePlayer", () => {
     const p = sanitizePlayer({ ...good, queue: [{ path: "/a.mp3", title: "A", duration: "long" }, { path: 1, title: "x" }] })!;
     expect(p.queue).toEqual([{ path: "/a.mp3", title: "A", artist: undefined, album: undefined, duration: undefined }]);
   });
+  it("retains the current song and position when a large queue must be bounded", () => {
+    const queue = Array.from({ length: 3000 }, (_, i) => ({ path: `/song-${i}.mp3`, title: `Song ${i}` }));
+    const saved = sanitizePlayer({ ...good, queue, index: 2700, position: 45 })!;
+    expect(saved.queue).toHaveLength(2000);
+    expect(saved.queue[saved.index].path).toBe("/song-2700.mp3");
+    expect(saved.position).toBe(45); expect(saved.truncated).toBe(1000);
+  });
 });
