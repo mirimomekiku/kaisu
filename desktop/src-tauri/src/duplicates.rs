@@ -101,7 +101,7 @@ pub async fn library_remove_duplicates(app: AppHandle, scope: State<'_, Scope>, 
     let cache = library::cache_path(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
         let results = remove_checked(&keep, &files, &hash, permanent.unwrap_or(false))?;
-        let _lock = library::CACHE_EDIT.lock().map_err(|_| "Library is unavailable.")?;
+        let _lock = library::CACHE_EDIT.lock().unwrap_or_else(|e| e.into_inner());
         let mut tracks = library::load_cache(&cache);
         tracks.retain(|t| !results.iter().any(|r| r.ok && r.path == t.path));
         library::save_cache(&cache, &tracks)?;

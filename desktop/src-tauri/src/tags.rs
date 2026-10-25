@@ -251,7 +251,7 @@ pub async fn library_edit_tags(app: AppHandle, scope: State<'_, Scope>, artwork:
             }
         }
         if !changed.is_empty() {
-            let _lock = library::CACHE_EDIT.lock().map_err(|_| "Library is unavailable.")?;
+            let _lock = library::CACHE_EDIT.lock().unwrap_or_else(|e| e.into_inner());
             let mut remembered = library::load_cache(&cache);
             for t in changed {
                 match remembered.iter_mut().find(|c| c.path == t.path) {

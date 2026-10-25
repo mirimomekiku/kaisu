@@ -15,6 +15,6 @@ export default function MusicFolders({ management: m, onClose }: { management: L
     </li>)}</ul>
     {m.folders.length === 0 && <p className="dim">Your download folders are already included. Add other folders to import your existing collection.</p>}
     <label className="flex items-center gap-2"><input type="checkbox" checked={m.watching} onChange={(e) => m.setWatching(e.target.checked)} />Watch music folders for changes</label>
-    <p className="dim">Checks every 15 seconds while Kaisu is open, and when you return to the window. Missing files stay listed so you can locate them. Removing a folder from the library keeps its files.</p>
+    <p className="dim">Checks every five minutes while the window is visible, and when you return after at least a minute. Scans include up to 100,000 tracks and eight subfolder levels. Missing files stay listed so you can locate them. Removing a folder from the library keeps its files.</p>
   </Sheet>;
 }

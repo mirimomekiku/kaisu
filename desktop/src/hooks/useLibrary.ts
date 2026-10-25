@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { errorText, libraryAnalyze, libraryEditTags, libraryLoad, libraryScan, type EditResult, type LibTrack } from "../lib/api";
 import { unmeasured } from "../lib/loudness";
 import type { TagEditRequest } from "../lib/tagEdit";
-import { libraryAddFolder, libraryFolders, libraryLocate, libraryRemoveFolder, type MusicFolder } from "../lib/api";
+import { libraryAddFolder, libraryForgetMissing, libraryFolders, libraryLocate, libraryRemoveFolder, type MusicFolder } from "../lib/api";
 import { loadLibraryWatch, saveLibraryWatch } from "../lib/storage";
 
 interface Args {
@@ -27,6 +27,7 @@ export function useLibrary({ ready, historyCount, historyKey, showFlash }: Args)
   const [loaded, setLoaded] = useState(false);
   const busy = useRef(false);
   const scanned = useRef(false);
+  const lastScan = useRef(0);
   const pending = useRef(false);
   const readyRef = useRef(ready);
   readyRef.current = ready;
@@ -38,10 +39,11 @@ export function useLibrary({ ready, historyCount, historyKey, showFlash }: Args)
   const scan = useCallback(async (quiet = false): Promise<void> => {
     if (busy.current) { pending.current = true; return; }
     busy.current = true;
+    lastScan.current = Date.now();
     setScanning({ done: 0, total: 0 });
     try {
       const tracks = await libraryScan((done, total) => setScanning({ done, total }));
-      setTracks((old) => old.length === tracks.length && tracks.every((t, i) => JSON.stringify(t) === JSON.stringify(old[i])) ? old : tracks);
+      setTracks((old) => old.length === tracks.length && tracks.every((t, i) => Object.keys(t).every((key) => t[key as keyof LibTrack] === old[i][key as keyof LibTrack])) ? old : tracks);
       setFolders(await libraryFolders());
       scanned.current = true;
     } catch (e) {
@@ -84,8 +86,8 @@ export function useLibrary({ ready, historyCount, historyKey, showFlash }: Args)
 
   useEffect(() => {
     if (!ready || !watchLoaded || !watching) return;
-    const timer = setInterval(() => void scan(true), 15_000);
-    const focused = () => void scan(true);
+    const timer = setInterval(() => { if (document.visibilityState !== "hidden") void scan(true); }, 5 * 60_000);
+    const focused = () => { if (Date.now() - lastScan.current >= 60_000) void scan(true); };
     window.addEventListener("focus", focused);
     return () => { clearInterval(timer); window.removeEventListener("focus", focused); };
   }, [ready, watchLoaded, watching, scan]);
@@ -98,6 +100,16 @@ export function useLibrary({ ready, historyCount, historyKey, showFlash }: Args)
     if (found) setTracks((prev) => [...prev.filter((t) => t.path !== path && t.path !== found.track.path), found.track]);
     return found;
   }, []);
+
+  const forgetMissing = useCallback(async (paths: string[]) => {
+    const results = await libraryForgetMissing(paths);
+    const removed = new Set(results.filter((r) => r.ok).map((r) => r.path));
+    setTracks((prev) => prev.filter((t) => !removed.has(t.path)));
+    // A background scan may have read the old cache just before the removal.
+    // Queue a fresh scan so it cannot leave forgotten entries visible.
+    await scan(true);
+    return results;
+  }, [scan]);
 
   /** Changes the tags of some files, and shows the new tags at once. */
   const editTags = useCallback(async (paths: string[], edit: TagEditRequest): Promise<EditResult[]> => {
@@ -150,7 +162,7 @@ export function useLibrary({ ready, historyCount, historyKey, showFlash }: Args)
   }, []);
 
   return { tracks, scanning, loaded, scan, editTags, measure, analysing, analyse, stopAnalysing, unmeasuredCount,
-    management: { folders, watching, setWatching, addFolder, removeFolder, locate } };
+    management: { folders, watching, setWatching, addFolder, removeFolder, locate, forgetMissing } };
 }
 
 export type LibraryManagement = ReturnType<typeof useLibrary>["management"];

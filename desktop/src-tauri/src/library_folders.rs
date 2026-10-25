@@ -126,7 +126,7 @@ pub async fn library_locate(app: AppHandle, scope: State<'_, Scope>, path: Strin
         let mut track = library::read_track(&real);
         track.path = scope::plain_path(&real);
         track.added = if previous.added > 0 { previous.added } else { previous.modified };
-        let _lock = library::CACHE_EDIT.lock().map_err(|_| "Library is unavailable.")?;
+        let _lock = library::CACHE_EDIT.lock().unwrap_or_else(|e| e.into_inner());
         let mut tracks = library::load_cache(&cache);
         tracks.retain(|t| t.path != path && t.path != track.path);
         tracks.push(track.clone());

@@ -1,5 +1,5 @@
 import { useMusicPreferences } from "../hooks/useMusicPreferences";
-import { save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { useSessionState } from "../hooks/useSessionState";
 import { ArrowDown, ArrowLeft, ArrowUp, Download, ListEnd, ListMusic, ListStart, Pencil, Play, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import PlaylistCoverEditor from "./PlaylistCoverEditor";
@@ -10,10 +10,13 @@ import { baseName } from "../lib/mediaKind";
 import { m3uFileName, toM3u, type Playlist } from "../lib/playlists";
 import Sheet from "./Sheet";
 import SmartPlaylistEditor from "./SmartPlaylistEditor";
-import { smartTracks } from "../lib/smartPlaylists";
+import { SMART_SORT_LABELS, smartTracks } from "../lib/smartPlaylists";
 import type { Listening } from "../lib/listening";
 
 interface Props {
+  requestedPlaylist?: { id: string; serial: number } | null;
+  onRequestedPlaylistHandled?: () => void;
+  pending: Record<string, number>;
   listening: Listening;
   api: PlaylistsApi;
   /** Every song in the library, by path. */
@@ -28,9 +31,12 @@ interface Props {
 const count = (n: number) => `${n} song${n === 1 ? "" : "s"}`;
 
 /** Playlists: made from the library, played in order, and exported as .m3u8. */
-export default function PlaylistsView({ api, byPath, listening, onPlay, onNext, onAdd, announce, flash }: Props) {
+export default function PlaylistsView({ requestedPlaylist, onRequestedPlaylistHandled, pending, api, byPath, listening, onPlay, onNext, onAdd, announce, flash }: Props) {
   const preferences = useMusicPreferences()?.preferences;
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [openId, setOpenId] = useSessionState<string | null>("library.playlistOpenId", null);
+  useEffect(() => {
+    if (requestedPlaylist && api.loaded) { setOpenId(requestedPlaylist.id); onRequestedPlaylistHandled?.(); }
+  }, [requestedPlaylist, api.loaded, setOpenId, onRequestedPlaylistHandled]);
   const [renaming, setRenaming] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [smartEdit, setSmartEdit] = useState<Playlist | "new" | null>(null);
@@ -42,7 +48,7 @@ export default function PlaylistsView({ api, byPath, listening, onPlay, onNext, 
   useEffect(() => { const timer = setInterval(() => tick((n) => n + 1), 60_000); return () => clearInterval(timer); }, []);
   const resolved = useMemo(() => api.playlists.map((p) => p.smart ? { ...p, paths: smartTracks([...byPath.values()], p.smart, listening, Date.now(), preferences).map((t) => t.path) } : p), [api.playlists, byPath, listening, minute, preferences]);
   const open = resolved.find((p) => p.id === openId) ?? null;
-  const smartDialog = smartEdit && <SmartPlaylistEditor initial={smartEdit === "new" ? undefined : smartEdit.smart} initialName={smartEdit === "new" ? "" : smartEdit.name} onClose={() => setSmartEdit(null)} onSave={(name, rules) => {
+  const smartDialog = smartEdit && <SmartPlaylistEditor tracks={[...byPath.values()]} listening={listening} preferences={preferences} initial={smartEdit === "new" ? undefined : smartEdit.smart} initialName={smartEdit === "new" ? "" : smartEdit.name} onClose={() => setSmartEdit(null)} onSave={(name, rules) => {
     if (smartEdit === "new") {
       const made = api.create(name, [], rules);
       if ("problem" in made) return made.problem;
@@ -79,7 +85,7 @@ export default function PlaylistsView({ api, byPath, listening, onPlay, onNext, 
                 <button type="button" className="artist-row" aria-label={`Open ${p.name}`} onClick={() => setOpenId(p.id)}>
                   {p.cover && <img className="playlist-cover" src={p.cover} alt="" />}
                   <b className="truncate">{p.name}</b>
-                  <span className="dim">{p.folder ? `${p.folder} · ` : ""}{p.smart ? "Smart · " : ""}{count(p.paths.length)}</span>
+                  <span className="dim">{p.folder ? `${p.folder} · ` : ""}{p.smart ? "Smart · " : ""}{count(p.paths.length)}{pending[p.id] ? ` · ${pending[p.id]} waiting for download` : ""}</span>
                 </button>
                 <button className="row-btn" aria-label={`Move playlist ${p.name} up`} disabled={i === 0} onClick={() => api.reorder(p.id, list[i - 1].id)}><ArrowUp className="w-3 h-3" /></button>
                 <button className="row-btn" aria-label={`Move playlist ${p.name} down`} disabled={i === list.length - 1} onClick={() => api.reorder(p.id, list[i + 1].id)}><ArrowDown className="w-3 h-3" /></button>
@@ -104,16 +110,16 @@ export default function PlaylistsView({ api, byPath, listening, onPlay, onNext, 
 
   const exportIt = async () => {
     try {
-      const target = await saveDialog({ title: "Export playlist", defaultPath: m3uFileName(open.name), filters: [{ name: "Playlist", extensions: ["m3u8"] }] });
-      if (!target) return;
-      await exportText(
-        target,
+      const saved = await exportText(
+        "Export playlist",
+        m3uFileName(open.name),
+        "m3u8",
         toM3u(open, (path) => {
           const t = byPath.get(path);
           return t ? { title: t.title, artist: t.artist || undefined, duration: t.duration } : undefined;
         }),
       );
-      announce({ title: "Playlist exported", subtitle: open.name });
+      if (saved) announce({ title: "Playlist exported", subtitle: open.name });
     } catch (e) {
       flash(errorText(e), true);
     }
@@ -135,11 +141,11 @@ export default function PlaylistsView({ api, byPath, listening, onPlay, onNext, 
           <label>Folder <select className="field" aria-label="Move playlist to folder" value={open.folder ?? ""} onChange={(e) => api.organize(open.id, e.target.value)}><option value="">Unfiled</option>{api.folders.map((f) => <option key={f} value={f}>{f}</option>)}</select></label>
           <PlaylistCoverEditor playlist={open} api={api} />
           <div className="dim">
-            {count(open.paths.length)}
+            {count(open.paths.length)}{pending[open.id] ? ` · ${pending[open.id]} waiting for download` : ""}
             {total > 0 ? ` · ${formatClock(total)}` : ""}
             {missing > 0 ? ` · ${missing} not in the library now` : ""}
           </div>
-          {open.smart && <p className="dim">Smart playlist · automatically matches {open.smart.match === "all" ? "all" : "any"} of {open.smart.rules.length} rules. Up to 5,000 available songs, sorted by title.</p>}
+          {open.smart && <p className="dim">Smart playlist · automatically matches {open.smart.match === "all" ? "all" : "any"} of {open.smart.rules.length} rules. Up to {(open.smart.limit ?? 5000).toLocaleString()} available songs · {SMART_SORT_LABELS[open.smart.sort ?? "title"]}, {open.smart.descending ? "descending" : "ascending"}.</p>}
           <div className="flex gap-2 flex-wrap">
             {open.smart && <button className="btn small" onClick={() => setSmartEdit(open)}>Edit rules</button>}
             <button type="button" className="btn small primary" disabled={found.length === 0} onClick={() => onPlay(found)}>

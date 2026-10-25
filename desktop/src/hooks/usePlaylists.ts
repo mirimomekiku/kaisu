@@ -73,6 +73,16 @@ export function usePlaylists() {
     [change],
   );
 
+  const addDownloaded = useCallback(async (id: string, path: string): Promise<"saved" | "missing" | "full" | "failed"> => {
+    const playlist = latest.current.find((p) => p.id === id && !p.smart);
+    if (!playlist) return "missing";
+    if (!playlist.paths.includes(path) && playlist.paths.length >= 5000) return "full";
+    const result = addPaths(playlist, [path]);
+    const next = latest.current.map((p) => p.id === id ? result.playlist : p);
+    latest.current = next; setPlaylists(next);
+    return await savePlaylists(next) ? "saved" : "failed";
+  }, []);
+
   const removeTrack = useCallback((id: string, index: number) => change(id, (p) => removeAt(p, index)), [change]);
   const move = useCallback((id: string, from: number, to: number) => change(id, (p) => moveTrack(p, from, to)), [change]);
 
@@ -110,7 +120,7 @@ export function usePlaylists() {
   const setCover = (id: string, cover?: string) => { if (cover === undefined || validPlaylistCover(cover)) change(id, (p) => ({ ...p, cover })); };
   const reorder = (from: string, to: string) => commit(moveItem(latest.current, -1, latest.current.findIndex((p) => p.id === from), latest.current.findIndex((p) => p.id === to)).queue);
 
-  return { playlists, folders, loaded, create, rename, remove, add, removeTrack, move, editSmart, relocate, createFolder, renameFolder, removeFolder, organize, setCover, reorder };
+  return { playlists, folders, loaded, create, rename, remove, add, addDownloaded, removeTrack, move, editSmart, relocate, createFolder, renameFolder, removeFolder, organize, setCover, reorder };
 }
 
 export type PlaylistsApi = ReturnType<typeof usePlaylists>;

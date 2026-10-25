@@ -262,13 +262,15 @@ pub async fn transfer_files(app: tauri::AppHandle, scope: State<'_, Scope>, item
     let mut results = run_transfer(items, base.display().to_string(), dest.display().to_string(), mode, conflict, keep_layout).await?;
     if mode.unwrap_or_default() == MoveMode::Move {
         let mappings: Vec<_> = results.iter().filter(|r| r.ok && !r.skipped).filter_map(|r| Some((sources.get(&r.id)?.clone(), crate::scope::plain_path(Path::new(r.new_path.as_ref()?))))).collect();
-        let updated = (|| {
-            let _lock = crate::library::CACHE_EDIT.lock().map_err(|_| "Library is unavailable.".to_string())?;
-            let cache = crate::library::cache_path(&app)?;
+        // The lock can be held for a whole library scan, so wait for it off the async workers.
+        let handle = app.clone();
+        let updated = tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+            let _lock = crate::library::CACHE_EDIT.lock().unwrap_or_else(|e| e.into_inner());
+            let cache = crate::library::cache_path(&handle)?;
             let mut tracks = crate::library::load_cache(&cache);
             crate::library::relocate_cached_tracks(&mut tracks, &mappings);
             crate::library::save_cache(&cache, &tracks)
-        })();
+        }).await.map_err(|e| e.to_string()).and_then(|r| r);
         if let Err(why) = updated {
             // The files have moved; return their successful mappings even if cache persistence fails.
             for result in results.iter_mut().filter(|r| r.ok && !r.skipped) {
@@ -282,7 +284,7 @@ pub async fn transfer_files(app: tauri::AppHandle, scope: State<'_, Scope>, item
 
 async fn run_transfer(items: Vec<MoveItem>, base_dir: String, dest_dir: String, mode: Option<MoveMode>, conflict: Option<Conflict>, keep_layout: Option<bool>) -> Result<Vec<MoveResult>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let _lock = TRANSFER.lock().map_err(|_| "File transfer is unavailable.")?;
+        let _lock = TRANSFER.lock().unwrap_or_else(|e| e.into_inner());
         let (mode, conflict, keep_layout) = (mode.unwrap_or_default(), conflict.unwrap_or_default(), keep_layout.unwrap_or(true));
         check_destination_sync(&dest_dir)?;
         let base = PathBuf::from(&base_dir);

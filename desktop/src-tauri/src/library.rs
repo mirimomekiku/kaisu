@@ -263,7 +263,7 @@ pub async fn library_scan(app: AppHandle, scope: State<'_, Scope>, on_progress: 
     }
     let cache = cache_path(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
-        let _lock = CACHE_EDIT.lock().map_err(|_| "Library is unavailable.")?;
+        let _lock = CACHE_EDIT.lock().unwrap_or_else(|e| e.into_inner());
         let known = load_cache(&cache);
         let tracks = scan(&dirs, &known, |done, total| {
             let _ = on_progress.send(ScanProgress { done, total });
@@ -273,6 +273,50 @@ pub async fn library_scan(app: AppHandle, scope: State<'_, Scope>, on_progress: 
     })
     .await
     .map_err(|e| format!("The scan stopped unexpectedly: {e}"))?
+}
+
+/// Forget only cached entries whose absence can still be verified. Never touches media or playlists.
+#[derive(Serialize, Debug)]
+pub struct MissingRemoval { pub path: String, pub ok: bool, pub error: Option<String> }
+
+/// An unmounted drive or network share usually leaves an empty mount point behind, which is not proof that its files were deleted.
+fn root_is_populated(root: &Path) -> bool {
+    fs::read_dir(root).is_ok_and(|mut entries| entries.next().is_some())
+}
+
+fn forget_missing(cache: &Path, dirs: &[PathBuf], paths: &[String]) -> Result<Vec<MissingRemoval>, String> {
+    if paths.is_empty() || paths.len() > 500 { return Err("Select between 1 and 500 missing entries.".into()); }
+    let _lock = CACHE_EDIT.lock().unwrap_or_else(|e| e.into_inner());
+    let mut tracks = load_cache(cache);
+    let mut results = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for path in paths {
+        if !seen.insert(path) { continue; }
+        let result = (|| {
+            let track = tracks.iter().find(|t| t.path == *path).ok_or("That entry is no longer in the library.")?;
+            if !track.missing { return Err("That entry is not marked missing. Rescan first.".to_string()); }
+            if !dirs.iter().any(|root| under(path, root) && root_is_populated(root)) {
+                return Err("Its music folder is unavailable. Reconnect it and rescan first.".into());
+            }
+            match fs::symlink_metadata(path) {
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
+                Ok(_) => return Err("The file has returned. Rescan to restore its entry.".into()),
+                Err(e) => return Err(format!("Could not verify that this file is missing: {e}")),
+            }
+            tracks.retain(|t| t.path != *path);
+            Ok(())
+        })();
+        results.push(MissingRemoval { path: path.clone(), ok: result.is_ok(), error: result.err() });
+    }
+    if results.iter().any(|r| r.ok) { save_cache(cache, &tracks)?; }
+    Ok(results)
+}
+
+#[tauri::command]
+pub async fn library_forget_missing(app: AppHandle, scope: State<'_, Scope>, paths: Vec<String>) -> Result<Vec<MissingRemoval>, String> {
+    let cache = cache_path(&app)?;
+    let dirs = scope.library_dirs();
+    tauri::async_runtime::spawn_blocking(move || forget_missing(&cache, &dirs, &paths)).await.map_err(|e| e.to_string())?
 }
 
 /// The picture for a track: the one inside the file, or a `cover.jpg`-style file in its folder.
@@ -354,6 +398,45 @@ pub(crate) mod tests {
         tag.insert_text(ItemKey::RecordingDate, year.to_string());
         file.insert_tag(tag);
         file.save_to_path(path, WriteOptions::default()).unwrap();
+    }
+
+    #[test]
+    fn missing_cleanup_only_forgets_verified_absences_and_keeps_media() {
+        let dir = scratch("cleanup-missing");
+        let cache = dir.join("cache.json");
+        let gone = dir.join("gone.mp3").display().to_string();
+        let present = dir.join("present.mp3").display().to_string();
+        let available = dir.join("available.mp3").display().to_string();
+        let disconnected = dir.join("offline/song.mp3").display().to_string();
+        fs::write(&present, b"returned").unwrap();
+        fs::write(&available, b"music").unwrap();
+        let entries: Vec<_> = [&gone, &present, &available, &disconnected].into_iter().enumerate()
+            .map(|(i, path)| LibTrack { path: path.clone(), missing: i != 2, ..Default::default() }).collect();
+        save_cache(&cache, &entries).unwrap();
+        // Disconnected roots must never be treated as proof that their files are gone.
+        let results = forget_missing(&cache, &[dir.join("offline")], std::slice::from_ref(&disconnected)).unwrap();
+        assert!(!results[0].ok);
+        // An empty mount point (an unmounted drive) is no better than a missing folder.
+        let mount = dir.join("mountpoint");
+        fs::create_dir_all(&mount).unwrap();
+        let unmounted = mount.join("a.mp3").display().to_string();
+        let mut entry = entries[0].clone();
+        entry.path = unmounted.clone();
+        entry.missing = true;
+        save_cache(&cache, &[entry]).unwrap();
+        assert!(!forget_missing(&cache, std::slice::from_ref(&mount), &[unmounted])
+            .unwrap()[0].ok);
+        save_cache(&cache, &entries).unwrap();
+        let results = forget_missing(&cache, std::slice::from_ref(&dir), &[gone.clone(), present.clone(), available.clone(), gone.clone(), dir.join("unknown.mp3").display().to_string()]).unwrap();
+        assert_eq!(results.len(), 4);
+        assert!(results[0].ok);
+        assert!(results[1..].iter().all(|r| !r.ok));
+        assert_eq!(load_cache(&cache).len(), 3);
+        assert!(Path::new(&present).exists() && Path::new(&available).exists());
+        assert!(!Path::new(&gone).exists());
+        assert!(forget_missing(&cache, std::slice::from_ref(&dir), &[]).is_err());
+        assert!(forget_missing(&cache, &[dir.clone()], &vec![gone; 501]).is_err());
+        fs::remove_dir_all(dir).ok();
     }
 
     #[test]

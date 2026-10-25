@@ -54,3 +54,31 @@ describe("listening history", () => {
     expect(saved.a.plays).toBe(2);
   });
 });
+
+describe("smart playlist ordering and folder rules", () => {
+  it("matches a folder and its descendants using path boundaries and Windows separators", () => {
+    const root = t("A", { path: "C:\\Music\\Jazz\\A.mp3" });
+    const child = t("B", { path: "C:/Music/Jazz/live/B.mp3" });
+    const neighbor = t("C", { path: "C:/Music/Jazzy/C.mp3" });
+    expect(smartTracks([neighbor, child, root], rule("folder", "c:/music/jazz/", "is"), {})).toEqual([root, child]);
+    expect(smartTracks([neighbor, child, root], rule("folder", "Jazz", "contains"), {})).toHaveLength(3);
+  });
+  it("sorts before limiting, has deterministic ties and responds to listening updates", () => {
+    const c = t("C");
+    const smart: SmartRules = { ...rule("played", "played"), sort: "plays", descending: true, limit: 2 };
+    const stats = { [a.path]: { plays: 1, lastPlayed: 5 }, [b.path]: { plays: 3, lastPlayed: 10 }, [c.path]: { plays: 3, lastPlayed: 8 } };
+    expect(smartTracks([c, b, a], smart, stats)).toEqual([b, c]);
+    expect(smartTracks([c, b, a], { ...smart, sort: "lastPlayed", descending: false }, stats)).toEqual([a, c]);
+    expect(smartTracks([c, b, a], smart, { ...stats, [a.path]: { plays: 4, lastPlayed: 20 } })).toEqual([a, b]);
+  });
+  it("validates and preserves sort, limit and direction without breaking old saved playlists", () => {
+    const smart = { ...rule("artist", "Band"), sort: "added" as const, descending: true, limit: 25 };
+    expect(sanitizeSmart(smart)).toEqual(smart);
+    expect(sanitizePlaylists([createPlaylist("New", [], 1, smart)])[0].smart).toEqual(smart);
+    for (const extra of [{ sort: "unknown" }, { descending: "yes" }, { limit: 0 }, { limit: 5001 }, { limit: 1.5 }, { limit: NaN }]) expect(sanitizeSmart({ ...smart, ...extra })).toBeUndefined();
+  });
+  it("filters duration in seconds without counting unknown durations as zero", () => {
+    const unknown = t("Unknown", { duration: 0 });
+    expect(smartTracks([a, unknown], rule("duration", "200", "at_most"), {})).toEqual([a]);
+  });
+});

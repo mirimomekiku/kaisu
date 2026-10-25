@@ -30,7 +30,7 @@ export function qualityLabel(t: LibTrack): string {
 }
 
 /** What the player needs to know about a track. */
-export const toPlayerTrack = (t: LibTrack): Track => ({ path: t.path, title: t.title, artist: t.artist || undefined, album: t.album || undefined, duration: t.duration > 0 ? t.duration : undefined,
+export const toPlayerTrack = (t: LibTrack): Track => ({ fileRevision: `${t.size}:${t.modified}`, path: t.path, title: t.title, artist: t.artist || undefined, album: t.album || undefined, duration: t.duration > 0 ? t.duration : undefined,
   albumArtist: t.album_artist || undefined, trackNumber: t.track ?? undefined, discNumber: t.disc ?? undefined,
   format: t.format, sampleRate: t.sample_rate ?? undefined, bitrate: t.bitrate ?? undefined, bitDepth: t.bit_depth ?? undefined,
 });

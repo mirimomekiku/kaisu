@@ -1,9 +1,11 @@
+import { useSessionState } from "../hooks/useSessionState";
+import { useSessionScroll } from "../hooks/useSessionScroll";
 import { ActionMenu, FilterDropdown } from "./Dropdown";
 import SongList from "./SongList";
 import { useMusicPreferences } from "../hooks/useMusicPreferences";
 import ListeningDashboard from "./ListeningDashboard";
 import { ArrowLeft, Disc3, ListEnd, ListMusic, ListPlus, ListStart, Loader2, Music, Pencil, Play, Search, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { usePlayerEngine } from "../hooks/usePlayer";
 import type { EditResult, LibTrack } from "../lib/api";
 import type { TagEditRequest } from "../lib/tagEdit";
@@ -18,6 +20,8 @@ import type { LibraryManagement } from "../hooks/useLibrary";
 import type { Listening } from "../lib/listening";
 import MusicFolders from "./MusicFolders";
 import DuplicateFinder from "./DuplicateFinder";
+
+const LibraryCleanup = lazy(() => import("./LibraryCleanup"));
 
 type View = "songs" | "albums" | "artists" | "playlists" | "listening";
 
@@ -34,6 +38,9 @@ const SORTS: Array<[SortKey, string]> = [
 ];
 
 interface Props {
+  playlistShortcut?: { id: string; serial: number } | null;
+  onPlaylistShortcutHandled?: () => void;
+  pendingPlaylists: Record<string, number>;
   playlists: PlaylistsApi;
   management: LibraryManagement;
   listening: Listening;
@@ -59,22 +66,24 @@ const hours = (seconds: number) => {
 };
 
 /** The music library: every sound file found in the download folders, by song, album or artist. */
-export default function LibraryPage({ playlists, tracks, management, listening, onRelocated, scanning, loaded, onScan, onReveal, onEditTags, analysing, unmeasuredCount, onAnalyse, onStopAnalysing, announce, flash }: Props) {
+export default function LibraryPage({ playlistShortcut, onPlaylistShortcutHandled, pendingPlaylists, playlists, tracks, management, listening, onRelocated, scanning, loaded, onScan, onReveal, onEditTags, analysing, unmeasuredCount, onAnalyse, onStopAnalysing, announce, flash }: Props) {
   const preferences = useMusicPreferences()?.preferences;
-  const [favoritesOnly, setFavoritesOnly] = useState(false);
-  const [minimumRating, setMinimumRating] = useState(0);
+  const [favoritesOnly, setFavoritesOnly] = useSessionState("library.favoritesOnly", false);
+  const [minimumRating, setMinimumRating] = useSessionState("library.minimumRating", 0);
   const player = usePlayerEngine();
   const [adding, setAdding] = useState<LibTrack[] | null>(null);
-  const [view, setView] = useState<View>("songs");
-  const [query, setQuery] = useState("");
-  const [format, setFormat] = useState("");
-  const [sort, setSort] = useState<SortKey>("title");
-  const [artist, setArtist] = useState("");
-  const [openAlbum, setOpenAlbum] = useState<string | null>(null);
+  const [view, setView] = useSessionState<View>("library.view", "songs");
+  useEffect(() => { if (playlistShortcut) { setView("playlists"); setOpenAlbum(null); } }, [playlistShortcut, setView]);
+  const [query, setQuery] = useSessionState("library.query", "");
+  const [format, setFormat] = useSessionState("library.format", "");
+  const [sort, setSort] = useSessionState<SortKey>("library.sort", "title");
+  const [artist, setArtist] = useSessionState("library.artist", "");
+  const [openAlbum, setOpenAlbum] = useSessionState<string | null>("library.openAlbum", null);
   const [editing, setEditing] = useState<LibTrack[] | null>(null);
   const [foldersOpen, setFoldersOpen] = useState(false);
+  const [cleanupOpen, setCleanupOpen] = useState(false);
   const [duplicatesOpen, setDuplicatesOpen] = useState(false);
-  const [availability, setAvailability] = useState("available");
+  const [availability, setAvailability] = useSessionState("library.availability", "available");
   const eligible = useMemo(() => tracks.filter((t) => (!favoritesOnly || preferences?.[t.path]?.favorite) && (preferences?.[t.path]?.rating ?? 0) >= minimumRating && (availability === "all" || (availability === "missing" ? !!t.missing : !t.missing))), [tracks, availability, favoritesOnly, minimumRating, preferences]);
 
   const formats = useMemo(() => formatsOf(tracks), [tracks]);
@@ -84,8 +93,13 @@ export default function LibraryPage({ playlists, tracks, management, listening, 
   const artists = useMemo(() => artistsOf(matching), [matching]);
   const byPath = useMemo(() => new Map(tracks.map((t) => [t.path, t])), [tracks]);
   const album = openAlbum ? albums.find((a) => a.key === openAlbum) ?? null : null;
+  const scroll = useSessionScroll(JSON.stringify([view, query, format, sort, artist, openAlbum, availability, favoritesOnly, minimumRating]), shown.length);
 
-  const play = (list: LibTrack[], from = 0) => player?.play(list.slice(from).filter((t) => !t.missing).slice(0, QUEUE_FROM_HERE).map(toPlayerTrack), 0);
+  const play = (list: LibTrack[], from = 0) => {
+    const available = list.slice(from).filter((t) => !t.missing);
+    if (available.length > QUEUE_FROM_HERE) announce({ title: `Playing the first ${QUEUE_FROM_HERE} songs`, subtitle: "Add more songs to the queue when you need them." });
+    player?.play(available.slice(0, QUEUE_FROM_HERE).map(toPlayerTrack), 0);
+  };
   const next = (list: LibTrack[]) => {
     player?.playNext(list.filter((t) => !t.missing).map(toPlayerTrack));
     announce({ title: "Playing next", subtitle: list.length === 1 ? list[0].title : `${list.length} tracks` });
@@ -123,7 +137,7 @@ export default function LibraryPage({ playlists, tracks, management, listening, 
   };
 
   return (
-    <section className="library" aria-label="Music library">
+    <section {...scroll} className="library" aria-label="Music library">
       <header className="lib-bar">
         <h1 className="lib-title-heading">Library</h1>
         <select className="field lib-view" aria-label="Library view" value={view} onChange={(e) => changeView(e.target.value as View)}>
@@ -150,6 +164,7 @@ export default function LibraryPage({ playlists, tracks, management, listening, 
         <span className="flex-1" />
         <ActionMenu label="Library tools" items={[
           { label: "Music folders", onSelect: () => setFoldersOpen(true) },
+          { label: "Library cleanup", onSelect: () => setCleanupOpen(true) },
           { label: "Find duplicates", onSelect: () => setDuplicatesOpen(true) },
           { kind: "separator" },
           { label: "Rescan", onSelect: onScan, disabled: scanning !== null },
@@ -158,9 +173,10 @@ export default function LibraryPage({ playlists, tracks, management, listening, 
       </header>
       <div className="lib-summary">
         <span aria-label="Library size">{shown.length === tracks.length ? `${tracks.length} songs` : `${shown.length} of ${tracks.length} songs`}{shown.length > 0 ? ` · ${hours(totalDuration(shown))}` : ""}</span>
-        <span>{management.watching ? "Watching for changes" : "Watching paused"}{tracks.some((t) => t.missing) ? ` · ${tracks.filter((t) => t.missing).length} missing` : ""}</span>
+        <span title="Automatic checks run every five minutes while visible, and on return after a minute. Scans include up to 100,000 tracks and eight folder levels.">{management.watching ? "Watching for changes" : "Watching paused"}{tracks.some((t) => t.missing) ? ` · ${tracks.filter((t) => t.missing).length} missing` : ""}</span>
       </div>
 
+      {tracks.length >= 100_000 && <div className="lib-chip" role="alert">The 100,000-track scan limit was reached. Add smaller music folders to include the rest.</div>}
       {artist && (
         <div className="lib-chip" role="status">
           Showing <b>{artist}</b>
@@ -177,6 +193,9 @@ export default function LibraryPage({ playlists, tracks, management, listening, 
 
       {view === "listening" ? <ListeningDashboard tracks={tracks} stats={listening} onPlay={(t) => player?.play([toPlayerTrack(t)])} /> : view === "playlists" ? (
         <PlaylistsView
+          requestedPlaylist={playlistShortcut}
+          onRequestedPlaylistHandled={onPlaylistShortcutHandled}
+          pending={pendingPlaylists}
           api={playlists}
           byPath={byPath}
           listening={listening}
@@ -261,6 +280,7 @@ export default function LibraryPage({ playlists, tracks, management, listening, 
         />
       )}
       {foldersOpen && <MusicFolders management={management} onClose={() => setFoldersOpen(false)} />}
+      {cleanupOpen && <Suspense fallback={<p role="status">Opening library cleanup…</p>}><LibraryCleanup tracks={tracks} management={management} scanning={scanning !== null} onScan={onScan} onLocate={locate} onEdit={setEditing} onReveal={onReveal} onDuplicates={() => setDuplicatesOpen(true)} onClose={() => setCleanupOpen(false)} /></Suspense>}
       {duplicatesOpen && <DuplicateFinder byPath={byPath} onChanged={onScan} onReveal={onReveal} onClose={() => setDuplicatesOpen(false)} />}
       {editing && (
         <TagEditor
