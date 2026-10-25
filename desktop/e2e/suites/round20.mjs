@@ -65,7 +65,7 @@ check("full player: transport settings survive returning", await bar(page).getBy
 // The OS can leave fullscreen independently (for example a system fullscreen shortcut).
 await expand(page); await page.evaluate(() => { window.__mock.fullscreen = false; window.__resized?.(); }); await room(page).waitFor({ state: "detached" });
 check("full player: native exit restores the regular player", await bar(page).getByRole("button", { name: "Pause", exact: true }).count() === 1);
-await nav(page, "Settings").click(); await page.getByLabel("Theme", { exact: true }).selectOption("dark");
+await nav(page, "Settings").click(); await page.getByLabel("Settings section", { exact: true }).selectOption("Customization"); await page.getByLabel("Theme", { exact: true }).selectOption("dark");
 await expand(page); await page.screenshot({ path: "src-tauri/target/full-player-dark.png" });
 check("themes: dark mode still uses the app's design system", await page.locator("html").getAttribute("data-theme") === "dark");
 await page.keyboard.press("Escape"); await page.context().close();

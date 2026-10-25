@@ -55,7 +55,7 @@ await page.getByRole("button", { name: "Playback options", exact: true }).click(
 check("Player: speed and sleep are grouped together", await page.getByRole("dialog", { name: "Playback options", exact: true }).getByLabel("Sleep timer").count() === 1);
 await page.keyboard.press("Escape");
 await nav(page, "Settings").click();
-check("Settings: begins with general preferences", await page.getByLabel("Settings section", { exact: true }).inputValue() === "General" && await main().getByRole("region", { name: "Appearance", exact: true }).count() === 1 && await main().getByRole("region", { name: "Downloads", exact: true }).count() === 0);
+check("Settings: begins with general preferences", await page.getByLabel("Settings section", { exact: true }).inputValue() === "General" && await main().getByRole("region", { name: "Interface", exact: true }).count() === 1 && await main().getByRole("region", { name: "Downloads", exact: true }).count() === 0);
 await page.getByLabel("Find a setting", { exact: true }).fill("crossfade");
 check("Settings: search finds a setting across sections", await main().getByRole("region", { name: "Playback transitions", exact: true }).count() === 1 && await main().getByRole("region", { name: "Appearance", exact: true }).count() === 0);
 await page.getByLabel("Find a setting", { exact: true }).fill("download folder");
@@ -68,7 +68,7 @@ check("Settings: section change narrows the page", await main().getByRole("regio
 await snapshot("settings");
 // Minimum-size layout in all themes; fields, panels and player must remain on screen.
 for (const theme of ["aqua", "graphite", "dark"]) {
-  await page.getByLabel("Settings section", { exact: true }).selectOption("General");
+  await page.getByLabel("Settings section", { exact: true }).selectOption("Customization");
   await page.getByLabel("Theme", { exact: true }).selectOption(theme);
   await page.setViewportSize({ width: 760, height: 540 });
   for (const section of ["Search", "Downloads", "History", "Library", "Settings"]) {

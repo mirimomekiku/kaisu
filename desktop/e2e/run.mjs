@@ -44,7 +44,7 @@ const run = (name) =>
     child.stderr.on("data", (d) => (output += d));
     child.on("close", (code) => {
       const summary = output.match(/(\d+) passed, (\d+) failed/);
-      done({ name, code, output, seconds: Math.round((Date.now() - started) / 1000), passed: summary ? +summary[1] : 0, failed: summary ? +summary[2] : null });
+      done({ name, code: code === 0 && (!summary || +summary[1] === 0) ? 1 : code, output, seconds: Math.round((Date.now() - started) / 1000), passed: summary ? +summary[1] : 0, failed: summary ? +summary[2] : null });
     });
   });
 

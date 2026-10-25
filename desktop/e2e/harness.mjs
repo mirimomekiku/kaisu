@@ -27,12 +27,27 @@ export async function open({ mock = {}, store = {}, data = {}, history = [], que
   if (clock) await page.clock.install();
   await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("input[type=text]", { timeout: 60000 });
+  if (ready) await page.getByRole("main", { name: "search", exact: true }).getByRole("heading", { name: "Search", exact: true }).waitFor();
   return page;
 }
 export const calls = (page, cmd) => page.evaluate((c) => window.__mock.calls.filter((x) => x.cmd === c), cmd);
 export const waitCalls = (page, cmd, n, t = 30000) => page.waitForFunction(([c, k]) => window.__mock.calls.filter((x) => x.cmd === c).length >= k, [cmd, n], { timeout: t });
 export const box = (page) => page.getByLabel("Search YouTube or paste a link");
-export const nav = (page, name) => page.getByRole("navigation", { name: "Sections" }).getByRole("button", { name: new RegExp(`^${name}`) });
+export const nav = (page, name) => {
+  const button = page.getByRole("navigation", { name: "Sections" }).getByRole("button", { name: new RegExp(`^${name}`) });
+  const click = button.click.bind(button);
+  // Page chunks and initial library reads are asynchronous; assertions should observe the requested view.
+  button.click = async (options) => {
+    await click(options);
+    const pageName = name === "Saved sources" ? "sources" : name.toLowerCase();
+    await page.waitForFunction((expected) => {
+      const main = document.querySelector("main");
+      return main?.getAttribute("aria-label") === expected && !main.textContent.includes("Opening view…")
+        && (expected !== "library" || !main.querySelector(".empty h2")?.textContent.includes("Reading your music"));
+    }, pageName);
+  };
+  return button;
+};
 export const chooseMenu = async (page, menu, item) => {
   await page.getByRole("button", { name: menu, exact: true }).click();
   await page.getByRole("menu", { name: menu, exact: true }).getByRole("menuitem", { name: item, exact: typeof item === "string" }).click();

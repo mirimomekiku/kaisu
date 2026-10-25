@@ -140,8 +140,8 @@ export async function invoke(cmd: string, args: any = {}): Promise<any> {
       });
     case "export_text":
       if (w.__mock.exportFail) throw "Couldn't save the file: permission denied";
-      (w.__mock.exports ??= []).push({ path: args.path, contents: args.contents });
-      return;
+      (w.__mock.exports ??= []).push({ path: "/home/u/export.csv", contents: args.contents });
+      return "/home/u/export.csv";
     case "test_proxy":
       await sleep(200);
       if (/bad/.test(args.proxy)) throw "Couldn't connect through the proxy. Check the address and that it is running.";
@@ -212,6 +212,7 @@ export async function invoke(cmd: string, args: any = {}): Promise<any> {
       return args.paths.map((p: string) => !(w.__mock.missing ?? []).includes(p));
     case "open_file":
     case "reveal_file":
+      if (w.__mock.openerFail) throw "The system could not launch the file manager or player.";
       if ((w.__mock.missing ?? []).includes(args.path)) throw "That file has been moved or deleted.";
       return;
     case "check_custom_args":
@@ -254,6 +255,16 @@ export async function invoke(cmd: string, args: any = {}): Promise<any> {
       if (!track) return null;
       w.__mock.library = [...(w.__mock.library ?? []).filter((t: any) => t.path !== args.path && t.path !== track.path), track];
       return { from: args.path, track };
+    }
+    case "library_forget_missing": {
+      const results = args.paths.map((path: string) => {
+        const track = (w.__mock.library ?? []).find((t: any) => t.path === path);
+        const error = !track?.missing ? "The file has returned. Rescan to restore its entry." : (w.__mock.forgetFail ?? []).includes(path) ? "Its music folder is unavailable. Reconnect it and rescan first." : null;
+        return { path, ok: !error, error };
+      });
+      const removed = new Set(results.filter((r: any) => r.ok).map((r: any) => r.path));
+      w.__mock.library = (w.__mock.library ?? []).filter((t: any) => !removed.has(t.path));
+      return results;
     }
     case "library_duplicates":
       args.onProgress.onmessage({ done: 2, total: 2 });
@@ -330,6 +341,12 @@ export async function invoke(cmd: string, args: any = {}): Promise<any> {
       (w.__mock.removedLeftovers ??= []).push(...args.paths);
       w.__mock.leftovers = (w.__mock.leftovers ?? []).filter((l: any) => !args.paths.includes(l.path));
       return args.paths.map((path: string) => ({ path, ok: true, error: null }));
+    case "media_waveform":
+      await sleep(w.__mock.waveformDelay ?? 50);
+      if (w.__mock.waveformFail) throw "The waveform could not be decoded.";
+      return { duration: w.__mock.audioSeconds ?? 120, peaks: Array.from({ length: 128 }, (_, i) => Math.abs(Math.sin(i / 8))) };
+    case "cancel_waveform":
+      (w.__mock.waveformCancelled ??= []).push(args.id); return;
     case "play_in_app":
       if (w.__mock.playDelay) await sleep(w.__mock.playDelay);
       if ((w.__mock.playFailPaths ?? []).includes(args.path)) throw "The file has been moved or deleted.";
@@ -359,14 +376,15 @@ export async function invoke(cmd: string, args: any = {}): Promise<any> {
       return "video";
     }
     case "get_playlist": {
-      await sleep(250);
+      await sleep(w.__mock.playlistDelay ?? 250);
+      if (w.__mock.playlistFail) throw "The source could not be reached.";
       const kind = /\/@|\/channel\//.test(args.url) ? "channel" : "playlist";
       const total = w.__mock.playlistTotal ?? 7;
       const n = Math.min(args.limit, total);
       return {
         title: kind === "channel" ? "Blender Channel" : "Road Trip: Mix / 2026",
         uploader: "Blender", kind, total,
-        entries: Array.from({ length: n }, (_, i) => ({
+        entries: w.__mock.playlistEntries ?? Array.from({ length: n }, (_, i) => ({
           id: `pl${String(i).padStart(9, "0")}`, title: `Playlist video ${i + 1}`, url: `https://www.youtube.com/watch?v=pl${String(i).padStart(9, "0")}`,
           channel: "Blender", duration_secs: 100 + i, view_count: 1000 * (i + 1), thumbnail: thumb(30 * i), live: false,
         })),
@@ -405,6 +423,7 @@ export async function invoke(cmd: string, args: any = {}): Promise<any> {
     case "open_folder":
     case "set_tray_status":
     case "quit_app":
+    case "finish_exit":
       return;
     case "tray_available":
       return w.__mock.tray ?? true;
