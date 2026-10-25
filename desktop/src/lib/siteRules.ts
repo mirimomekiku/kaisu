@@ -1,4 +1,5 @@
 import type { AudioFormat, Preset } from "./api";
+import { AUDIO_FORMAT_IDS, audioFormatName } from "./audioFormats";
 import { PRESET_LABEL } from "./format";
 
 /**
@@ -23,7 +24,7 @@ export interface SiteRule {
   folder: string;
 }
 
-export const AUDIO_FORMATS: AudioFormat[] = ["mp3", "m4a", "opus", "flac", "wav"];
+export const AUDIO_FORMATS: AudioFormat[] = AUDIO_FORMAT_IDS;
 const PRESETS: Preset[] = ["best", "p1080", "p720", "audio"];
 const HOST_PATTERN = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
 
@@ -62,7 +63,7 @@ export function describeSiteRule(rule: SiteRule): string {
   const from = `${rule.channel.trim() ? `${rule.channel.trim()} on ` : ""}${normalizeHost(rule.host) || "…"}`;
   const does: string[] = [];
   if (rule.preset) does.push(`downloaded as ${rule.preset === "audio" ? "audio" : PRESET_LABEL[rule.preset]}`);
-  if (rule.audioFormat) does.push(`audio as ${rule.audioFormat.toUpperCase()}`);
+  if (rule.audioFormat) does.push(`audio as ${audioFormatName(rule.audioFormat)}`);
   if (rule.folder.trim()) does.push(`saved in ${rule.folder.trim()}`);
   return does.length ? `Anything from ${from} is ${does.join(", ")}.` : `Anything from ${from}.`;
 }

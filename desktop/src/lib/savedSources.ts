@@ -1,4 +1,5 @@
 import type { AudioFormat, LinkKind, PlaylistInfo, Preset, SearchResult } from "./api";
+import { isAudioFormat } from "./audioFormats";
 import { canonicalUrl } from "./links";
 import { redactText } from "./redact";
 import { checkDownloadUrl } from "./validate";
@@ -49,7 +50,7 @@ export function sanitizeSavedSources(raw: unknown): SavedSource[] {
     const pending = Array.isArray(r.pending) ? [...new Map(r.pending.map(entry).filter((e): e is SearchResult => !!e).map((e) => [canonicalUrl(e.url), e])).values()].slice(-MAX_PENDING) : [];
     const seen = Array.isArray(r.seen) ? r.seen.filter((url): url is string => typeof url === "string" && !!sourceUrl(url)).map(canonicalUrl) : [];
     return [{ id: r.id, url, title: typeof r.title === "string" ? redactText(r.title).slice(0, 2000) : url, kind: r.kind as SavedSource["kind"],
-      preset: ["best", "p1080", "p720", "audio"].includes(r.preset ?? "") ? r.preset! : "best", audioFormat: ["mp3", "m4a", "opus", "flac", "wav"].includes(r.audioFormat ?? "") ? r.audioFormat! : "mp3",
+      preset: ["best", "p1080", "p720", "audio"].includes(r.preset ?? "") ? r.preset! : "best", audioFormat: isAudioFormat(r.audioFormat) ? r.audioFormat! : "mp3",
       playlistId: typeof r.playlistId === "string" && /^[a-z0-9_-]{1,128}$/i.test(r.playlistId) ? r.playlistId : "", pending,
       seen: [...new Set([...seen, ...pending.map((e) => canonicalUrl(e.url))])].slice(-MAX_SEEN), checked: typeof r.checked === "number" && Number.isFinite(r.checked) ? r.checked : 0,
       total: typeof r.total === "number" && Number.isFinite(r.total) && r.total >= 0 ? r.total : null }];

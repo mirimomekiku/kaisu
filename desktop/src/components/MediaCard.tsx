@@ -3,7 +3,9 @@ import { open as pickFile } from "@tauri-apps/plugin-dialog";
 import { Calendar, CheckCircle2, Clock, Download, Eye, MonitorPlay, Music, Radio, ThumbsUp, Video } from "lucide-react";
 import FileActions from "./FileActions";
 import Picture from "./Picture";
-import type { AudioExtras, Clip, CoverMode, CoverOptions, FormatInfo, LyricsMode, MediaInfo, MetaOptions, Preset, SubtitleOptions } from "../lib/api";
+import { lossyEncodeNote } from "../lib/audioFormats";
+import type { DownloadPlan } from "../lib/downloadPlan";
+import type { AudioExtras, AudioFormat, Clip, CoverMode, CoverOptions, FormatInfo, LyricsMode, MediaInfo, MetaOptions, Preset, SubtitleOptions } from "../lib/api";
 import type { FormatPreset } from "../lib/presets";
 import { changedTags, guessTags, headsUp, type TagGuess } from "../lib/tags";
 import { checkAudioQuality, checkTag } from "../lib/validate";
@@ -68,6 +70,8 @@ interface Props {
   audioLabel: string;
   /** Short descriptions of advanced options that will apply (advanced mode only). */
   activeOptions: string[];
+  /** What a site rule and the folder/name settings will do to this download. */
+  plan: DownloadPlan;
   /** Earlier downloads of this exact video, newest first. */
   downloads: Array<{ item: HistoryItem; exists: boolean | undefined }>;
   /** Resolves to false when the download didn't start (the user cancelled a warning), so the card stays open. */
@@ -106,7 +110,7 @@ function estimateSize(videos: FormatInfo[], audios: FormatInfo[], kind: "video" 
   return pick.filesize + (pick.kind === "video" ? bestAudio : 0);
 }
 
-export default function MediaCard({ info, extras, presets, onSavePreset, onPreview, onWatchPreview, onLyricsChoice, hasCookies, mode, subtitleDefaults, audioLabel, activeOptions, downloads, onDownload, onOpen, onReveal }: Props) {
+export default function MediaCard({ info, extras, presets, onSavePreset, onPreview, onWatchPreview, onLyricsChoice, hasCookies, mode, subtitleDefaults, audioLabel, activeOptions, plan, downloads, onDownload, onOpen, onReveal }: Props) {
   const advanced = mode === "advanced";
   const [kind, setKind] = useState<"video" | "audio">("video");
   const [quality, setQuality] = useState<Quality>("best");
@@ -188,7 +192,8 @@ export default function MediaCard({ info, extras, presets, onSavePreset, onPrevi
 
   const tagErrors = Object.fromEntries(TAG_FIELDS.map(([key, , type]) => [key, checkTag(type, tags[key])])) as Record<keyof TagGuess, string | null>;
   const tagProblem = Object.values(tagErrors).find(Boolean) ?? null;
-  const qualityProblem = kind === "audio" ? checkAudioQuality(audioQuality) : null;
+  const original = audioLabel === "Original";
+  const qualityProblem = kind === "audio" && !original ? checkAudioQuality(audioQuality) : null;
   const coverProblem = kind === "audio" && cover === "custom" && !coverPath ? "Choose a picture, or pick another cover option." : null;
   const problem = tagProblem ?? qualityProblem ?? coverProblem;
 
@@ -605,7 +610,7 @@ export default function MediaCard({ info, extras, presets, onSavePreset, onPrevi
                       <div className="flex items-center gap-3 flex-wrap">
                         <label className="flex items-center gap-2">
                           Audio quality
-                          <select value={QUALITY_CHOICES.some(([v]) => v === audioQuality) ? audioQuality : "custom"} onChange={(e) => setAudioQuality(e.target.value)} className="field" aria-label="Audio quality">
+                          <select value={QUALITY_CHOICES.some(([v]) => v === audioQuality) ? audioQuality : "custom"} onChange={(e) => setAudioQuality(e.target.value)} disabled={original} className="field" aria-label="Audio quality">
                             {QUALITY_CHOICES.map(([v, text]) => (
                               <option key={v} value={v}>
                                 {text}
@@ -615,11 +620,11 @@ export default function MediaCard({ info, extras, presets, onSavePreset, onPrevi
                           </select>
                         </label>
                         <label className="flex items-center gap-1.5">
-                          <input type="checkbox" checked={normalize} onChange={(e) => setNormalize(e.target.checked)} />
+                          <input type="checkbox" checked={normalize} disabled={original} onChange={(e) => setNormalize(e.target.checked)} />
                           Even out the volume
                         </label>
                         <label className="flex items-center gap-1.5">
-                          <input type="checkbox" checked={trimSilence} onChange={(e) => setTrimSilence(e.target.checked)} />
+                          <input type="checkbox" checked={trimSilence} disabled={original} onChange={(e) => setTrimSilence(e.target.checked)} />
                           Trim silence at the start and end
                         </label>
                       </div>
@@ -628,6 +633,8 @@ export default function MediaCard({ info, extras, presets, onSavePreset, onPrevi
                           {qualityProblem ?? coverProblem}
                         </p>
                       )}
+                      {original && <p className="m-0 dim" role="note">Original audio is kept without conversion, so quality, volume and silence options are skipped.</p>}
+                      {lossyEncodeNote(audioLabel.toLowerCase() as AudioFormat) && <p className="m-0 dim" role="note">{lossyEncodeNote(audioLabel.toLowerCase() as AudioFormat)}</p>}
                       <p className="m-0 dim">Cover art and lyrics are for MP3, M4A and FLAC. Lyrics come from the free LRCLIB service; nothing else is sent.</p>
                     </div>
                   ) : (
@@ -697,6 +704,11 @@ export default function MediaCard({ info, extras, presets, onSavePreset, onPrevi
                 )}
               </details>
             )}
+
+            <div className="m-0 dim" aria-label="What will happen to this download">
+              {plan.rule && <p className="m-0" role="note">Site rule: {plan.rule}</p>}
+              <p className="m-0">Saved as: {plan.output}</p>
+            </div>
 
             {advanced && activeOptions.length > 0 && (
               <p className="m-0 dim">

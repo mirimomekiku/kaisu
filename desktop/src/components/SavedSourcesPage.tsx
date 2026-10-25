@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Bookmark, RefreshCw } from "lucide-react";
+import { AUDIO_FORMAT_IDS, audioFormatName, lossyEncodeNote } from "../lib/audioFormats";
 import type { SavedSourcesApi } from "../hooks/useSavedSources";
 import type { PlaylistsApi } from "../hooks/usePlaylists";
 import type { SavedSource } from "../lib/savedSources";
@@ -40,7 +41,8 @@ function SourceCard({ source, api, playlists, ready, onOpen }: { source: SavedSo
       <label>Download as <select className="field" aria-label={`Download format for ${source.title}`} value={source.preset} onChange={(e) => api.update(source.id, { preset: e.target.value as Preset })}>
         <option value="best">Best video</option><option value="p1080">1080p video</option><option value="p720">720p video</option><option value="audio">Audio only</option>
       </select></label>
-      {source.preset === "audio" && <><label>Audio format <select className="field" aria-label={`Audio format for ${source.title}`} value={source.audioFormat} onChange={(e) => api.update(source.id, { audioFormat: e.target.value as AudioFormat })}>{["mp3", "m4a", "opus", "flac", "wav"].map((format) => <option key={format} value={format}>{format.toUpperCase()}</option>)}</select></label>
+      {source.preset === "audio" && <><label>Audio format <select className="field" aria-label={`Audio format for ${source.title}`} value={source.audioFormat} onChange={(e) => api.update(source.id, { audioFormat: e.target.value as AudioFormat })}>{AUDIO_FORMAT_IDS.map((format) => <option key={format} value={format}>{audioFormatName(format)}</option>)}</select></label>
+        {lossyEncodeNote(source.audioFormat) && <p className="pref-hint m-0" role="note">{lossyEncodeNote(source.audioFormat)}</p>}
         <DownloadPlaylistTarget api={playlists} value={source.playlistId} onChange={(playlistId) => api.update(source.id, { playlistId })} /></>}
     </div>
     {api.errors[source.id] && <p role="alert">Could not check this source: {api.errors[source.id]} Your review list has been kept.</p>}

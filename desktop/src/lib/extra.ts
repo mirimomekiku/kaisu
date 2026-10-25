@@ -1,4 +1,5 @@
 import type { AudioExtras, Clip, CoverOptions, ExtraOptions, LyricsMode, MetaOptions, OutputOptions, PlaylistCtx, SubtitleOptions } from "./api";
+import { audioFormatName, forFormat } from "./audioFormats";
 import { parseLangs, toOptions } from "./subtitles";
 import type { Settings } from "./storage";
 
@@ -60,18 +61,19 @@ export function buildExtra(settings: Settings, formatId: string | null, ctx?: Ex
         verbose: settings.verbose,
       }
     : SIMPLE_BASE;
+  const audioFormat = ctx?.audioFormat ?? base.audio_format;
   return {
     collision: settings.downloadConflict ?? "keep_both",
     meta: ctx?.meta ?? null,
     cover: ctx?.cover !== undefined ? ctx.cover : advanced ? { mode: settings.coverMode } : null,
     lyrics: ctx?.lyrics !== undefined ? ctx.lyrics : advanced ? settings.lyricsMode : null,
-    audio: ctx?.audio !== undefined ? ctx.audio : defaultAudio(settings),
+    audio: forFormat(audioFormat, ctx?.audio !== undefined ? ctx.audio : defaultAudio(settings)),
     // The proxy applies in both modes: it is about reaching the internet, not about choices.
     proxy: settings.proxy.trim() || null,
     clean_titles: settings.cleanTitles,
     subs: ctx?.subs !== undefined ? ctx.subs : defaultSubs(settings),
     ...base,
-    audio_format: ctx?.audioFormat ?? base.audio_format,
+    audio_format: audioFormat,
     rate_limit: ctx?.rateLimit !== undefined ? ctx.rateLimit : base.rate_limit,
     output: outputOptions(settings),
     playlist: ctx?.playlist ?? null,
@@ -88,5 +90,5 @@ export const activeOptions = (settings: Settings): string[] =>
     settings.proxy.trim() && "proxy",
     settings.rateLimit.trim() && `limit ${settings.rateLimit.trim()}/s`,
     settings.customArgs.trim() && "custom arguments",
-    settings.audioFormat !== "mp3" && `audio ${settings.audioFormat.toUpperCase()}`,
+    settings.audioFormat !== "mp3" && `audio ${audioFormatName(settings.audioFormat)}`,
   ].filter((x): x is string => Boolean(x));

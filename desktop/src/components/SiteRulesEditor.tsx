@@ -1,5 +1,6 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { Plus, Trash2 } from "lucide-react";
+import { audioFormatName } from "../lib/audioFormats";
 import { AUDIO_FORMATS, blankSiteRule, describeSiteRule, validateSiteRule, type SiteRule } from "../lib/siteRules";
 
 interface Props {
@@ -54,7 +55,7 @@ export default function SiteRulesEditor({ rules, onChange }: Props) {
                   <option value="">from Settings</option>
                   {AUDIO_FORMATS.map((f) => (
                     <option key={f} value={f}>
-                      {f.toUpperCase()}
+                      {audioFormatName(f)}
                     </option>
                   ))}
                 </select>

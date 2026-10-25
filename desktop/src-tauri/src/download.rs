@@ -49,6 +49,8 @@ pub enum AudioFormat {
     Opus,
     Flac,
     Wav,
+    /// Keep the site's own audio stream instead of converting it.
+    Original,
 }
 
 impl AudioFormat {
@@ -59,6 +61,8 @@ impl AudioFormat {
             AudioFormat::Opus => "opus",
             AudioFormat::Flac => "flac",
             AudioFormat::Wav => "wav",
+            // yt-dlp's name for "extract the audio without re-encoding it".
+            AudioFormat::Original => "best",
         }
     }
 }
@@ -239,7 +243,8 @@ fn reserve_output(downloads: &Downloads, req: &DownloadRequest, planned: &std::p
     let base = owned.filter(|p| p.parent() == planned.parent()).unwrap_or(planned);
     let mut candidate = base.to_path_buf();
     // Audio extraction changes the extension after the download.
-    if matches!(req.preset, Preset::Audio) { candidate.set_extension(req.extra.audio_format.as_arg()); }
+    // The original audio keeps whatever extension the extractor finds, so only the name is reserved.
+    if matches!(req.preset, Preset::Audio) && !matches!(req.extra.audio_format, AudioFormat::Original) { candidate.set_extension(req.extra.audio_format.as_arg()); }
     let original = candidate.clone();
     let mut active = downloads.active.lock().map_err(|_| "Download state unavailable.")?;
     for n in 0..1000 {
@@ -418,6 +423,9 @@ fn build_args(
         Preset::Audio => {
             push(&["-f", custom_format.unwrap_or("ba/b"), "-x", "--audio-format", extra.audio_format.as_arg()]);
             let audio = extra.audio.clone().unwrap_or_default();
+            if matches!(extra.audio_format, AudioFormat::Original) && (audio.filter().is_some() || audio.quality.as_deref().is_some_and(|q| !q.trim().is_empty())) {
+                return Err("Original audio is not converted, so audio quality, volume and silence options cannot be used with it. Choose another audio format or clear them.".into());
+            }
             push(&["--audio-quality", audio.quality()?.as_str(), "--embed-metadata"]);
             for arg in audio.args() {
                 push(&[arg.as_str()]);
@@ -1454,6 +1462,22 @@ mod tests {
         assert!(!a.contains(&"--merge-output-format".to_string()));
         r.extra.audio_format = AudioFormat::Wav;
         assert!(!args(&r).unwrap().contains(&"--embed-thumbnail".to_string()));
+    }
+
+    #[test]
+    fn original_audio_is_extracted_without_converting() {
+        let mut r = req(Preset::Audio);
+        r.extra.audio_format = AudioFormat::Original;
+        let a = args(&r).unwrap();
+        assert!(a.windows(2).any(|w| w == ["--audio-format", "best"]));
+        // Conversion options cannot apply to a file that is not converted.
+        r.extra.audio = Some(crate::meta::AudioExtras { normalize: true, ..Default::default() });
+        assert!(args(&r).is_err());
+        r.extra.audio = Some(crate::meta::AudioExtras { quality: Some("192K".into()), ..Default::default() });
+        assert!(args(&r).is_err());
+        r.extra.audio = Some(crate::meta::AudioExtras::default());
+        assert!(args(&r).is_ok());
+        assert_eq!(serde_json::to_string(&AudioFormat::Original).unwrap(), "\"original\"");
     }
 
     #[test]

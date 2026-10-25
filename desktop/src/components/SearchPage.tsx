@@ -1,3 +1,5 @@
+import { downloadPlan } from "../lib/downloadPlan";
+import { audioFormatName } from "../lib/audioFormats";
 import DownloadPlaylistTarget from "./DownloadPlaylistTarget";
 import type { PlaylistsApi } from "../hooks/usePlaylists";
 import { AlertCircle, Search } from "lucide-react";
@@ -42,7 +44,7 @@ export default function SearchPage({ onSaveSource, playlists, playlistTarget, on
   const mediaActions = useMediaActions();
   const mode = settings.mode;
   const advanced = mode === "advanced";
-  const audioLabel = advanced ? settings.audioFormat.toUpperCase() : "MP3";
+  const audioLabel = advanced ? audioFormatName(settings.audioFormat) : "MP3";
   const isListing = search?.kind === "playlist" || search?.kind === "channel";
   const listingTitle =
     search?.kind === "playlist" || search?.kind === "channel" ? `${search.title ?? ""}${search.total ? ` · ${search.total} video${search.total === 1 ? "" : "s"}` : ""}` : search?.kind === "links" ? search.title : undefined;
@@ -131,6 +133,7 @@ export default function SearchPage({ onSaveSource, playlists, playlistTarget, on
             subtitleDefaults={advanced ? { mode: settings.subtitleMode, langs: settings.subtitleLangs, auto: settings.subtitleAuto } : { mode: "off", langs: settings.subtitleLangs, auto: true }}
             audioLabel={audioLabel}
             activeOptions={activeOptions(settings)}
+            plan={downloadPlan(settings, media?.url ?? visibleMedia.webpage_url ?? "", visibleMedia.uploader)}
             downloads={downloadsOfCurrent}
             onDownload={actions.downloadCurrent}
             onOpen={openDownloaded}

@@ -1,4 +1,5 @@
 import type { Settings } from "./storage";
+import { AUDIO_FORMAT_IDS } from "./audioFormats";
 import { validateRule, type ScheduleRule } from "./schedule";
 
 /** Stored JSON is untrusted, including values written by older versions. */
@@ -14,7 +15,7 @@ export function settingsShape(raw: unknown, defaults: Settings): Settings {
   }
   const choices: Record<string, string[]> = {
     mode: ["simple", "advanced"], viewSearch: ["details", "list", "grid", "compact"], viewQueue: ["details", "list", "grid", "compact"], viewHistory: ["details", "list", "grid", "compact"],
-    sponsorblock: ["off", "mark", "remove"], subtitleMode: ["off", "embed", "file", "both"], audioFormat: ["mp3", "m4a", "opus", "flac", "wav"],
+    sponsorblock: ["off", "mark", "remove"], subtitleMode: ["off", "embed", "file", "both"], audioFormat: AUDIO_FORMAT_IDS,
     coverMode: ["default", "square", "none"], lyricsMode: ["off", "file", "embed", "both"], layout: ["flat", "channel", "kind", "year", "music"],
     nameStyle: ["title_id", "title", "channel_title", "date_title", "track_title"], closeMode: ["downloads", "always", "never"], searchSource: ["youtube", "youtube_music", "soundcloud"],
     historySort: ["date", "title", "channel", "format", "size"],

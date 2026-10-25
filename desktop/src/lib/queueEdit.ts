@@ -1,5 +1,6 @@
 import type { DownloadItem } from "../hooks/useDownloads";
 import type { AudioFormat, Preset } from "./api";
+import { forFormat } from "./audioFormats";
 
 export interface QueueEdit { preset?: Preset; audioFormat?: AudioFormat; outDir?: string; rateLimit?: string | null }
 export const editableDownload = (item: DownloadItem) => item.status === "queued" || item.status === "paused";
@@ -10,7 +11,7 @@ export function editWaitingDownloads(items: DownloadItem[], ids: Set<string>, ed
     ...(edit.outDir?.trim() ? { outDir: edit.outDir.trim() } : {}),
     extra: { ...item.extra,
       ...(edit.preset ? { format_id: null } : {}),
-      ...(edit.audioFormat ? { audio_format: edit.audioFormat } : {}),
+      ...(edit.audioFormat ? { audio_format: edit.audioFormat, audio: forFormat(edit.audioFormat, item.extra.audio ?? null) } : {}),
       ...(edit.rateLimit !== undefined ? { rate_limit: edit.rateLimit } : {}),
     },
   });

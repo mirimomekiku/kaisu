@@ -2,6 +2,7 @@ import type { ExtraOptions } from "./api";
 import type { SavedDownload } from "./storage";
 import { checkDownloadUrl, checkSpeedLimit } from "./validate";
 import { checkCustomName } from "./output";
+import { AUDIO_FORMAT_IDS } from "./audioFormats";
 
 const object = (v: unknown): Record<string, unknown> => v && typeof v === "object" && !Array.isArray(v) ? v as Record<string, unknown> : {};
 const pick = <T extends string>(v: unknown, values: readonly T[], fallback: T): T => {
@@ -37,7 +38,7 @@ export function sanitizeDownloadExtra(value: unknown): ExtraOptions {
     collision: pick(r.collision, ["keep_both", "skip", "replace"] as const, "keep_both"),
     sponsorblock: pick(r.sponsorblock, ["off", "mark", "remove"], "off"),
     cookies_from_browser: r.cookies_from_browser == null ? null : pick(r.cookies_from_browser, ["firefox", "chrome", "chromium", "edge", "brave", "opera", "vivaldi"] as const, "firefox"),
-    audio_format: pick(r.audio_format, ["mp3", "m4a", "opus", "flac", "wav"], "mp3"),
+    audio_format: pick(r.audio_format, AUDIO_FORMAT_IDS, "mp3"),
     proxy: null, format_id: format, rate_limit: limit, custom_args: text(r.custom_args, 16384), verbose: r.verbose === true, clean_titles: r.clean_titles === true,
     output: { layout: pick(output.layout, ["flat", "channel", "kind", "year", "music"], "flat"), name: pick(output.name, ["title_id", "title", "channel_title", "date_title", "track_title"], "title_id"), custom, playlist_folder: output.playlist_folder !== false, playlist_numbering: output.playlist_numbering !== false },
     clip: r.clip == null ? null : { start: Number(clip.start), end: Number(clip.end), precise: clip.precise === true },

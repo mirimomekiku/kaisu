@@ -133,7 +133,7 @@ export function useDownloadActions(a: Args) {
         // Older history has no full output profile. Infer its audio format from the actual file.
         const key = keyOf(r);
         return !r.formatId && canonicalUrl(h.url) === canonicalUrl(r.url) && h.preset === r.preset && (h.clip ?? "") === (key.clipKey ?? "")
-          && (r.preset !== "audio" || h.path.toLowerCase().endsWith(`.${key.extra.audio_format}`));
+          && (r.preset !== "audio" || key.extra.audio_format === "original" || h.path.toLowerCase().endsWith(`.${key.extra.audio_format}`));
       });
       const dupes = todo.filter((r) => onDisk(r));
       if (dupes.length > 0) {
