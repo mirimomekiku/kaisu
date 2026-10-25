@@ -137,3 +137,99 @@ There is no CI: releases are built on a developer machine. Versions are 0.0.x un
    The result is `desktop/src-tauri/target/x86_64-pc-windows-msvc/release/desktop.exe`.
 3. Tag and publish: `git tag v0.0.4 && git push origin v0.0.4`, then
    `gh release create v0.0.4 desktop/src-tauri/target/x86_64-pc-windows-msvc/release/desktop.exe#kaisu-windows-x64.exe --prerelease --generate-notes`.
+
+
+## Saved sources and download playlists
+
+`Saved sources` is a manual review workflow, independent of the disabled podcast feature. It keeps a source's public URL,
+seen item URLs, pending review items and video/audio/playlist choices in `savedSources`. Checks use the existing bounded
+playlist command (500 items). A failed check keeps the review list; accepted items leave it only after the queue snapshot
+has been saved. No scheduler or automatic background downloading is enabled.
+
+`extra.library_playlist_ids` holds local destinations for audio downloads. It is excluded from artifact/partial-file identity
+and native command arguments, but retained in queue snapshots and native recovery records. Verified completion records
+retain pending playlist intents until playlist persistence succeeds. Missing/deleted playlists do not fail a completed download.
+
+`storage.ts` serializes explicit disk saves, exposes failures to StorageNotice and blocks writes after a failed read.
+Previous values for playlists, playlist folders, preferences, listening and positions are retained under `backup:*` keys.
+These are previous-value copies in the same store, not a separate backup against whole-file corruption.
+The native tray/close path requests a frontend flush before exit; a rejected flush cancels exit, with an eight-second
+native fallback if the frontend cannot respond. Started jobs still have their independent recovery manifests.
+
+Library polling reconciles every five minutes while visible, and on focus after at least a minute; explicit scans and
+post-download scans remain available. View filters and library scroll positions stay in memory across navigation.
+`round27` covers settings repair, lookup invalidation, save retries, file-opening errors, download playlists and saved sources.
+Terminal jobs now run in isolated process groups, allowing Escape or quit to stop search/inspection and ffmpeg children.
+`test_jobs.py` exercises deadlines, stalled cancellation and helper termination without network requests.
+
+
+## Player practice, profiles, waveforms and session history
+
+A–B boundaries live in PlayerEngine and are not persisted or counted as completed plays. Active loops suppress preloading/
+crossfade, clear on queue-entry changes and yield to finish-track sleep. The normal deadline timer can pause a loop.
+Engine tests cover boundaries, pause/seek/navigation, sleep priority, completion counts and crossfade suppression.
+
+Playback profiles are validated local settings. Built-ins are Music, Spoken audio and Practice; users can create/update/delete
+profiles. Profile application keeps the queue and current position, and applies rate, equalizer, transitions, volume leveling
+and long-track position policy. Explicit listening-session restores retain their position even if automatic long-track resume
+is disabled. Manual edits mark the active profile Custom.
+
+`media_waveform` is only invoked by the opt-in seek display (`waveformSeek`, false by default). It authorizes the path through
+Scope, rectifies each audio channel before mixing/downsampling in ffmpeg, and aggregates streamed float samples into at most
+768 bins. Rectification prevents opposite-phase stereo from cancelling out and retains the amplitude of high-frequency sound.
+Analysis is serialized, cancellable and limited to two minutes and less than 24 hours of audio. Cache keys include canonical path,
+file size and nanosecond modification time; a changed file is refused at completion. Disk cache retains 128 tiny envelopes and
+frontend memory retains 32. Failed/cancelled analysis never interrupts playback. The shared native process lease handles cancellation.
+
+Listening sessions use the existing measured listening callback, retain at most 30 snapshots with 500 tracks each, exclude temporary
+artwork, preserve duplicate queue occurrences, and save through the normal storage failure/retry and exit-flush paths. New queues
+and 30-minute breaks begin sessions; explicit restore pauses and replaces the current queue. App-level relocation updates historical
+session paths. The listening dashboard and a player dialog share one store.
+
+`round28` exercises player tools, profile creation/update/persistence, waveform default-off/enabling/cancellation/fallback/fullscreen,
+session queue boundaries, persistence, rename/restore/playlist conversion/clear, and minimum-window themes. Run the real waveform
+reader against generated, opposite-phase stereo PCM using:
+
+```
+cd desktop/src-tauri
+cargo test --locked waveform::tests -- --include-ignored
+```
+
+The real test uses `../../bin/ffmpeg` by default (`KAISU_FFMPEG` can override it). It requires no network or native window.
+
+
+Smart playlist rules remain backward-compatible with older saved playlists. Optional `sort`, `descending` and `limit` settings
+are sanitized along with rules; ordering is applied before the result cap. Folder equality includes descendant directories but
+respects path boundaries, and accepts Windows separators. Presets use the same rule evaluator as live previews and resolved
+playlists; persisted smart playlists continue to store rules rather than member paths.
+
+`library_forget_missing` updates only the library cache under `CACHE_EDIT`. Each selected entry must still be marked missing,
+fall within an available registered root, and return `NotFound` from `symlink_metadata`. Existing files, symlinks, unavailable roots
+and permission errors are retained with per-entry reasons. It never deletes media or edits playlists/history. Cleanup reuses the
+existing tag editor, relocation coordination and exact duplicate review; reports are derived locally from cached library metadata.
+The report renders 100 rows at once and bounds selections to 500, including selections across pages.
+
+`round29` covers smart presets, live previews, limits, ordering, persistence and folder membership, plus cleanup review/cancel,
+partial failures, preserved references, relocation, tag fixes, duplicate access, pagination and minimum-window themes. Run it with
+`npm run test:ui -- round13 round14 round29` from `desktop`; pure rule/report tests run with `npm test`, and the native missing-entry
+recheck test runs with `cargo test --locked missing_cleanup` from `desktop/src-tauri`.
+
+
+Customization settings live in `lib/customization.ts`: `appearance`, `sidebar`, `seekPreferences`, `customTheme`, and up to 20
+`customizationPresets`. Legacy settings get defaults; every nested setting and snapshot is sanitized on load. Sidebar sanitization
+restores missing section IDs, prevents hiding Settings, caps pins, and ignores unknown IDs. Pins resolve against live playlists and
+sources, so deleted targets disappear without mutating preset snapshots. Playlist navigation uses a consumed request so revisiting
+Library does not reopen an old pin. Source pins use the normal Search lookup.
+
+`customizationDom.ts` applies bounded interface properties and validated custom-color CSS variables. Custom palettes disable the
+legacy full-page dark/graphite and accent filters; turning them off removes only their variables. Theme JSON imports are bounded to
+32 KB, versioned, hex-only, and checked for text contrast. Editors preview drafts separately from active settings. Presets capture
+only customization fields, excluding download paths, proxy secrets, playback profiles and queues. Reset controls are scoped by area.
+
+`useSeekControls` supplies shared range-key and optional non-passive wheel handlers for the bar, full-screen and mini-player. J/L
+shortcuts ignore text fields, composition, modifiers and unrelated modals. Shift uses the fine interval; seeking clamps to duration,
+unknown duration is ignored, and wheel handling is throttled for trackpads. Default wheel behavior leaves page scrolling intact.
+
+`round30` covers settings visibility, live appearance, sidebar reorder/hide/pins/routing/persistence, theme contrast/import/export,
+shared keyboard/wheel seeking, presets and resets, and the largest text size at minimum window dimensions. Existing `round18`,
+`round20`, `round27`–`round29` cover adjacent settings, player, persistence and library behavior.

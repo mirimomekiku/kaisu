@@ -30,6 +30,11 @@ works behind a proxy, and can check again if you installed the tools yourself. A
   single download its own speed limit.
 - **Search and bulk editing:** search Downloads by title, URL or folder. Select waiting downloads to change quality,
   audio format, destination or speed together. Running downloads are skipped; changing quality or destination may start a fresh file.
+- **Download into a playlist:** Search lets you choose an existing library playlist or create one for audio downloads.
+  Waiting items appear on that playlist, and verified files are added automatically. The choice survives queue restoration and recovery.
+- **Saved sources:** save a channel or playlist from Search, or paste its link in Saved sources. Check manually for new items,
+  review them, and download selected items using saved video/audio and playlist choices. Each check reads up to 500 items;
+  older items outside that window may not be detected. Checks do not start background downloads.
 - Queued and restored downloads use your current proxy settings. Proxy addresses and passwords are not saved with the queue.
 - **File already exists:** choose Keep both (a unique name), Skip existing (the old file is verified first) or Replace in Settings > Downloads.
   Downloads of the same link with the same output choices are not queued twice.
@@ -50,34 +55,56 @@ works behind a proxy, and can check again if you installed the tools yourself. A
   of titles.
 - Files are sorted into folders and named the way you like (by channel, by year, video and audio apart, and so on).
 - Kaisu warns you before downloading something you already have, or when your disk is nearly full.
-- **History** shows everything you have downloaded with its size and channel. Sort and filter it, open files,
+- **History** retains completion records without an automatic 500-entry cutoff. Long lists initially show 500 rows;
+  search and export use every matching record, and Show 500 more expands the list. History shows everything you have downloaded with its size and channel. Sort and filter it, open files,
   download again, clean up entries for files that were deleted, and export the list as CSV or JSON.
 
 **Finding your way**
+- **Customization settings:** Settings > Customization includes text size (11–16 px), compact or comfortable spacing, artwork
+  shapes and reduced motion. Reorder or hide sidebar sections, change its width, toggle artwork/counts, and pin up to 20 playlists
+  and 20 saved sources. Playlist pins open that playlist; source pins open the source in Search. Settings always stays reachable.
+- **Theme editor:** preview a custom palette in Settings > Customization, then apply it. Color choices use real colors without the
+  base theme’s whole-page filters, with contrast checks for readable text. Import/export portable Kaisu theme JSON files; imports
+  enter the preview before applying. Use base theme or Reset custom theme to return to built-in colors.
+- **Customization presets:** Classic, Compact and Study presets apply appearance, sidebar, seeking and custom palette together.
+  Save up to 20 named custom presets, update them from the current settings, or delete them while keeping the current appearance.
+- **Seek preferences:** Settings > Playback changes forward/backward intervals (1–120 seconds), Shift fine seeking (1–10 seconds),
+  and optional mouse-wheel seeking over the seek bar (off by default, reversible direction). J/L seek while browsing or using the full-screen player, except in text fields and other dialogs;
+  arrow keys use the same intervals on a focused seek bar. Full-screen and mini-player share these settings.
 - Right-click a download or history row for its actions; Shift+F10 opens the same menu from the keyboard. Selected history rows also offer batch actions.
 - Downloads can be filtered by status; History actions groups export and cleanup. File actions groups queue, conversion, copy and delete controls on downloaded files, with Open and Play kept visible.
 - Downloads show preparation, downloading, conversion, extras and verification separately. Unknown sizes use indeterminate progress. Pause and cancel cover the entire job, including final helper processes; missing, empty or unreadable output is reported as a failure.
 - Destination checks group downloads by drive, reserve space for active jobs and allow three times the estimated size for downloading and conversion. Windows checks the complete generated path; Linux checks filename byte limits and the original recovery drive identity.
 - Interrupted downloads keep recovery records independently of the saved queue, with their original URL, destination, output choices and resolved format. Recovery reuses compatible partial files and may restart when they are unavailable. Discarding recovery records keeps media and partial files. Legacy partial-file scanning includes registered alternate destinations.
 - Copied download commands use PowerShell syntax on Windows and shell syntax on Linux, with the installed tool paths and redacted proxy passwords.
+- Storage failures show a persistent notice with Retry. Normal exit flushes the queue and pending saves; failed reads prevent
+  replacement of that saved collection. Invalid settings use safe defaults, and a recovery screen can reset settings after a rendering error.
 - Settings opens with general preferences. Choose a section or search for a setting; changes save automatically.
 
 **Music**
 - Browse downloaded music by song, album or artist, edit tags, and make playlists you can export as `.m3u8`.
 - **Playlist organization:** create and rename folders, move playlists between them, and choose a local JPEG/PNG cover.
   Drag playlists or songs to reorder them; arrow buttons provide the same controls. Removing a folder keeps its playlists.
-- **A quieter library:** use the view dropdown to switch between Songs, Albums, Artists, Playlists and Listening. Library filters group format, file availability, favorites and ratings; Library tools holds folders, rescanning and duplicate cleanup.
+- **A quieter library:** use the view dropdown to switch between Songs, Albums, Artists, Playlists and Listening. Library filters group format, file availability, favorites and ratings; Library tools holds folders, rescanning and library cleanup.
 - **Select several songs:** tick their boxes, Ctrl/Command-click rows to toggle them, or Shift-click a range. Apply tags,
   favorites and ratings together, or play, queue and add the selection to a playlist. Selected actions groups tag, favorite, queue and playlist operations; Rate selected applies a rating. Ctrl/Command+A in the song list
   selects all matching songs, including those off screen; Escape clears the selection. Filtering drops hidden selections.
 - **Artwork editor:** Edit tags > Choose image previews a JPEG/PNG before embedding it as the front cover. Apply one cover to an album or remove embedded artwork. Originals are replaced only after the working copy passes verification. Folder artwork stays in place.
 - **Import your collection:** Library > Library tools > Music folders adds existing music without moving it. Optional watching checks for
-  changes every 15 seconds and when the window regains focus. Missing files stay listed; use the Missing files filter
+  changes every five minutes while visible, and when the window regains focus after at least a minute. Missing files stay listed; use the Missing files filter
   and Locate file to reconnect a moved song. Import its new containing folder first if needed.
 - **Favorites and ratings:** heart songs from the library or player, rate songs from 0 (unrated) to 5, and filter your collection. Preferences stay local and follow files you relocate.
 - **Listening dashboard:** Library > the Listening view shows recently played, most played songs, top artists, completed plays and measured playback time. Earlier play counts are retained; time is measured from this version onward.
-- **Smart playlists:** match all or any rules for title, artist, album, genre, format, year, play count, recently added,
-  played/unplayed, favorite status or rating. Membership updates automatically; a play counts when a track finishes. Exports save the current matches.
+- **Smart playlists:** Library > Playlists > New smart playlist offers Recently added, Most played, Never played, Favorites and
+  Top rated presets, or custom all/any rules for title, artist, album, genre, format, year, play count, recently added,
+  played/unplayed, favorite status, rating, duration in seconds and file folders (including subfolders). Preview matches before
+  saving, choose an order and direction, and limit results to 1–5,000 songs. Membership updates automatically; a play counts when
+  a track finishes. Playback and export follow the chosen order; exports save a snapshot of the current matches.
+- **Library cleanup:** Library > Library tools > Library cleanup reviews missing files and incomplete metadata with search,
+  issue filters, 100-row pages and selections of up to 500 songs. Locate moved files, edit individual or shared tags, and open exact
+  duplicate review. Missing-entry removal previews the exact paths and verifies each file is still absent before updating the index;
+  media files, playlists and listening history are kept. Unavailable music folders must be reconnected first. Metadata checks use
+  cached tags and embedded artwork; folder covers are not counted, and filename-derived titles may hide missing title tags.
 - **Exact duplicates:** compare file contents, choose a copy to keep, and review selected copies before moving them to the Recycle Bin or Trash.
   Permanent deletion is available explicitly. Kaisu checks that copies still match before removal; companion files are kept.
 - **Full-screen player:** use the expand button in the player bar for large artwork, synced or plain lyrics, an Up next queue, and playback controls. Click a timed lyric to seek. Escape returns to the app without restarting the song. Online lyric lookup asks for consent.
@@ -97,6 +124,19 @@ works behind a proxy, and can check again if you installed the tools yourself. A
   Adjust ten bands from 31 Hz to 16 kHz and a preamp, choose a preset, or reset to flat. Bypass keeps your adjustments.
   Automatic headroom reduces EQ boosts to help avoid clipping. Settings stay local and apply to both crossfade decks;
   your music files are unchanged.
+- **A–B looping:** Playback options (or Playback tools in the full-screen player) sets A and B for a repeating passage.
+  Loops are local to the current track, pause crossfade, and clear when you change tracks. Seeking outside the passage disables
+  looping. Finish-track sleep takes priority; ordinary sleep deadlines still stop playback. Timing depends on the system player.
+- **Playback profiles:** Settings > Playback offers Music, Spoken audio and Practice, plus up to 20 saved profiles.
+  A profile applies speed, EQ, transitions, volume leveling and long-track resume. Save your current choices as a new profile,
+  or choose a saved profile to update. Manual changes switch the active label to Custom settings.
+- **Optional waveform seek bar:** off by default. Enable Settings > Playback > Waveform seek bar to show a local waveform
+  in the player bar and full-screen player. Analysis reads only the playing file, keeps a small cache and stops when no view
+  needs it. Audio is not uploaded. If analysis is unavailable, too slow or exceeds 24 hours, the ordinary seek bar still works.
+- **Listening sessions:** Library > Listening and the player's Playback options keep the latest 30 sessions. Each saves up to
+  500 queued tracks around the current song, its position, speed, volume and shuffle/repeat settings. A new queue or a
+  30-minute listening break starts a session. Rename sessions, restore a queue paused, or save it as a playlist. Clearing
+  session history keeps music files, playlists and listening statistics. Located or automatically moved files update saved sessions too.
 - **Mini-player:** use Playback options > Open mini-player for a compact always-on-top window with playback, seek and volume controls.
   Return to the full window without restarting playback.
 - Read saved lyrics or choose to look them up online. Measure loudness to make loud songs quieter during playback.
