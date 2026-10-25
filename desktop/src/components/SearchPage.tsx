@@ -1,3 +1,5 @@
+import DownloadPlaylistTarget from "./DownloadPlaylistTarget";
+import type { PlaylistsApi } from "../hooks/usePlaylists";
 import { AlertCircle, Search } from "lucide-react";
 import type { useDownloadActions } from "../hooks/useDownloadActions";
 import { useMediaActions } from "../hooks/useMediaDialogs";
@@ -14,6 +16,10 @@ import SearchResults from "./SearchResults";
 import type { Page } from "./Sidebar";
 
 interface Props {
+  onSaveSource?: () => Promise<void>;
+  playlists: PlaylistsApi;
+  playlistTarget: string;
+  onPlaylistTarget: (id: string) => void;
   flow: ReturnType<typeof useSearchFlow>;
   actions: ReturnType<typeof useDownloadActions>;
   settings: Settings;
@@ -31,7 +37,7 @@ interface Props {
 }
 
 /** The Search page: the open video's card, search results or a playlist listing, and any message about the lookup. */
-export default function SearchPage({ flow, actions, settings, visibleMedia, history, existing, setPage, openDownloaded, revealDownloaded, copyText, showFlash, ensureLyricsConsent, savePreset }: Props) {
+export default function SearchPage({ onSaveSource, playlists, playlistTarget, onPlaylistTarget, flow, actions, settings, visibleMedia, history, existing, setPage, openDownloaded, revealDownloaded, copyText, showFlash, ensureLyricsConsent, savePreset }: Props) {
   const { url, media, search, errorMessage } = flow;
   const mediaActions = useMediaActions();
   const mode = settings.mode;
@@ -51,6 +57,7 @@ export default function SearchPage({ flow, actions, settings, visibleMedia, hist
   return (
     <div className="page flush">
       <PageHeading title="Search" description="Find a video or paste a link, then choose video or audio." />
+      {(visibleMedia || search) && <div className="px-3 py-2"><DownloadPlaylistTarget api={playlists} value={playlistTarget} onChange={onPlaylistTarget} /></div>}
       {(errorMessage && friendlyInputError) || (previouslyDownloaded && !visibleMedia) ? (
         <div className="px-4 pt-3 flex flex-col gap-2">
           {previouslyDownloaded && !visibleMedia && (
@@ -83,6 +90,7 @@ export default function SearchPage({ flow, actions, settings, visibleMedia, hist
         </div>
       ) : null}
 
+      {onSaveSource && <div className="px-3 py-2"><button className="btn small" onClick={() => void onSaveSource()}>Save this channel or playlist</button></div>}
       {visibleMedia && partOfPlaylist && !isListing && (
         <div className="px-3 pt-3">
           <div className="alert note items-center">

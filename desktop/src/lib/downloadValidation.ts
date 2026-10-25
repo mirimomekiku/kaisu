@@ -32,6 +32,7 @@ export function sanitizeDownloadExtra(value: unknown): ExtraOptions {
   const subs = object(r.subs), meta = object(r.meta), cover = object(r.cover), audio = object(r.audio);
   const langs = Array.isArray(subs.langs) ? subs.langs.filter((v): v is string => typeof v === "string" && v.length <= 80).slice(0, 20) : [];
   return {
+    ...(Array.isArray(r.library_playlist_ids) ? { library_playlist_ids: [...new Set(r.library_playlist_ids.filter((id): id is string => typeof id === "string" && /^[a-z0-9_-]{1,128}$/i.test(id)))].slice(0, 200) } : {}),
     credentials_required: r.credentials_required === true,
     collision: pick(r.collision, ["keep_both", "skip", "replace"] as const, "keep_both"),
     sponsorblock: pick(r.sponsorblock, ["off", "mark", "remove"], "off"),

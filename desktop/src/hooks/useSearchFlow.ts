@@ -52,6 +52,10 @@ export function useSearchFlow({ settings, settingsLoaded, settingsRef, engineRea
   const inspectToken = useRef(0);
   const searchToken = useRef(0);
   const lastAutoInspected = useRef("");
+  const invalidateLookups = () => {
+    inspectToken.current++; searchToken.current++;
+    setLoadingInfo(false); setSearching(false); setLoadingMore(false);
+  };
   const mode = settings.mode;
   const advanced = mode === "advanced";
 
@@ -61,6 +65,8 @@ export function useSearchFlow({ settings, settingsLoaded, settingsRef, engineRea
   }, [mode]);
 
   const loadListing = useCallback(async (link: string, limit: number) => {
+    inspectToken.current++;
+    setLoadingInfo(false);
     const token = ++searchToken.current;
     const more = limit > LISTING_PAGE;
     if (!more) {
@@ -94,6 +100,8 @@ export function useSearchFlow({ settings, settingsLoaded, settingsRef, engineRea
       const problem = checkDownloadUrl(target);
       if (problem) { setErrorMessage(problem); return; }
 
+      searchToken.current++;
+      setSearching(false); setLoadingMore(false);
       const token = ++inspectToken.current;
       lastAutoInspected.current = target;
       setLoadingInfo(true);
@@ -120,6 +128,8 @@ export function useSearchFlow({ settings, settingsLoaded, settingsRef, engineRea
   );
 
   const runSearch = useCallback(async (query: string, limit: number) => {
+    inspectToken.current++;
+    setLoadingInfo(false);
     const token = ++searchToken.current;
     const more = limit > SEARCH_PAGE_SIZE;
     if (!more) {
@@ -147,7 +157,7 @@ export function useSearchFlow({ settings, settingsLoaded, settingsRef, engineRea
   const showLinks = useCallback(
     (urls: string[]) => {
       const entries: SearchResult[] = urls.map((u) => ({ id: u, title: u, url: u, channel: null, duration_secs: null, view_count: null, thumbnail: "", live: false }));
-      searchToken.current++;
+      invalidateLookups();
       setMedia(null);
       setErrorMessage(null);
       setSearch({ kind: "links", query: "", items: entries, limit: entries.length, title: `${entries.length} links` });

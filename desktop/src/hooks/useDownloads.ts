@@ -1,3 +1,4 @@
+import { downloadSnapshot } from "../lib/downloadSnapshot";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   cancelDownload,
@@ -293,6 +294,10 @@ export function useDownloads(concurrency: number, onCompleted: (item: DownloadIt
     }
   }, [policy, resourceKey]);
 
+  const attachPlaylist = useCallback((itemId: string, playlistId: string) => {
+    setItems((prev) => prev.map((item) => item.id === itemId && item.preset === "audio" && !isFinished(item.status) ? { ...item, extra: { ...item.extra, library_playlist_ids: [...new Set([...(item.extra.library_playlist_ids ?? []), playlistId])] } } : item));
+  }, []);
+
   const enqueue = useCallback((inputs: EnqueueInput | EnqueueInput[]) => {
     const list = uniqueDownloads(Array.isArray(inputs) ? inputs : [inputs], itemsRef.current.filter((i) => !isFinished(i.status)));
     const created: DownloadItem[] = list.map((input) => ({
@@ -457,5 +462,6 @@ export function useDownloads(concurrency: number, onCompleted: (item: DownloadIt
 
   const unfinished = items.filter((i) => i.status === "queued" || isActive(i.status)).length;
 
-  return { items, enqueue, runNext, runLater, reorder, setRateLimit, editWaiting, cancel, pause, resume, pauseAll, resumeAll, retry, remove, clearFinished, restore, hasActive: unfinished > 0 };
+  const snapshotQueue = useCallback(() => downloadSnapshot(itemsRef.current), []);
+  return { items, snapshotQueue, enqueue, attachPlaylist, runNext, runLater, reorder, setRateLimit, editWaiting, cancel, pause, resume, pauseAll, resumeAll, retry, remove, clearFinished, restore, hasActive: unfinished > 0 };
 }

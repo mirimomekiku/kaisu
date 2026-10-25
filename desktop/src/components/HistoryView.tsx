@@ -1,3 +1,4 @@
+import { useSessionState } from "../hooks/useSessionState";
 import ContextMenu, { type MenuEntry } from "./ContextMenu";
 import { useRowMenu } from "../hooks/useRowMenu";
 import { fileMenu } from "../lib/fileMenu";
@@ -15,7 +16,8 @@ import Picture from "./Picture";
 import PageHeading from "./PageHeading";
 import { ActionMenu } from "./Dropdown";
 
-export const HISTORY_VIEWS: ViewMode[] = ["details", "list", "grid", "compact"];
+import { HISTORY_VIEWS } from "../lib/viewOptions";
+export { HISTORY_VIEWS } from "../lib/viewOptions";
 
 const SORT_LABEL: Record<HistorySort, string> = { date: "Date", title: "Name", channel: "Channel", format: "Format", size: "Size" };
 
@@ -51,9 +53,11 @@ type FileFilter = "all" | "present" | "missing";
 
 export default function HistoryView(p: Props) {
   const view = HISTORY_VIEWS.includes(p.view) ? p.view : "details";
-  const [filter, setFilter] = useState("");
-  const [kind, setKind] = useState<KindFilter>("all");
-  const [files, setFiles] = useState<FileFilter>("all");
+  const [filter, setFilter] = useSessionState("history.filter", "");
+  const [kind, setKind] = useSessionState<KindFilter>("history.kind", "all");
+  const [files, setFiles] = useSessionState<FileFilter>("history.files", "all");
+  const [visibleCount, setVisibleCount] = useState(500);
+  useEffect(() => setVisibleCount(500), [filter, kind, files, p.sort, p.sortDesc]);
   const [again, setAgain] = useState<string | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set());
 
@@ -78,6 +82,7 @@ export default function HistoryView(p: Props) {
     return sortHistory(matching, p.sort, p.sortDesc);
   }, [rows, filter, kind, files, p.sort, p.sortDesc]);
 
+  const rendered = shown.slice(0, visibleCount);
   const missing = rows.filter((r) => r.exists === false && r.item.path).length;
   const shownCount = shown.length;
   const shownBytes = shown.reduce((sum, r) => sum + (r.size ?? 0), 0);
@@ -214,7 +219,7 @@ export default function HistoryView(p: Props) {
         </tr>
       </thead>
       <tbody>
-        {shown.map(({ item: h }) => (
+        {rendered.map(({ item: h }) => (
           <Fragment key={h.id}>
             <tr aria-selected={picked.has(h.id)} {...context.bind(h.id)} data-history-id={h.id}>
               <td className="fit">{check(h)}</td>
@@ -438,10 +443,11 @@ export default function HistoryView(p: Props) {
             Select all shown
           </label>
           <ul className={`m-0 list-none p-3 ${view === "grid" ? "grid grid-cols-2 lg:grid-cols-3 gap-3" : view === "compact" ? "flex flex-col gap-1" : "flex flex-col gap-1.5"}`}>
-            {shown.map(renderItem)}
+            {rendered.map(renderItem)}
           </ul>
         </>
       )}
+      {shown.length > visibleCount && <div className="p-3 flex items-center gap-2"><span className="dim">Showing {visibleCount} of {shown.length} matching downloads. Search and export include every match.</span><button className="btn small" onClick={() => setVisibleCount((n) => n + 500)}>Show 500 more</button></div>}
     </div>
   );
 }

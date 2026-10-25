@@ -101,6 +101,8 @@ impl Browser {
 #[derive(Deserialize, Serialize, Default)]
 #[serde(default)]
 pub struct ExtraOptions {
+    /// Local library destinations, retained in recovery but never passed to yt-dlp.
+    pub library_playlist_ids: Vec<String>,
     pub credentials_required: bool,
     pub collision: CollisionPolicy,
     pub fragment_limit: Option<u8>,
@@ -363,6 +365,9 @@ fn build_args(
     ffmpeg_dir: &std::path::Path,
     js_runtime: Option<&str>,
 ) -> Result<Vec<String>, String> {
+    if req.extra.library_playlist_ids.len() > 200 || req.extra.library_playlist_ids.iter().any(|id| id.is_empty() || id.len() > 128 || !id.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_".contains(&b))) {
+        return Err("Invalid library playlist destination.".into());
+    }
     if req.recovery_id.as_deref().is_some_and(|id| id.is_empty() || id.len() > 128 || !id.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_".contains(&b))) {
         return Err("Invalid recovery ID.".into());
     }
@@ -1257,6 +1262,16 @@ mod tests {
 
     fn args(r: &DownloadRequest) -> Result<Vec<String>, String> {
         build_args(r, "https://example.com/v", Path::new("/bin"), None)
+    }
+
+    #[test]
+    fn library_playlists_are_recovery_metadata_not_downloader_arguments() {
+        let mut r = req(Preset::Audio);
+        let original = args(&r).unwrap();
+        r.extra.library_playlist_ids = vec!["pl-target".into()];
+        assert_eq!(args(&r).unwrap(), original);
+        r.extra.library_playlist_ids = vec!["../invalid".into()];
+        assert!(args(&r).is_err());
     }
 
     #[test]

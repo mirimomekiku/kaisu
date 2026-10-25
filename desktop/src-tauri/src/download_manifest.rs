@@ -39,7 +39,7 @@ pub fn owned_path(app: &AppHandle, req: &DownloadRequest) -> Option<PathBuf> {
     if record.request.url != req.url || record.request.out_dir != req.out_dir { return None; }
     let choices = |r: &DownloadRequest| {
         let mut value = serde_json::to_value(&r.extra).unwrap_or_default();
-        if let Some(object) = value.as_object_mut() { for key in ["proxy", "rate_limit", "fragment_limit", "managed_retries", "verbose", "credentials_required", "collision"] { object.remove(key); } }
+        if let Some(object) = value.as_object_mut() { for key in ["library_playlist_ids", "proxy", "rate_limit", "fragment_limit", "managed_retries", "verbose", "credentials_required", "collision"] { object.remove(key); } }
         value
     };
     if choices(&record.request) != choices(req) { return None; }
@@ -127,7 +127,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!("kaisu-manifest-{}", uuid::Uuid::new_v4()));
         let req: DownloadRequest = serde_json::from_value(serde_json::json!({
             "id": "attempt-1", "recovery_id": "saved-1", "url": "https://vimeo.com/123", "preset": "audio",
-            "out_dir": std::env::temp_dir(), "extra": { "audio_format": "flac", "proxy": "http://user:secret@proxy:8080",
+            "out_dir": std::env::temp_dir(), "extra": { "library_playlist_ids": ["pl-target"], "audio_format": "flac", "proxy": "http://user:secret@proxy:8080",
                 "output": { "layout": "music" }, "clip": { "start": 5, "end": 12 }, "custom_args": "--embed-chapters" }
         })).unwrap();
         save_at(root.clone(), &req, Some("/music/track.flac"), None).unwrap();
@@ -140,6 +140,7 @@ mod tests {
         assert_eq!(record.resolved_format.as_deref(), Some("251"));
         let json = serde_json::to_value(record.request).unwrap();
         assert_eq!(json["extra"]["audio_format"], "flac");
+        assert_eq!(json["extra"]["library_playlist_ids"], serde_json::json!(["pl-target"]));
         assert_eq!(json["extra"]["clip"]["start"], 5.0);
         assert_eq!(json["extra"]["output"]["layout"], "music");
         assert_eq!(json["extra"]["custom_args"], "--embed-chapters");

@@ -19,7 +19,7 @@ export function useDownloadedFiles(history: HistoryItem[], page: string, showFla
       return;
     }
     let cancelled = false;
-    fileInfo(paths)
+    Promise.all(Array.from({ length: Math.ceil(paths.length / 5000) }, (_, i) => fileInfo(paths.slice(i * 5000, (i + 1) * 5000)))).then((batches) => batches.flat())
       .then((res) => {
         if (cancelled) return;
         setExisting(Object.fromEntries(paths.map((p, i) => [p, res[i].exists])));
@@ -35,7 +35,9 @@ export function useDownloadedFiles(history: HistoryItem[], page: string, showFla
     (run: (path: string) => Promise<void>) => (path: string) => {
       run(path).catch((e) => {
         showFlash(errorText(e), true);
-        setExisting((prev) => ({ ...prev, [path]: false }));
+        void fileInfo([path]).then(([info]) => {
+          if (info) setExisting((prev) => ({ ...prev, [path]: info.exists }));
+        }).catch(() => {});
       });
     },
     [showFlash],

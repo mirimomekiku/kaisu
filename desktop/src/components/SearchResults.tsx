@@ -6,7 +6,8 @@ import type { ViewMode } from "../lib/storage";
 import ContextMenu, { type MenuEntry } from "./ContextMenu";
 import Picture from "./Picture";
 
-export const SEARCH_VIEWS: ViewMode[] = ["details", "list", "grid", "compact"];
+import { SEARCH_VIEWS } from "../lib/viewOptions";
+export { SEARCH_VIEWS } from "../lib/viewOptions";
 export type BatchQuality = "best" | "p1080" | "p720";
 
 interface Props {

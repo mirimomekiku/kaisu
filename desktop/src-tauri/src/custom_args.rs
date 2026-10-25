@@ -241,6 +241,13 @@ pub fn parse_custom_args(input: &str) -> Result<Vec<String>, String> {
         };
         let Some((_, values)) = find(name) else { return Err(refusal(token, name)) };
         i += 1;
+        let value = inline.or_else(|| tokens.get(i).map(String::as_str));
+        if matches!(find(name), Some((spellings, _)) if spellings.contains(&"--compat-options")) {
+            // This option can switch off yt-dlp's check on the file extension a website asks for.
+            if value.is_some_and(|v| v.to_ascii_lowercase().contains("unsafe-ext")) {
+                return Err("`--compat-options` can't turn off the safe file-extension check.".into());
+            }
+        }
         match (*values, inline) {
             (1, Some(_)) | (0, None) => {}
             (0, Some(_)) => return Err(format!("`{name}` doesn't take a value.")),
@@ -361,6 +368,13 @@ mod tests {
         ] {
             assert!(parse_custom_args(bad).is_err(), "{bad} should be refused");
         }
+    }
+
+    #[test]
+    fn compat_options_cannot_disable_the_extension_check() {
+        assert!(parse_custom_args("--compat-options no-keep-subs").is_ok());
+        assert!(parse_custom_args("--compat-options allow-unsafe-ext").is_err());
+        assert!(parse_custom_args("--compat-options=no-keep-subs,allow-unsafe-ext").is_err());
     }
 
     #[test]

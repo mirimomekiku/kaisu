@@ -7,7 +7,7 @@ const stable = (v: unknown): unknown => Array.isArray(v) ? v.map(stable) : v && 
 /** Network settings do not change the artifact; output, processing and tagging choices do. */
 export function outputProfile(extra?: ExtraOptions, preset?: Preset): string {
   if (!extra) return "";
-  const { proxy: _p, rate_limit: _r, verbose: _v, cookies_from_browser: _c, collision: _x, fragment_limit: _f, managed_retries: _m, credentials_required: _s, ...rest } = extra;
+  const { library_playlist_ids: _playlists, proxy: _p, rate_limit: _r, verbose: _v, cookies_from_browser: _c, collision: _x, fragment_limit: _f, managed_retries: _m, credentials_required: _s, ...rest } = extra;
   const tags = Object.fromEntries(Object.entries(extra.meta ?? {}).filter(([, value]) => value != null && value !== ""));
   const artifact: Record<string, unknown> = { ...rest,
     audio: { quality: extra.audio?.quality || "0", normalize: extra.audio?.normalize === true, trim_silence: extra.audio?.trim_silence === true },

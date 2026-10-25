@@ -55,6 +55,7 @@ export interface DownloadReq {
   outDir?: string;
   audioFormat?: AudioFormat;
   estimatedBytes?: number;
+  libraryPlaylistId?: string;
   /** The site of the rule that changed this download, for saying so. */
   ruledBy?: string;
   /** Feed episodes keep their original audio and stay inside the podcast folder. */
@@ -70,6 +71,9 @@ interface Args {
   outDir: string;
   itemsRef: React.MutableRefObject<DownloadItem[]>;
   enqueue: (inputs: EnqueueInput[]) => number;
+  persistQueue: () => Promise<void>;
+  playlistTarget?: string;
+  attachPlaylist: (itemId: string, playlistId: string) => void;
   confirm: ReturnType<typeof useConfirm>;
   history: HistoryItem[];
   historyRef: React.MutableRefObject<HistoryItem[]>;
@@ -94,12 +98,13 @@ export function useDownloadActions(a: Args) {
    * The one way downloads get queued. Skips what is already queued, asks before repeating something already on
    * disk, and warns when the drive is nearly full. Returns how many were added (0 if the user backed out).
    */
-  const submitDownloads = async (asked: DownloadReq[], estimateBytes: number | null = null): Promise<number> => {
+  const submitDownloads = async (asked: DownloadReq[], estimateBytes: number | null = null, onAccepted?: (urls: string[]) => void): Promise<number> => {
     const budgetError = settingsRef.current.mode === "advanced" ? checkSpeedLimit(settingsRef.current.globalRateLimit) : null;
     if (budgetError) { showFlash(`Total download speed: ${budgetError}`, true); return 0; }
     // Site rules (Advanced mode) change what is downloaded and where it goes, before anything is compared or queued.
     const rules = settingsRef.current.mode === "advanced" ? settingsRef.current.siteRules : [];
-    const reqs = asked.map((r): DownloadReq => {
+    const reqs = asked.map((original): DownloadReq => {
+      const r = { ...original, libraryPlaylistId: original.libraryPlaylistId ?? a.playlistTarget };
       const rule = rules.length && r.applySiteRules !== false ? matchSiteRule(rules, r.url, r.channel) : null;
       if (!rule) return r;
       return { ...r, preset: rule.preset || r.preset, audioFormat: rule.audioFormat || undefined, outDir: rule.folder.trim() || undefined, ruledBy: rule.host.trim() };
@@ -111,6 +116,10 @@ export function useDownloadActions(a: Args) {
     const keyOf = (r: DownloadReq) => ({ url: r.url, preset: r.preset, outDir: r.outDir ?? outDir, clipKey: clipKeyOf(r.clip ?? null), extra: buildExtra(settingsRef.current, r.formatId, { playlist: r.playlist, clip: r.clip, subs: r.subs, meta: r.meta, cover: r.cover, lyrics: r.lyrics, audio: r.audio, audioFormat: r.audioFormat }) });
 
     const live = itemsRef.current.filter((i) => !isFinishedStatus(i.status));
+    for (const request of reqs) {
+      const queued = live.find((item) => sameDownload(item, keyOf(request)));
+      if (queued && request.preset === "audio" && request.libraryPlaylistId) a.attachPlaylist(queued.id, request.libraryPlaylistId);
+    }
     let todo = uniqueDownloads(reqs.map((r) => ({ ...keyOf(r), request: r })), live).map((r) => r.request);
     if (todo.length === 0) {
       announce({ title: "Already in Downloads", subtitle: reqs.length === 1 ? reqs[0].title : `${reqs.length} items` });
@@ -177,7 +186,7 @@ export function useDownloadActions(a: Args) {
     const inputs = todo.map((r) => ({
       url: r.url, title: r.title, thumbnail: r.thumbnail, preset: r.preset,
       outDir: r.outDir && !badFolders.has(r.outDir) ? r.outDir : outDir,
-      extra: buildExtra(settings, r.formatId, { playlist: r.playlist, clip: r.clip, subs: r.subs, meta: r.meta, cover: r.cover, lyrics: r.lyrics, audio: r.audio, audioFormat: r.audioFormat }),
+      extra: { ...buildExtra(settings, r.formatId, { playlist: r.playlist, clip: r.clip, subs: r.subs, meta: r.meta, cover: r.cover, lyrics: r.lyrics, audio: r.audio, audioFormat: r.audioFormat }), ...(r.preset === "audio" && r.libraryPlaylistId ? { library_playlist_ids: [r.libraryPlaylistId] } : {}) },
       estimatedBytes: r.estimatedBytes ?? (estimateBytes && Number.isSafeInteger(estimateBytes) && estimateBytes > 0 ? Math.ceil(estimateBytes / todo.length) : undefined),
       clipKey: clipKeyOf(r.clip ?? null), placeholderTitle: r.placeholderTitle, channel: r.channel,
     }));
@@ -191,8 +200,13 @@ export function useDownloadActions(a: Args) {
         }
       }
     } catch (err) { showFlash(errorText(err), true); return 0; }
-    const added = enqueue(inputs);
+    const accepted = uniqueDownloads(inputs, itemsRef.current.filter((i) => !isFinishedStatus(i.status)));
+    const added = enqueue(accepted);
     if (!added) { announce({ title: "Already in Downloads" }); return 0; }
+    if (onAccepted && added === accepted.length) {
+      try { await a.persistQueue(); onAccepted(accepted.map((i) => i.url)); }
+      catch { showFlash("Downloads were queued, but the queue could not be saved. The source items stay in your review list.", true); }
+    }
     const ruled = todo.filter((r) => r.ruledBy);
     const what = todo.length === 1 ? todo[0].title : `${todo.length} items`;
     announce({ title: "Added to Downloads", subtitle: ruled.length > 0 ? `${what} · site rule for ${ruled[0].ruledBy}` : what });

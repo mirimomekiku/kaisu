@@ -26,6 +26,10 @@ describe("artifact identity and enqueue reservations", () => {
     const a = job();
     expect(sameDownload(a, { ...a, extra: { ...a.extra, audio: { quality: null, normalize: false, trim_silence: false }, cover: { mode: "default" }, lyrics: "off", meta: {} } })).toBe(true);
   });
+  it("local playlist destinations do not create a second media artifact", () => {
+    const a = job();
+    expect(sameDownload(a, { ...a, extra: { ...a.extra, library_playlist_ids: ["pl-one", "pl-two"] } })).toBe(true);
+  });
   it("deduplicates within a batch and against synchronously reserved jobs", () => {
     const a = job(), flac = { ...a, extra: { ...a.extra, audio_format: "flac" as const } };
     const first = uniqueDownloads([a, a, flac], []);
