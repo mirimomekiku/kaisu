@@ -4,7 +4,7 @@ import { PlayerEngine, type PlayerState, type PlayerTime, type Track } from "../
 import { bindMediaSession } from "../lib/mediaSession";
 import { EqualizerGraph } from "../lib/equalizerGraph";
 import type { Positions } from "../lib/positions";
-import { loadPlayer, loadPositions, savePlayer, savePositions } from "../lib/storage";
+import { loadPlayer, loadPositions, savePlayer, savePositions, registerStorageFlush } from "../lib/storage";
 
 const SAVE_DELAY_MS = 1000;
 const POSITION_SAVE_EVERY_MS = 5000;
@@ -29,7 +29,7 @@ export const trackFor = (path: string, title: string, extra: Partial<Track> = {}
  * Creates the player once, connects it to the system's media keys, puts back what was queued last time (paused) and keeps
  * saving the queue and the positions in long files.
  */
-export function useCreatePlayer(onPlayed?: (track: Track) => void, onListen?: (track: Track, seconds: number) => void, onRestored?: () => void): PlayerEngine {
+export function useCreatePlayer(onPlayed?: (track: Track) => void, onListen?: (track: Track, seconds: number) => void, onRestored?: (notice?: string) => void): PlayerEngine {
   const restoredRef = useRef(onRestored);
   restoredRef.current = onRestored;
   const listenedRef = useRef(onListen);
@@ -71,7 +71,7 @@ export function useCreatePlayer(onPlayed?: (track: Track) => void, onListen?: (t
 
     const snapshot = () => {
       const { queue, index, volume, rate, repeat, shuffle } = engine.getState();
-      void savePlayer(queue.length === 0 ? null : { queue: queue.map(({ cover: _temporary, ...t }) => t), index, position: engine.getTime().position, volume, rate, repeat, shuffle });
+      return savePlayer(queue.length === 0 ? null : { queue: queue.map(({ cover: _temporary, ...t }) => t), index, position: engine.getTime().position, volume, rate, repeat, shuffle });
     };
     const soon = () => {
       if (saveTimer) clearTimeout(saveTimer);
@@ -84,7 +84,7 @@ export function useCreatePlayer(onPlayed?: (track: Track) => void, onListen?: (t
       positions.current = { ...savedPositions, ...positions.current };
       if (saved && engine.getState().queue.length === 0) {
         engine.applySettings(saved);
-        engine.restore(saved.queue, saved.index, saved.position);
+        engine.restore(saved.queue, saved.index, saved.position, true);
       }
       let paths = engine.getState().queue.map((t) => t.path);
       offs.push(engine.subscribe(() => {
@@ -103,7 +103,11 @@ export function useCreatePlayer(onPlayed?: (track: Track) => void, onListen?: (t
           }
         }),
       );
-      restoredRef.current?.();
+      offs.push(registerStorageFlush(async () => {
+        if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+        await snapshot(); await savePositions(positions.current);
+      }));
+      restoredRef.current?.(saved?.truncated ? `Restored 2,000 queued tracks around the current song. ${saved.truncated} other tracks were not restored.` : undefined);
     })();
 
     return () => {

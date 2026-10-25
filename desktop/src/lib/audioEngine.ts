@@ -8,6 +8,7 @@ import type { AudioProcessing } from "./equalizerGraph";
 // audio element.
 
 export interface Track {
+  fileRevision?: string;
   /** The file on disk. */
   path: string;
   title: string;
@@ -31,7 +32,9 @@ export type RepeatMode = "off" | "all" | "one";
 /** Stop playing at a time, or when the current track ends. */
 export type Sleep = { kind: "timer"; endsAt: number; fadeSeconds?: number; finishTrack?: boolean } | { kind: "track"; fadeSeconds?: number } | null;
 
+export interface ABLoop { a: number | null; b: number | null; enabled: boolean }
 export interface PlayerState {
+  loop: ABLoop;
   queueKeys: string[];
   queueUndoLabel: string | null;
   phase: "idle" | "loading" | "buffering" | "playing" | "paused" | "failed";
@@ -116,7 +119,7 @@ export function playbackError(e: unknown): string | null {
 export class PlayerEngine {
   private audio: AudioLike;
   private readonly deps: EngineDeps;
-  private state: PlayerState = { queueKeys: [], queueUndoLabel: null, phase: "idle", errorDetails: null, notice: null, queue: [], index: -1, playing: false, loading: false, duration: 0, volume: 1, rate: 1, repeat: "off", shuffle: false, sleep: null, error: null };
+  private state: PlayerState = { loop: { a: null, b: null, enabled: false }, queueKeys: [], queueUndoLabel: null, phase: "idle", errorDetails: null, notice: null, queue: [], index: -1, playing: false, loading: false, duration: 0, volume: 1, rate: 1, repeat: "off", shuffle: false, sleep: null, error: null };
   private entrySequence = 0;
   private queueHistory: QueueSnapshot[] = [];
   private originalKeys: string[] | null = null;
@@ -166,6 +169,9 @@ export class PlayerEngine {
   private activeGain = 1;
   private fadeTimer: ReturnType<typeof setInterval> | null = null;
   private levelMap = new Map<string, number>();
+  private resumeLongTracks = true;
+  private restoreRespectsPolicy = false;
+  private listeningListeners = new Set<(track: Track, seconds: number) => void>();
 
   constructor(deps: EngineDeps) {
     this.deps = deps;
@@ -204,6 +210,7 @@ export class PlayerEngine {
     if (this.sleepTimer) clearTimeout(this.sleepTimer);
     if (this.sleepFadeTimer) clearInterval(this.sleepFadeTimer);
     this.loadToken++;
+    this.listeningListeners.clear();
     this.listeners.clear();
     this.timeListeners.clear();
     this.deps.processing?.dispose();
@@ -223,6 +230,10 @@ export class PlayerEngine {
     return () => this.timeListeners.delete(fn);
   };
 
+  flushListening() { this.sampleListening(true); this.sampleTail(true); }
+  subscribeListening = (fn: (track: Track, seconds: number) => void) => { this.listeningListeners.add(fn); return () => { this.listeningListeners.delete(fn); }; };
+  private reportListening(track: Track, seconds: number) { this.deps.onListen?.(track, seconds); this.listeningListeners.forEach((fn) => fn(track, seconds)); }
+
   get current(): Track | null {
     return this.state.queue[this.state.index] ?? null;
   }
@@ -233,6 +244,7 @@ export class PlayerEngine {
   private set(patch: Partial<PlayerState>) {
     if (patch.queue && !patch.queueKeys) patch.queueKeys = patch.queue.length === this.state.queueKeys.length ? this.state.queueKeys : this.freshKeys(patch.queue);
     if (patch.queue && (patch.queue.length !== this.state.queue.length || patch.queue.some((t, i) => t.path !== this.state.queue[i]?.path || patch.queueKeys![i] !== this.state.queueKeys[i]))) { this.cancelPreload(); this.finishTail(false); }
+    if (patch.queue && this.state.queueKeys[this.state.index] !== patch.queueKeys?.[patch.index ?? this.state.index]) patch.loop = { a: null, b: null, enabled: false };
     this.state = { ...this.state, ...patch };
     this.state.phase = this.state.error ? "failed" : this.state.index < 0 ? "idle" : this.state.loading ? this.state.playing ? "buffering" : "loading" : this.state.playing ? "playing" : "paused";
     this.listeners.forEach((fn) => fn());
@@ -253,6 +265,7 @@ export class PlayerEngine {
   play(tracks: Track[], start = 0) {
     if (tracks.length === 0) return;
     this.saveNow();
+    this.clearLoop();
     this.failedPaths.clear(); this.transitionFailures.clear();
     this.original = null;
     this.originalKeys = null; this.forgetQueueHistory();
@@ -270,12 +283,16 @@ export class PlayerEngine {
   }
 
   /** Sets a queue up without playing it (after a restart). It opens the file when play is pressed. */
-  restore(tracks: Track[], index: number, position: number) {
+  restore(tracks: Track[], index: number, position: number, respectResumePolicy = false) {
     if (tracks.length === 0) return;
+    if (this.state.queue.length || this.hasSource || this.resolving) { this.pause(); this.saveNow(); }
+    this.loadToken++; this.hasSource = false; this.resolving = false;
+    this.cancelPreload(false); this.finishTail(false); this.clearLoop(); this.audio.src = "";
     const i = Number.isFinite(index) ? clamp(Math.trunc(index), 0, tracks.length - 1) : 0;
     this.forgetQueueHistory(); this.original = null; this.originalKeys = null;
-    this.set({ queue: tracks, queueKeys: this.freshKeys(tracks), queueUndoLabel: null, index: i, duration: tracks[i].duration ?? 0 });
-    this.pendingSeek = Number.isFinite(position) ? Math.max(0, position) : 0;
+    this.set({ queue: tracks, queueKeys: this.freshKeys(tracks), queueUndoLabel: null, playing: false, loading: false, error: null, errorDetails: null, index: i, duration: tracks[i].duration ?? 0 });
+    this.restoreRespectsPolicy = respectResumePolicy;
+    this.pendingSeek = respectResumePolicy && !this.resumeLongTracks ? 0 : Number.isFinite(position) ? Math.max(0, position) : 0;
     this.seekRequested = true;
     this.unloaded = true;
     this.setTime(this.pendingSeek, tracks[i].duration ?? 0);
@@ -290,6 +307,7 @@ export class PlayerEngine {
     const track = this.state.queue[index];
     if (!track) return;
     if (this.editingFiles.has(track.path)) { this.pause(); this.set({ error: "Wait for this file to finish saving before playing it.", loading: false, playing: false }); return; }
+    if (index !== this.state.index) this.clearLoop();
     const token = ++this.loadToken;
     if (save) this.saveNow();
     this.cancelPreload(); this.finishTail(false);
@@ -318,7 +336,7 @@ export class PlayerEngine {
     }
     if (token !== this.loadToken) return;
     this.resolving = false;
-    if (this.pendingSeek === 0 && !this.seekRequested) this.pendingSeek = resumeAt(this.deps.getPositions(), track.path);
+    if (this.pendingSeek === 0 && !this.seekRequested) this.pendingSeek = this.resumeLongTracks ? resumeAt(this.deps.getPositions(), track.path) : 0;
     this.audio.src = src;
     this.hasSource = true;
     this.audio.playbackRate = this.state.rate;
@@ -402,6 +420,8 @@ export class PlayerEngine {
 
   seek(seconds: number) {
     if (!Number.isFinite(seconds)) return;
+    const loop = this.state.loop;
+    if (loop.enabled && (seconds < loop.a! || seconds >= loop.b!)) this.set({ loop: { ...loop, enabled: false } });
     if (this.promoting) this.cancelPreload(false);
     this.finishTail(false);
     this.sampleListening(true);
@@ -418,6 +438,37 @@ export class PlayerEngine {
   }
 
   // ---- settings of the player -----------------------------------------------------------------
+
+  setResumeLongTracks(enabled: boolean) {
+    this.resumeLongTracks = enabled;
+    if (!enabled && this.unloaded && this.restoreRespectsPolicy) { this.pendingSeek = 0; this.seekRequested = true; this.setTime(0, this.time.duration); }
+  }
+
+  setLoopPoint(point: "a" | "b", seconds = this.time.position): boolean {
+    const duration = this.time.duration || this.state.duration;
+    if (!this.current || !Number.isFinite(seconds) || duration <= 0 || seconds < 0 || seconds > duration) return false;
+    const next = { ...this.state.loop, [point]: Math.round(seconds * 100) / 100, enabled: false };
+    if (point === "a" && next.b !== null && next.b <= seconds + .25) next.b = null;
+    if (point === "b" && (next.a === null || seconds - next.a < .25)) return false;
+    this.cancelPreload(false); this.finishTail(false); this.set({ loop: next }); return true;
+  }
+  enableLoop(enabled: boolean): boolean {
+    const loop = this.state.loop;
+    if (enabled && (loop.a === null || loop.b === null || loop.b - loop.a < .25 || loop.b > (this.time.duration || this.state.duration) || this.state.sleep?.kind === "track" || this.state.sleep?.kind === "timer" && this.state.sleep.finishTrack)) return false;
+    this.cancelPreload(false); this.finishTail(false);
+    this.set({ loop: { ...loop, enabled } });
+    if (enabled && (this.time.position < loop.a! || this.time.position >= loop.b!)) this.seek(loop.a!);
+    return true;
+  }
+  clearLoop() { if (this.state.loop.a !== null || this.state.loop.b !== null || this.state.loop.enabled) this.set({ loop: { a: null, b: null, enabled: false } }); }
+  private maybeLoop(): boolean {
+    const loop = this.state.loop;
+    if (!loop.enabled || loop.a === null || loop.b === null || !this.hasSource || !this.wantsPlay || this.state.loading || this.audio.currentTime < loop.b) return false;
+    this.sampleListening(true);
+    this.audio.currentTime = loop.a;
+    this.listenLast = this.listeningPoint(); this.setTime(loop.a, this.time.duration);
+    return true;
+  }
 
   setRate(rate: number) {
     if (!Number.isFinite(rate)) return;
@@ -492,6 +543,7 @@ export class PlayerEngine {
 
   /** `{ minutes }` stops after that long, `"track"` when the current track ends, `null` cancels. */
   setSleep(spec: { minutes: number; fadeSeconds?: number; finishTrack?: boolean } | "track" | null, trackFadeSeconds = 0) {
+    if ((spec === "track" || typeof spec === "object" && spec?.finishTrack) && this.state.loop.enabled) this.enableLoop(false);
     if (this.sleepTimer) clearTimeout(this.sleepTimer);
     this.sleepTimer = null;
     if (this.sleepFadeTimer) clearInterval(this.sleepFadeTimer);
@@ -652,7 +704,7 @@ export class PlayerEngine {
     this.loadToken++;
     this.wantsPlay = false; this.resolving = false; this.clearWatchdog(); this.failedPaths.clear();
     this.saveNow();
-    this.setSleep(null);
+    this.setSleep(null); this.clearLoop();
     this.cancelPreload(); this.finishTail(false);
     this.hasSource = false;
     this.audio.pause();
@@ -672,6 +724,7 @@ export class PlayerEngine {
     if (!this.hasSource) return;
     const d = this.audio.duration;
     if (Number.isFinite(d) && d > 0) {
+      if (this.state.loop.b !== null && this.state.loop.b > d) this.clearLoop();
       if (d !== this.state.duration) this.set({ duration: d });
       if ((this.seekRequested || this.pendingSeek > 0) && this.pendingSeek < d) {
         this.audio.currentTime = this.pendingSeek;
@@ -679,12 +732,14 @@ export class PlayerEngine {
       }
       this.pendingSeek = 0;
       this.seekRequested = false;
+      this.setTime(this.audio.currentTime, d);
     }
   }
 
   private onTime() {
     if (!this.hasSource) return;
     this.sampleListening();
+    if (this.maybeLoop()) return;
     const d = Number.isFinite(this.audio.duration) ? this.audio.duration : this.state.duration;
     this.setTime(this.audio.currentTime, d);
     if (this.now() - this.lastSaved >= SAVE_EVERY_MS) this.saveNow();
@@ -729,6 +784,12 @@ export class PlayerEngine {
 
   private onEnded() {
     if (!this.hasSource || (!this.wantsPlay && !this.promoting)) return;
+    if (this.maybeLoop()) {
+      this.set({ playing: false });
+      const token = this.loadToken;
+      void this.audio.play().catch((e) => { if (token === this.loadToken) this.fail(playbackError(e) ?? CANT_PLAY, errorText(e)); });
+      return;
+    }
     this.sampleListening(true);
     this.listenLast = null;
     const track = this.current;
@@ -782,7 +843,7 @@ export class PlayerEngine {
     }
     this.listenLast = next;
     if ((flush || this.listenPending >= 5) && this.listenPending > 0 && this.listenTrack) {
-      this.deps.onListen?.(this.listenTrack, this.listenPending);
+      this.reportListening(this.listenTrack, this.listenPending);
       this.listenPending = 0;
     }
   }
@@ -792,7 +853,7 @@ export class PlayerEngine {
     this.sampleListening(true);
     this.lastSaved = this.now();
     const track = this.current;
-    if (!track || this.unloaded) return;
+    if (!track || this.unloaded || !this.resumeLongTracks) return;
     const d = Number.isFinite(this.audio.duration) ? this.audio.duration : this.state.duration;
     this.deps.setPositions(remember(this.deps.getPositions(), track.path, this.audio.currentTime, d, this.now()));
   }
@@ -944,7 +1005,7 @@ export class PlayerEngine {
   private dropAudio(audio: AudioLike) { this.unbindAudio(audio); audio.pause(); audio.src = ""; this.deps.processing?.detach(audio); }
 
   private nextIndex() {
-    if (this.state.sleep?.kind === "track" || this.state.repeat === "one") return -1;
+    if (this.state.loop.enabled || this.state.sleep?.kind === "track" || this.state.repeat === "one") return -1;
     return this.state.index + 1 < this.state.queue.length ? this.state.index + 1 : this.state.repeat === "all" && this.state.queue.length > 1 ? 0 : -1;
   }
 
@@ -971,7 +1032,7 @@ export class PlayerEngine {
     if (this.prepared?.index === index && this.prepared.path === track.path) return;
     this.cancelPreload(); const token = this.preloadToken;
     const audio = this.deps.createAudio(); audio.preload = "auto"; audio.volume = 0; audio.muted = false; audio.playbackRate = this.state.rate;
-    const start = resumeAt(this.deps.getPositions(), track.path);
+    const start = this.resumeLongTracks ? resumeAt(this.deps.getPositions(), track.path) : 0;
     const prepared = { audio, index, path: track.path, token, ready: false, start }; this.prepared = prepared; this.bindAudio(audio);
     try {
       const src = await this.deps.resolve(track);
@@ -989,13 +1050,13 @@ export class PlayerEngine {
   }
 
   private refreshTransitionTimer() {
-    const enabled = !this.disposed && this.gapless && this.crossfadeSeconds > 0 && !!this.deps.createAudio && this.hasSource && !this.unloaded && this.state.playing && !this.state.loading;
-    if (enabled && !this.transitionTimer) this.transitionTimer = setInterval(() => this.maybeCrossfade(), 40);
+    const enabled = !this.disposed && (this.state.loop.enabled || this.gapless && this.crossfadeSeconds > 0 && !!this.deps.createAudio) && this.hasSource && !this.unloaded && this.state.playing && !this.state.loading;
+    if (enabled && !this.transitionTimer) this.transitionTimer = setInterval(() => { if (!this.maybeLoop()) this.maybeCrossfade(); }, 25);
     else if (!enabled && this.transitionTimer) { clearInterval(this.transitionTimer); this.transitionTimer = null; }
   }
 
   private maybeCrossfade() {
-    if (!this.crossfadeSeconds || this.tail || this.promoting || !this.state.playing || !this.readyPrepared()) return;
+    if (this.state.loop.enabled || !this.crossfadeSeconds || this.tail || this.promoting || !this.state.playing || !this.readyPrepared()) return;
     const p = this.prepared!;
     if (this.transitionFailures.has(p.path)) return;
     const current = this.current; const next = this.state.queue[p.index];
@@ -1053,7 +1114,7 @@ export class PlayerEngine {
     const now = this.now(); const elapsed = (now - t.lastAt) / 1000; const advanced = t.audio.currentTime - t.lastPosition;
     if (this.state.playing && !this.state.loading && elapsed > 0 && elapsed <= 30 && advanced > 0 && advanced <= elapsed * this.state.rate + 1) t.pending += Math.min(elapsed, advanced / this.state.rate) * ((t.lastGain + t.gain) / 2);
     t.lastAt = now; t.lastPosition = t.audio.currentTime; t.lastGain = t.gain;
-    if ((flush || t.pending >= 5) && t.pending > 0) { this.deps.onListen?.(t.track, t.pending); t.pending = 0; }
+    if ((flush || t.pending >= 5) && t.pending > 0) { this.reportListening(t.track, t.pending); t.pending = 0; }
   }
 
   private finishTail(ended: boolean) {

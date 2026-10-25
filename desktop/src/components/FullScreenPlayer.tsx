@@ -1,3 +1,4 @@
+import PlaybackTools from "./PlaybackTools";
 import { Captions, ListMusic, Loader2, Minimize2, Music, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward, Volume2, VolumeX } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useEffect, useId, useRef, useState } from "react";
@@ -79,7 +80,7 @@ export default function FullScreenPlayer({ engine, onClose }: { engine: PlayerEn
           <button className="row-btn" aria-label="Next track" disabled={state.index >= state.queue.length - 1 && state.repeat !== "all"} onClick={() => engine.next()}><SkipForward /></button>
           <button className="row-btn" aria-label={`Repeat: ${state.repeat}`} aria-pressed={state.repeat !== "off"} onClick={() => engine.setRepeat(nextRepeat[state.repeat])}>{state.repeat === "one" ? <Repeat1 /> : <Repeat />}</button>
         </div>
-        <div className="full-options"><FilterDropdown label="Audio output"><AudioOutputPicker /></FilterDropdown><TrackPreferences path={track.path} title={track.title} compact /><select className="field" aria-label="Playback speed" value={state.rate} onChange={(e) => engine.setRate(Number(e.target.value))}>{RATES.map((rate) => <option key={rate} value={rate}>{rate}×</option>)}</select></div>
+        <div className="full-options"><FilterDropdown label="Playback tools"><PlaybackTools engine={engine} /></FilterDropdown><FilterDropdown label="Audio output"><AudioOutputPicker /></FilterDropdown><TrackPreferences path={track.path} title={track.title} compact /><select className="field" aria-label="Playback speed" value={state.rate} onChange={(e) => engine.setRate(Number(e.target.value))}>{RATES.map((rate) => <option key={rate} value={rate}>{rate}×</option>)}</select></div>
       </div>
     </footer>
   </div>, document.body);

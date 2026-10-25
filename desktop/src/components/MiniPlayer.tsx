@@ -1,3 +1,4 @@
+import { useSeekControls } from "../hooks/useSeekControls";
 import { Maximize2, Music, Pause, Play, SkipBack, SkipForward } from "lucide-react";
 import type { PlayerEngine } from "../lib/audioEngine";
 import { usePlayerState, usePlayerTime } from "../hooks/usePlayer";
@@ -6,6 +7,7 @@ import { CoverArt } from "./Picture";
 import PlaybackDetails from "./PlaybackDetails";
 
 export default function MiniPlayer({ engine, onRestore, busy, error }: { engine: PlayerEngine; onRestore: () => void; busy: boolean; error?: string }) {
+  const seekControls = useSeekControls(engine);
   const state = usePlayerState(engine);
   const time = usePlayerTime(engine);
   const track = state.queue[state.index];
@@ -22,7 +24,7 @@ export default function MiniPlayer({ engine, onRestore, busy, error }: { engine:
         </div>
       </div>
     </div>
-    <div className="mini-seek"><span>{formatClock(time.position)}</span><input type="range" aria-label="Position" min={0} max={Math.max(1, time.duration)} step={0.1} value={Math.min(time.position, Math.max(1, time.duration))} disabled={!track || !time.duration} onChange={(e) => engine.seek(Number(e.target.value))} /><span>{formatClock(time.duration)}</span></div>
+    <div className="mini-seek"><span>{formatClock(time.position)}</span><input {...seekControls} type="range" aria-label="Position" min={0} max={Math.max(1, time.duration)} step={0.1} value={Math.min(time.position, Math.max(1, time.duration))} disabled={!track || !time.duration} onChange={(e) => engine.seek(Number(e.target.value))} /><span>{formatClock(time.duration)}</span></div>
     {(error || state.error) && <p className="mini-error" role="alert">{error || state.error}</p>}
     {(state.loading || state.error) && <PlaybackDetails engine={engine} compact />}
   </section>;

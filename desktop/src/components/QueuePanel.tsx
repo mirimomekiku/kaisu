@@ -60,6 +60,7 @@ export default function QueuePanel({ engine, onClose }: { engine: PlayerEngine; 
         ]} />
         <span className="dim qp-selection-hint">Select with checkboxes, Ctrl/Cmd-click or Shift-click. Drag selected tracks together.</span>
       </div>
+      {queue.length > 2000 && <p className="dim">After a restart, Kaisu restores up to 2,000 tracks around the current song.</p>}
       <ol className="qp-list" role="list" aria-label="Tracks in the queue">
         {queue.map((track, i) => {
           const key = queueKeys[i];

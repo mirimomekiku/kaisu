@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { flushStorage } from "../lib/storage";
+import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { setTrayStatus, trayAvailable, type CloseMode } from "../lib/api";
 import { notify } from "../lib/notify";
@@ -42,6 +44,9 @@ export function useTrayBridge({ active, queued, paused, closeMode, ready, pauseA
       listen(name, (e) => fn(e.payload))
         .then((off) => (dead ? off() : offs.push(off)))
         .catch(() => {});
+    on("prepare-exit", () => {
+      void flushStorage().then(() => invoke("finish_exit", { saved: true }), () => invoke("finish_exit", { saved: false })).catch(() => {});
+    });
     on("tray-action", (action) => {
       if (action === "pause_all") actions.current.pauseAll();
       else if (action === "resume_all") actions.current.resumeAll();

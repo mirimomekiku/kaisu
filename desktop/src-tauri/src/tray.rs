@@ -6,7 +6,7 @@
 
 use std::sync::{
     Mutex, MutexGuard,
-    atomic::{AtomicBool, AtomicU32, Ordering},
+    atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
 };
 use std::time::Duration;
 
@@ -39,6 +39,9 @@ pub enum CloseMode {
 #[derive(Default)]
 pub struct TrayState {
     available: AtomicBool,
+    preparing_exit: AtomicBool,
+    /// Counts quit requests so a stale fallback timer from a cancelled quit cannot end a later one.
+    quit_epoch: AtomicU64,
     mode: Mutex<CloseMode>,
     /// Downloads running or waiting.
     busy: AtomicU32,
@@ -86,8 +89,19 @@ pub fn show_main(app: &AppHandle) {
 
 /// Quits for real: stops downloads first so no yt-dlp or ffmpeg process is left behind.
 pub fn quit(app: &AppHandle) {
-    app.state::<Downloads>().kill_all();
-    app.exit(0);
+    let state = app.state::<TrayState>();
+    if state.preparing_exit.swap(true, Ordering::SeqCst) { return; }
+    let epoch = state.quit_epoch.fetch_add(1, Ordering::SeqCst) + 1;
+    let _ = app.emit("prepare-exit", ());
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(8));
+        let state = handle.state::<TrayState>();
+        if state.quit_epoch.load(Ordering::SeqCst) == epoch && state.preparing_exit.swap(false, Ordering::SeqCst) {
+            handle.state::<Downloads>().kill_all();
+            handle.exit(0);
+        }
+    });
 }
 
 /// Called once at startup. Failure just means "no tray".
@@ -156,6 +170,9 @@ pub fn on_window_event(window: &Window, event: &WindowEvent) {
             let _ = window.hide();
             state.hidden_by_close.store(true, Ordering::SeqCst);
             let _ = window.app_handle().emit("background-started", ());
+        } else {
+            api.prevent_close();
+            quit(window.app_handle());
         }
     }
 }
@@ -208,6 +225,12 @@ pub fn tray_available(state: State<'_, TrayState>) -> bool {
 #[tauri::command]
 pub fn show_main_window(app: AppHandle) {
     show_main(&app);
+}
+
+#[tauri::command]
+pub fn finish_exit(app: AppHandle, saved: bool) {
+    if !app.state::<TrayState>().preparing_exit.swap(false, Ordering::SeqCst) { return; }
+    if saved { app.state::<Downloads>().kill_all(); app.exit(0); } else { show_main(&app); }
 }
 
 #[tauri::command]

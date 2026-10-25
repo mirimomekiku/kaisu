@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { flushStorage } from "../lib/storage";
 import { Minus, Plus, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
@@ -37,7 +38,7 @@ export default function WindowControls() {
 
   return (
     <div className={`lights ${focused ? "" : "inactive"}`} role="group" aria-label="Window controls">
-      <button type="button" className="light close" aria-label="Close window" title="Close" onClick={() => swallow(win().close())}>
+      <button type="button" className="light close" aria-label="Close window" title="Close" onClick={() => swallow(flushStorage().then(() => win().close()))}>
         <X strokeWidth={3.5} />
       </button>
       <button type="button" className="light min" aria-label="Minimize window" title="Minimize" onClick={() => swallow(win().minimize())}>

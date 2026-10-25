@@ -71,6 +71,59 @@ function make(initial: Positions = {}, resolve?: (t: Track) => Promise<string>, 
 
 afterEach(() => vi.useRealTimers());
 
+describe("A–B practice loops", () => {
+  it("repeats only the segment without advancing or counting a completed track", async () => {
+    const played = vi.fn(), listened = vi.fn();
+    const { engine, audio, advance } = make({}, undefined, played, listened);
+    engine.play([A, B]); await flush(); audio.loaded(120);
+    expect(engine.setLoopPoint("a", 5)).toBe(true); expect(engine.setLoopPoint("b", 10)).toBe(true);
+    engine.enableLoop(true); expect(audio.currentTime).toBe(5);
+    advance(5000); audio.currentTime = 10; audio.fire("timeupdate");
+    expect(audio.currentTime).toBe(5); expect(engine.getState().index).toBe(0); expect(played).not.toHaveBeenCalled();
+    expect(listened.mock.calls.reduce((sum, call) => sum + call[1], 0)).toBeCloseTo(5);
+    engine.pause(); audio.currentTime = 11; audio.fire("timeupdate"); expect(audio.currentTime).toBe(11);
+    engine.dispose();
+  });
+  it("validates points, disables outside seeks and clears on navigation", async () => {
+    const { engine, audio } = make();
+    engine.play([A, B]); await flush();
+    expect(engine.setLoopPoint("a", 5)).toBe(false);
+    audio.loaded(120); engine.setLoopPoint("a", 5);
+    expect(engine.setLoopPoint("b", 4)).toBe(false); expect(engine.setLoopPoint("b", 5.1)).toBe(false);
+    engine.setLoopPoint("b", 10); engine.enableLoop(true); engine.seek(15);
+    expect(engine.getState().loop.enabled).toBe(false);
+    engine.enableLoop(true); engine.next(); await flush();
+    expect(engine.getState().loop).toEqual({ a: null, b: null, enabled: false }); engine.dispose();
+  });
+  it("end-of-track sleep takes priority, while a deadline can stop an active loop", async () => {
+    const { engine, audio } = make(); engine.play([A]); await flush(); audio.loaded(120);
+    engine.setLoopPoint("a", 1); engine.setLoopPoint("b", 3); engine.enableLoop(true);
+    engine.setSleep("track"); expect(engine.getState().loop.enabled).toBe(false); expect(engine.enableLoop(true)).toBe(false);
+    engine.setSleep(null); engine.enableLoop(true);
+    vi.useFakeTimers(); engine.setSleep({ minutes: 1 }); vi.advanceTimersByTime(60000);
+    expect(engine.getState().playing).toBe(false); engine.dispose();
+  });
+  it("can disable remembered positions without deleting them", async () => {
+    const saved = { [A.path]: { t: 55, d: LONG, at: 100 } };
+    const { engine, audio, positions } = make(saved);
+    engine.setResumeLongTracks(false); engine.play([A]); await flush(); audio.loaded(LONG);
+    expect(audio.currentTime).toBe(0); engine.seek(40); engine.pause(); expect(positions()).toEqual(saved); engine.dispose();
+  });
+  it("restoring a session replaces active playback with a paused queue", async () => {
+    const { engine, audio } = make(); engine.play([A]); await flush(); audio.loaded(120);
+    engine.restore([B, C], 1, 42);
+    expect(audio.paused).toBe(true); expect(engine.getState()).toMatchObject({ playing: false, index: 1, queue: [B, C] });
+    engine.toggle(); await flush(); audio.loaded(120); expect(audio.currentTime).toBe(42); engine.dispose();
+  });
+  it("keeps explicit session positions while respecting startup resume policy", () => {
+    const { engine } = make(); const long = { ...A, duration: LONG };
+    engine.setResumeLongTracks(false); engine.restore([long], 0, 55, true); expect(engine.getTime().position).toBe(0);
+    engine.restore([long], 0, 55); expect(engine.getTime().position).toBe(55);
+    engine.setResumeLongTracks(true); engine.restore([long], 0, 55, true); engine.setResumeLongTracks(false); expect(engine.getTime().position).toBe(0);
+    engine.dispose();
+  });
+});
+
 describe("queue selection edits and undo", () => {
   it("removes only the selected duplicate occurrence and keeps the playing copy", async () => {
     const { engine, audio, resolved } = make();
@@ -719,6 +772,15 @@ function seamless(seconds = 0) {
   return { engine, audios, resolved, played, listened, advance: (ms: number) => { clock += ms; }, ready: (a: FakeAudio, duration = 10) => { a.loaded(duration); a.fire("canplay"); } };
 }
 describe("preloaded transitions", () => {
+  it("suppresses a prepared crossfade while A–B looping is enabled", async () => {
+    const { engine, audios, ready, played } = seamless(3);
+    engine.play([A, B]); await settleTransitions(); ready(audios[0]); ready(audios[1]);
+    engine.setLoopPoint("a", 6); engine.setLoopPoint("b", 9); engine.enableLoop(true);
+    audios[0].currentTime = 8; audios[0].fire("timeupdate"); await settleTransitions();
+    expect(engine.current?.path).toBe(A.path); expect(audios[1].src).toBe("");
+    audios[0].currentTime = 9; audios[0].fire("timeupdate");
+    expect(audios[0].currentTime).toBe(6); expect(played).not.toHaveBeenCalled(); engine.dispose();
+  });
   it("prepares without playing and advances without resolving the next source twice", async () => {
     const { engine, audios, ready, resolved, played } = seamless();
     engine.play([A, B]); await settleTransitions(); ready(audios[0]); ready(audios[1]);

@@ -7,7 +7,7 @@ struct Geometry { size: PhysicalSize<u32>, position: PhysicalPosition<i32>, maxi
 pub struct MiniState(Mutex<Option<Geometry>>);
 
 fn restore(window: &WebviewWindow, saved: &Geometry) -> tauri::Result<()> {
-    window.set_min_size(Some(LogicalSize::new(760.0, 540.0)))?;
+    window.set_min_size(Some(LogicalSize::new(720.0, 576.0)))?;
     window.set_size(saved.size)?;
     window.set_position(saved.position)?;
     window.set_always_on_top(saved.top)?;

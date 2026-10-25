@@ -52,7 +52,8 @@ impl MediaStream {
             let app = app.clone();
             std::thread::Builder::new().name("media-stream".into()).spawn(move || {
                 let active = Arc::new(AtomicUsize::new(0));
-                for stream in listener.incoming().flatten() {
+                for stream in listener.incoming() {
+                    let Ok(stream) = stream else { std::thread::sleep(Duration::from_millis(100)); continue; };
                     if active.fetch_add(1, Ordering::Relaxed) >= 8 { active.fetch_sub(1, Ordering::Relaxed); continue; }
                     let files = shared.clone(); let app = app.clone(); let active = active.clone();
                     std::thread::spawn(move || { let _ = serve(stream, port, &files, &app); active.fetch_sub(1, Ordering::Relaxed); });
@@ -97,6 +98,7 @@ fn mime(path: &std::path::Path) -> &'static str {
 fn serve(mut stream: TcpStream, port: u16, files: &Mutex<Files>, app: &AppHandle) -> io::Result<()> {
     stream.set_read_timeout(Some(Duration::from_secs(5)))?;
     stream.set_write_timeout(Some(Duration::from_secs(15)))?;
+    let started = std::time::Instant::now();
     let mut reader = BufReader::new((&stream).take(8193));
     let mut request = String::new();
     let mut used = reader.read_line(&mut request)?;
@@ -110,7 +112,8 @@ fn serve(mut stream: TcpStream, port: u16, files: &Mutex<Files>, app: &AppHandle
     loop {
         let mut line = String::new();
         let n = reader.read_line(&mut line)?; used += n;
-        if used > 8192 || n == 0 { return status(&mut stream, "400 Bad Request", None); }
+        // The timeout is per read, so a client trickling bytes needs an overall limit too.
+        if used > 8192 || n == 0 || started.elapsed() > Duration::from_secs(10) { return status(&mut stream, "400 Bad Request", None); }
         if line == "\r\n" { break; }
         if let Some((key, value)) = line.split_once(':') {
             if key.eq_ignore_ascii_case("host") { host = value.trim().to_string(); }

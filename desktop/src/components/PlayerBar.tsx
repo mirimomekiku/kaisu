@@ -1,3 +1,4 @@
+import PlaybackTools from "./PlaybackTools";
 import TrackPreferences from "./TrackPreferences";
 import FullScreenPlayer from "./FullScreenPlayer";
 import Seek from "./PlayerSeek";
@@ -143,6 +144,7 @@ export default function PlayerBar({ engine, onMini, miniBusy }: { engine: Player
         </button>
         <FilterDropdown label="Playback options">
         {!state.error && <PlaybackDetails engine={engine} />}
+        <PlaybackTools engine={engine} />
         <AudioOutputPicker />
         <TrackPreferences path={track.path} title={track.title} compact />
         <label>Speed<select className="field" aria-label="Playback speed" title="Playback speed" value={state.rate} onChange={(e) => engine.setRate(Number(e.target.value))}>
