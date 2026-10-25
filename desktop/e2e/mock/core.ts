@@ -416,6 +416,14 @@ export async function invoke(cmd: string, args: any = {}): Promise<any> {
     case "secret_get":
       if (w.__mock.noKeyring) throw "The system's password store isn't available: no store";
       return (w.__mock.secrets ??= {})[args.name] ?? null;
+    case "secret_status":
+      return w.__mock.noKeyring ? { available: false, store: "Secret Service", detail: "The system's password store isn't available: no store" } : { available: true, store: "Secret Service", detail: null };
+    case "check_app_update": {
+      if (w.__mock.appUpdateFail) throw "Couldn't reach GitHub.";
+      const latest = w.__mock.appLatest ?? "0.0.4";
+      (w.__mock.appUpdateChecks = (w.__mock.appUpdateChecks ?? 0) + 1);
+      return { current: "0.0.4", latest, newer: latest !== "0.0.4", url: "https://github.com/mirimomekiku/kaisu/releases" };
+    }
     case "secret_delete":
       if (w.__mock.noKeyring) throw "The system's password store isn't available: no store";
       delete (w.__mock.secrets ??= {})[args.name];
