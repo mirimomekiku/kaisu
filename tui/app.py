@@ -5,6 +5,7 @@ from pathlib import Path
 import yt_dlp
 from rich.text import Text
 
+import kaisu_jobs
 import kaisu_search
 import kaisu_setup
 from textual.app import App, ComposeResult
@@ -287,6 +288,15 @@ class KaisuTUI(App):
     def action_clear_logs(self) -> None:
         self.query_one(RichLog).clear()
 
+    def action_quit(self) -> None:
+        self._cancel.set()
+        kaisu_jobs.shutdown_jobs()
+        self.exit()
+
+    def on_unmount(self) -> None:
+        self._cancel.set()
+        kaisu_jobs.shutdown_jobs()
+
     def action_cancel(self) -> None:
         if self.busy:
             self._cancel.set()
@@ -302,6 +312,7 @@ class KaisuTUI(App):
     def action_inspect(self) -> None:
         if self.busy or not (url := self._read_url()):
             return
+        self._cancel.clear()
         self.busy = True
         self._status("Inspecting...", "yellow")
         self._log(("Fetching metadata: ", "bold blue"), url)
@@ -319,6 +330,7 @@ class KaisuTUI(App):
         except ValueError as e:
             self._status(str(e), "bold red")
             return
+        self._cancel.clear()
         self.busy = True
         self._search_query, self._search_limit = query, limit
         self._status(f"Searching YouTube for: {query}", "yellow")
@@ -326,8 +338,11 @@ class KaisuTUI(App):
 
     def _search_worker(self, query: str, limit: int) -> None:
         try:
-            results = kaisu_search.search(query, limit)
+            info = kaisu_jobs.run_job("search", f"ytsearch{limit}:{query}", {"extract_flat": "in_playlist", "quiet": True, "no_warnings": True, "skip_download": True, **self._tool_opts()}, self._cancel, timeout=120)
+            results = kaisu_search.parse_results(info or {})
             self.call_from_thread(self._show_results, results)
+        except kaisu_jobs.Cancelled:
+            self.call_from_thread(self._cancelled)
         except ValueError as e:
             self.call_from_thread(self._fail, str(e))
         except Exception as e:
@@ -367,9 +382,10 @@ class KaisuTUI(App):
     def _inspect_worker(self, url: str) -> None:
         opts = {"skip_download": True, "quiet": True, "no_warnings": True, "noplaylist": True, **self._tool_opts()}
         try:
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                info = ydl.extract_info(url, download=False)
+            info = kaisu_jobs.run_job("inspect", url, opts, self._cancel, timeout=120)
             self.call_from_thread(self._show_info, info)
+        except kaisu_jobs.Cancelled:
+            self.call_from_thread(self._cancelled)
         except Exception as e:  # yt-dlp raises many types
             self.call_from_thread(self._fail, str(e))
 
@@ -420,8 +436,6 @@ class KaisuTUI(App):
             "quiet": True,
             "no_warnings": True,
             "noprogress": True,
-            "progress_hooks": [self._progress_hook],
-            "postprocessor_hooks": [self._postprocessor_hook],
         }
         opts.update(self._tool_opts())
         if preset_id == "fmt-mp3":
@@ -439,12 +453,14 @@ class KaisuTUI(App):
         self._expected_streams = 1 if preset_id == "fmt-mp3" else 2
         self._last_format = None
         try:
-            with yt_dlp.YoutubeDL(self._build_opts(preset_id)) as ydl:
-                info = ydl.extract_info(url, download=True)
-            downloads = info.get("requested_downloads") or []
-            path = (downloads[0].get("filepath") if downloads else None) or "(unknown location)"
+            def event(message):
+                if message.get("kind") == "progress":
+                    self._progress_hook(message["data"])
+                elif message.get("kind") == "postprocess":
+                    self._postprocessor_hook(message["data"])
+            path = kaisu_jobs.run_job("download", url, self._build_opts(preset_id), self._cancel, event, timeout=24 * 60 * 60)
             self.call_from_thread(self._finish, path)
-        except yt_dlp.utils.DownloadCancelled:
+        except (kaisu_jobs.Cancelled, yt_dlp.utils.DownloadCancelled):
             self.call_from_thread(self._cancelled)
         except Exception as e:
             self.call_from_thread(self._fail, str(e))
