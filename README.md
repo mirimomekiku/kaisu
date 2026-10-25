@@ -100,6 +100,8 @@ works behind a proxy, and can check again if you installed the tools yourself. A
   played/unplayed, favorite status, rating, duration in seconds and file folders (including subfolders). Preview matches before
   saving, choose an order and direction, and limit results to 1–5,000 songs. Membership updates automatically; a play counts when
   a track finishes. Playback and export follow the chosen order; exports save a snapshot of the current matches.
+- **Library health:** the cleanup view opens with one summary of what needs attention: missing files, files that could not be read
+  (damaged, empty or not really audio; shown in their folder, never deleted by Kaisu), incomplete metadata and exact duplicates.
 - **Library cleanup:** Library > Library tools > Library cleanup reviews missing files and incomplete metadata with search,
   issue filters, 100-row pages and selections of up to 500 songs. Locate moved files, edit individual or shared tags, and open exact
   duplicate review. Missing-entry removal previews the exact paths and verifies each file is still absent before updating the index;
@@ -159,6 +161,15 @@ works behind a proxy, and can check again if you installed the tools yourself. A
 - **Simple** mode is for everyday use: paste, choose video or audio, download. Problems are explained in plain words.
 - **Advanced** mode adds site rules ("anything from this site is audio, as FLAC, saved in this folder"), exact format choice, audio format and quality options, SponsorBlock, browser cookies, speed
   limits, download logs and your own yt-dlp options.
+- **Before you download:** the video card says which site rule will change the download (a rule overrides the card's choices) and how
+  the file will be saved (folder layout and naming).
+- **Original audio:** pick "Original audio (no conversion)" to keep the site's own file, usually Opus or M4A. Volume, silence and
+  quality options need conversion, so they are skipped for it. FLAC and WAV note that sites serve compressed audio, so those files
+  get larger without sounding better.
+- **Password store:** Settings > Network shows whether your system password store works. Without one, a proxy password stays in the
+  settings file and private header values are not remembered after Kaisu closes.
+- **New versions:** once a day (switch it off in Settings) Kaisu reads the version number on its public releases page and tells you
+  when a newer one exists. It never downloads or installs anything; you update by downloading the new file.
 
 Kaisu keeps the downloader up to date automatically, so it keeps working when sites change.
 

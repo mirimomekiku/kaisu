@@ -209,6 +209,21 @@ and permission errors are retained with per-entry reasons. It never deletes medi
 existing tag editor, relocation coordination and exact duplicate review; reports are derived locally from cached library metadata.
 The report renders 100 rows at once and bounds selections to 500, including selections across pages.
 
+Library health adds `isUnreadable` (no size, or no duration, sample rate, channels and bitrate: the scanner's fallback entry for a file
+lofty could not read) and an `unreadable` list in `cleanupReport`; unreadable files are excluded from tag-gap counts and offer only
+"Show in folder". Heuristic, derived from cached data, no Rust change.
+
+App updates: `app_update.rs` reads the `/releases/latest` redirect of the Kaisu repository (same approach as the yt-dlp check, no API
+rate limit), compares dotted numeric versions and ignores any tag that is not plain `N.N.N`. The page link is a constant, never network
+text. `useAppUpdate` checks at most daily (`appUpdateLastCheck`), is silent on failure, and remembers a dismissed release.
+`secret_status` probes the credential store read-only for Settings. `AudioFormat` has an `original` variant (`--audio-format best`);
+`reserve_output` reserves only the file name for it, `build_args` refuses audio filters or an explicit quality with it, and the
+frontend strips them through `forFormat` (shared list and labels in `lib/audioFormats.ts`). With Skip-existing, an original-audio
+download whose name already has any file reports a name conflict instead of skipping, because the extension is not known in advance.
+
+`round31` covers the update notice, the password-store status, original audio and the lossless-format note, the download plan and
+library health. Run it with `npm run test:ui -- round31`.
+
 `round29` covers smart presets, live previews, limits, ordering, persistence and folder membership, plus cleanup review/cancel,
 partial failures, preserved references, relocation, tag fixes, duplicate access, pagination and minimum-window themes. Run it with
 `npm run test:ui -- round13 round14 round29` from `desktop`; pure rule/report tests run with `npm test`, and the native missing-entry
