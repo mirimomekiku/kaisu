@@ -30,7 +30,7 @@ const MIN_FREE_BYTES: u64 = 200 * 1024 * 1024;
 
 const NO_FFMPEG: &str = "The media converter (ffmpeg) isn't installed yet. Open Setup to install it.";
 
-#[derive(Deserialize, Serialize, Clone, Copy)]
+#[derive(Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Preset {
     Best,
@@ -655,6 +655,7 @@ pub async fn start_download(
             _ = job.cancelled() => Ok(None),
             result = async {
                 build_args(&req, &req.url, std::path::Path::new("ffmpeg"), None)?;
+                crate::download_manifest::check_compatible(&app, &req)?;
                 crate::files::check_folder(req.out_dir.display().to_string())?;
                 if !scope.library_dirs().iter().any(|root| req.out_dir.starts_with(root)) {
                     crate::library_folders::register_destinations(&app, &scope, &[req.out_dir.display().to_string()])?;
@@ -710,7 +711,7 @@ async fn run_download(
     // Resolve the actual basename before any media/sidecar writes and reserve its entire family.
     let mut planning = args.clone();
     let at = planning.len() - 2;
-    planning.splice(at..at, ["--simulate".into(), "--print".into(), "KAISU_PLAN|%(filename)s".into(), "--print".into(), "KAISU_TRANSPORT|%(protocol)s|%(is_live)s".into()]);
+    planning.splice(at..at, ["--simulate".into(), "--print".into(), "KAISU_PLAN|%(filename)s".into(), "--print".into(), "KAISU_PLAN_FORMAT|%(format_id)s".into(), "--print".into(), "KAISU_TRANSPORT|%(protocol)s|%(is_live)s".into()]);
     let plan = crate::ytdlp::run_capture(&ytdlp, &planning.iter().map(String::as_str).collect::<Vec<_>>(), Duration::from_secs(90), proxy.as_deref()).await?;
     let planned = plan.lines().find_map(|l| l.strip_prefix("KAISU_PLAN|")).ok_or("Could not resolve the output filename before downloading.")?;
     let planned = PathBuf::from(planned.trim());
@@ -741,7 +742,14 @@ async fn run_download(
         }
     }
     validate_planned_path(&planned, &req.out_dir)?;
-    let owned = crate::download_manifest::owned_path(app, req);
+    let resolved_format = plan.lines().find_map(|l| l.strip_prefix("KAISU_PLAN_FORMAT|")).map(str::trim).filter(|id| *id != "NA" && validate_format_id(id).is_ok());
+    let owned = crate::download_manifest::owned_path(app, req, resolved_format);
+    if let (Some(_), Some(format)) = (&owned, resolved_format) {
+        // Planning and transfer are separate extractor calls. Pin a resumed transfer to
+        // the exact streams whose partial files we just authorized.
+        let at = args.len() - 2;
+        args.splice(at..at, ["-f".into(), format.to_string()]);
+    }
     let (chosen, existing) = reserve_output(downloads, req, &planned, owned.as_deref())?;
     if let Some(existing) = existing {
         validate_output_file(&existing, &req.out_dir)?;
