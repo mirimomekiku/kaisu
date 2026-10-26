@@ -1,5 +1,6 @@
 import { Channel, convertFileSrc, invoke } from "@tauri-apps/api/core";
 import type { TagEditRequest } from "./tagEdit";
+import type { IdentificationCandidate, SuggestedTags } from "./identification";
 import { checkDownloadUrl, checkSpeedLimit } from "./validate";
 
 export type Preset = "best" | "p1080" | "p720" | "audio";
@@ -392,6 +393,9 @@ export interface LibTrack {
 
 /** What was found by the last scan, at once. */
 export const libraryLoad = () => invoke<LibTrack[]>("library_load");
+export const identifySearch = (path: string, title: string, artist: string, allowed: boolean) => invoke<IdentificationCandidate[]>("identify_search", { path, title, artist, allowed, proxy: currentProxy });
+export const identifyDetails = (path: string, recordingId: string, releaseId: string | null, allowed: boolean) => invoke<SuggestedTags>("identify_details", { path, recordingId, releaseId, allowed, proxy: currentProxy });
+export const identifyCover = (path: string, releaseId: string, allowed: boolean) => invoke<ArtworkChoice>("identify_cover", { path, releaseId, allowed, proxy: currentProxy });
 
 export interface MusicFolder { path: string; available: boolean; download_destination?: boolean; configured?: boolean }
 export const libraryFolders = () => invoke<MusicFolder[]>("library_folders");

@@ -1,7 +1,9 @@
 import ArtworkEditor from "./ArtworkEditor";
 import type { ArtworkEdit } from "../lib/tagEdit";
 import { useMemo, useState } from "react";
-import type { EditResult, LibTrack } from "../lib/api";
+import type { ArtworkChoice, EditResult, LibTrack } from "../lib/api";
+import IdentifyMusic from "./IdentifyMusic";
+import { tagKeys } from "../lib/identification";
 import { baseName } from "../lib/mediaKind";
 import { FIELDS, LABEL, SINGLE_ONLY, buildEdit, startForm, validateForm, type Field, type TagEditRequest, type TagForm } from "../lib/tagEdit";
 import Sheet from "./Sheet";
@@ -22,6 +24,8 @@ export default function TagEditor({ tracks, onSave, onClose }: Props) {
   const start = useMemo(() => startForm(tracks), [tracks]);
   const [form, setForm] = useState<TagForm>(start.values);
   const [choosingArtwork, setChoosingArtwork] = useState(false);
+  const [identifying, setIdentifying] = useState(false);
+  const [identifiedArtwork, setIdentifiedArtwork] = useState<ArtworkChoice>();
   const [artwork, setArtwork] = useState<ArtworkEdit | undefined>();
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState<EditResult[]>([]);
@@ -48,9 +52,9 @@ export default function TagEditor({ tracks, onSave, onClose }: Props) {
   };
 
   return (
-    <Sheet
+    <><Sheet
       title={many ? `Edit ${tracks.length} songs` : "Edit tags"}
-      onClose={() => !busy && !choosingArtwork && onClose()}
+      onClose={() => !busy && !choosingArtwork && !identifying && onClose()}
       footer={
         <>
           <button type="button" className="btn" disabled={busy || choosingArtwork} onClick={onClose}>
@@ -80,7 +84,8 @@ export default function TagEditor({ tracks, onSave, onClose }: Props) {
             </>
           )}
         </p>
-        <ArtworkEditor path={tracks[0].path} count={tracks.length} value={artwork} onChange={setArtwork} onBusy={setChoosingArtwork} disabled={busy} />
+        {!many && <button type="button" className="btn w-fit" disabled={busy || choosingArtwork || tracks[0].missing} onClick={() => setIdentifying(true)}>Identify music online</button>}
+        <ArtworkEditor path={tracks[0].path} count={tracks.length} value={artwork} externalChoice={identifiedArtwork} onChange={setArtwork} onBusy={setChoosingArtwork} disabled={busy} />
         <div className="grid gap-x-3 gap-y-2" style={{ gridTemplateColumns: "auto 1fr" }}>
           {fields.map((f) => (
             <label key={f} className="contents">
@@ -127,5 +132,10 @@ export default function TagEditor({ tracks, onSave, onClose }: Props) {
         )}
       </form>
     </Sheet>
+    {identifying && <IdentifyMusic path={tracks[0].path} current={form} duration={tracks[0].duration} onClose={() => setIdentifying(false)} onUse={(edit, choice) => {
+      setForm((old) => ({ ...old, ...Object.fromEntries(FIELDS.flatMap((f) => edit[tagKeys[f]] !== undefined ? [[f, edit[tagKeys[f]]]] : [])) }));
+      if (edit.artwork) { setArtwork(edit.artwork); setIdentifiedArtwork(choice); }
+      setIdentifying(false);
+    }} />}</>
   );
 }

@@ -5,6 +5,7 @@ mod download_manifest;
 mod duplicates;
 mod engine;
 mod files;
+mod identification;
 mod leftovers;
 mod library;
 mod library_folders;
@@ -82,6 +83,7 @@ pub fn run() {
         .manage(thumbs::Thumbs::default())
         .manage(mini::MiniState::default())
         .manage(artwork::ArtworkStore::default())
+        .manage(identification::Identification::default())
         .manage(media_stream::MediaStream::default())
         .setup(|app| {
             library_folders::restore(app.handle(), &app.state::<scope::Scope>());
@@ -124,6 +126,9 @@ pub fn run() {
             artwork::library_choose_artwork,
             artwork::library_artwork_preview,
             artwork::library_discard_artwork,
+            identification::identify_search,
+            identification::identify_details,
+            identification::identify_cover,
             library::library_load,
             library_folders::library_folders,
             library_folders::library_add_folder,

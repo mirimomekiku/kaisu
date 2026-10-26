@@ -80,6 +80,19 @@ function musicFolders() {
 export async function invoke(cmd: string, args: any = {}): Promise<any> {
   w.__mock.calls.push({ cmd, args: JSON.parse(JSON.stringify(args, (k, v) => (k === "onEvent" ? "[channel]" : v))) });
   switch (cmd) {
+    case "identify_search":
+      if (!args.allowed) throw "Online lookup consent is required.";
+      if (w.__mock.identifyFail) throw "Couldn't reach MusicBrainz.";
+      await sleep(w.__mock.identifyDelay ?? 20);
+      return structuredClone(w.__mock.identificationCandidates ?? []);
+    case "identify_details":
+      if (!args.allowed) throw "Online lookup consent is required.";
+      await sleep(w.__mock.identifyDelay ?? 20);
+      return structuredClone(w.__mock.identificationTags ?? {});
+    case "identify_cover":
+      if (!args.allowed) throw "Online lookup consent is required.";
+      if (w.__mock.identifyCoverFail) throw "No artwork was found for this release.";
+      return { token: "identified-cover", name: "Cover Art Archive front cover" };
     case "check_setup":
       return {
         engine: engine(w.__mock.ready),

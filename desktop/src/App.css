@@ -924,6 +924,9 @@ input[type="radio"] {
   font-size: 11px;
 }
 .sheet {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100dvh - 90px);
   width: 100%;
   max-width: 540px;
   border-radius: 8px;
@@ -1107,10 +1110,13 @@ input[type="radio"] {
   padding: 16px 18px 6px;
 }
 .sheet .sheet-body {
+  min-height: 0;
+  overflow: auto;
   padding: 4px 18px 12px;
   color: #3a3a3a;
 }
 .sheet .sheet-foot {
+  flex-shrink: 0;
   display: flex;
   justify-content: flex-end;
   flex-wrap: wrap;
