@@ -18,6 +18,7 @@ import type { LibraryManagement } from "../hooks/useLibrary";
 import type { Listening } from "../lib/listening";
 import MusicFolders from "./MusicFolders";
 import DuplicateFinder from "./DuplicateFinder";
+import PortableSync from "./PortableSync";
 
 type View = "songs" | "albums" | "artists" | "playlists" | "listening";
 
@@ -74,6 +75,7 @@ export default function LibraryPage({ playlists, tracks, management, listening, 
   const [editing, setEditing] = useState<LibTrack[] | null>(null);
   const [foldersOpen, setFoldersOpen] = useState(false);
   const [duplicatesOpen, setDuplicatesOpen] = useState(false);
+  const [syncOpen, setSyncOpen] = useState(false);
   const [availability, setAvailability] = useState("available");
   const eligible = useMemo(() => tracks.filter((t) => (!favoritesOnly || preferences?.[t.path]?.favorite) && (preferences?.[t.path]?.rating ?? 0) >= minimumRating && (availability === "all" || (availability === "missing" ? !!t.missing : !t.missing))), [tracks, availability, favoritesOnly, minimumRating, preferences]);
 
@@ -151,6 +153,7 @@ export default function LibraryPage({ playlists, tracks, management, listening, 
         <ActionMenu label="Library tools" items={[
           { label: "Music folders", onSelect: () => setFoldersOpen(true) },
           { label: "Find duplicates", onSelect: () => setDuplicatesOpen(true) },
+          { label: "Portable collection sync", onSelect: () => setSyncOpen(true) },
           { kind: "separator" },
           { label: "Rescan", onSelect: onScan, disabled: scanning !== null },
           ...(analysing ? [{ label: `Stop measuring loudness (${analysing.done} of ${analysing.total})`, onSelect: onStopAnalysing }] : [{ label: `Measure loudness (${unmeasuredCount})`, onSelect: onAnalyse, disabled: unmeasuredCount === 0 }]),
@@ -262,6 +265,7 @@ export default function LibraryPage({ playlists, tracks, management, listening, 
       )}
       {foldersOpen && <MusicFolders management={management} onClose={() => setFoldersOpen(false)} />}
       {duplicatesOpen && <DuplicateFinder byPath={byPath} onChanged={onScan} onReveal={onReveal} onClose={() => setDuplicatesOpen(false)} />}
+      {syncOpen && <PortableSync tracks={tracks} playlists={playlists.playlists} listening={listening} onClose={() => setSyncOpen(false)} />}
       {editing && (
         <TagEditor
           // A new key for a new selection starts the form afresh.

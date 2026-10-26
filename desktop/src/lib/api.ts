@@ -1,6 +1,7 @@
 import { Channel, convertFileSrc, invoke } from "@tauri-apps/api/core";
 import type { TagEditRequest } from "./tagEdit";
 import type { IdentificationCandidate, SuggestedTags } from "./identification";
+import type { PortableDevice, PortableProfile, PortablePlaylist, SyncPlan, SyncProgress, SyncResult } from "./portableSync";
 import { checkDownloadUrl, checkSpeedLimit } from "./validate";
 
 export type Preset = "best" | "p1080" | "p720" | "audio";
@@ -396,6 +397,15 @@ export const libraryLoad = () => invoke<LibTrack[]>("library_load");
 export const identifySearch = (path: string, title: string, artist: string, allowed: boolean) => invoke<IdentificationCandidate[]>("identify_search", { path, title, artist, allowed, proxy: currentProxy });
 export const identifyDetails = (path: string, recordingId: string, releaseId: string | null, allowed: boolean) => invoke<SuggestedTags>("identify_details", { path, recordingId, releaseId, allowed, proxy: currentProxy });
 export const identifyCover = (path: string, releaseId: string, allowed: boolean) => invoke<ArtworkChoice>("identify_cover", { path, releaseId, allowed, proxy: currentProxy });
+export const portableSyncDevices = () => invoke<PortableDevice[]>("portable_sync_devices");
+export const portableSyncProfiles = () => invoke<PortableProfile[]>("portable_sync_profiles");
+export const portableSyncCreate = (name: string, deviceId: string | null = null) => invoke<PortableProfile | null>("portable_sync_create", { name, deviceId });
+export const portableSyncSave = (profile: PortableProfile) => invoke<PortableProfile>("portable_sync_save", { id: profile.id, name: profile.name, format: profile.format, bitrate: profile.bitrate, sourceKind: profile.source_kind, sourceIds: profile.source_ids });
+export const portableSyncForget = (id: string) => invoke<void>("portable_sync_forget", { id });
+export const portableSyncCancel = (id: string) => invoke<void>("portable_sync_cancel", { id });
+const syncProgress = (onProgress: (progress: SyncProgress) => void) => { const channel = new Channel<SyncProgress>(); channel.onmessage = onProgress; return channel; };
+export const portableSyncPlan = (profileId: string, id: string, paths: string[], playlists: PortablePlaylist[], onProgress: (progress: SyncProgress) => void) => invoke<SyncPlan>("portable_sync_plan", { profileId, id, paths, playlists, onProgress: syncProgress(onProgress) });
+export const portableSyncApply = (id: string, removeOld: boolean, onProgress: (progress: SyncProgress) => void) => invoke<SyncResult>("portable_sync_apply", { id, removeOld, onProgress: syncProgress(onProgress) });
 
 export interface MusicFolder { path: string; available: boolean; download_destination?: boolean; configured?: boolean }
 export const libraryFolders = () => invoke<MusicFolder[]>("library_folders");

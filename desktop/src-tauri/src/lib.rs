@@ -19,6 +19,7 @@ mod mini;
 mod net;
 mod output;
 mod podcast;
+mod portable_sync;
 mod power;
 mod proc;
 mod removal;
@@ -84,6 +85,7 @@ pub fn run() {
         .manage(mini::MiniState::default())
         .manage(artwork::ArtworkStore::default())
         .manage(identification::Identification::default())
+        .manage(portable_sync::SyncState::default())
         .manage(media_stream::MediaStream::default())
         .setup(|app| {
             library_folders::restore(app.handle(), &app.state::<scope::Scope>());
@@ -129,6 +131,14 @@ pub fn run() {
             identification::identify_search,
             identification::identify_details,
             identification::identify_cover,
+            portable_sync::portable_sync_devices,
+            portable_sync::portable_sync_profiles,
+            portable_sync::portable_sync_create,
+            portable_sync::portable_sync_save,
+            portable_sync::portable_sync_forget,
+            portable_sync::portable_sync_plan,
+            portable_sync::portable_sync_apply,
+            portable_sync::portable_sync_cancel,
             library::library_load,
             library_folders::library_folders,
             library_folders::library_add_folder,
@@ -169,6 +179,7 @@ pub fn run() {
             // Never leave yt-dlp / ffmpeg running after Kaisu is gone.
             if let tauri::RunEvent::Exit = event {
                 app.state::<download::Downloads>().kill_all();
+                app.state::<portable_sync::SyncState>().kill_all();
             }
         });
 }
