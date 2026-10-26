@@ -1,4 +1,5 @@
-import { useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { sourceLyrics } from "../lib/lyricsPolicy";
 import type { useConfirm } from "../components/ConfirmDialog";
 import type { BatchQuality } from "../components/SearchResults";
 import type { DownloadChoice } from "../components/MediaCard";
@@ -71,6 +72,7 @@ interface Args {
   itemsRef: React.MutableRefObject<DownloadItem[]>;
   enqueue: (inputs: EnqueueInput[]) => number;
   confirm: ReturnType<typeof useConfirm>;
+  ensureLyricsConsent: () => Promise<boolean>;
   history: HistoryItem[];
   historyRef: React.MutableRefObject<HistoryItem[]>;
   existing: Record<string, boolean>;
@@ -89,6 +91,8 @@ interface Args {
 /** Everything that puts downloads in the queue: checks first (already queued, already on disk, disk space), then queues. */
 export function useDownloadActions(a: Args) {
   const { settings, settingsRef, outDir, itemsRef, enqueue, confirm, historyRef, existing, openDownloaded, showFlash, announce, setPage, setErrorMessage, media, search } = a;
+  const [batchLyrics, setBatchLyrics] = useState(settings.lyricsMode);
+  useEffect(() => { setBatchLyrics(settings.searchSource === "youtube_music" ? "both" : settings.lyricsMode); }, [settings.searchSource, settings.lyricsMode]);
 
   /**
    * The one way downloads get queued. Skips what is already queued, asks before repeating something already on
@@ -99,7 +103,7 @@ export function useDownloadActions(a: Args) {
     if (budgetError) { showFlash(`Total download speed: ${budgetError}`, true); return 0; }
     // Site rules (Advanced mode) change what is downloaded and where it goes, before anything is compared or queued.
     const rules = settingsRef.current.mode === "advanced" ? settingsRef.current.siteRules : [];
-    const reqs = asked.map((r): DownloadReq => {
+    let reqs = asked.map((r): DownloadReq => {
       const rule = rules.length && r.applySiteRules !== false ? matchSiteRule(rules, r.url, r.channel) : null;
       if (!rule) return r;
       return { ...r, preset: rule.preset || r.preset, audioFormat: rule.audioFormat || undefined, outDir: rule.folder.trim() || undefined, ruledBy: rule.host.trim() };
@@ -107,6 +111,10 @@ export function useDownloadActions(a: Args) {
     if (!outDir) {
       setErrorMessage("Could not determine a download folder. Choose one in Settings.");
       return 0;
+    }
+    reqs = reqs.map((r) => r.applySiteRules === false ? r : { ...r, lyrics: sourceLyrics(settingsRef.current.searchSource, r.preset, r.lyrics ?? batchLyrics) });
+    if (reqs.some((r) => r.preset === "audio" && r.lyrics && r.lyrics !== "off") && !(await a.ensureLyricsConsent())) {
+      reqs = reqs.map((r) => r.preset === "audio" ? { ...r, lyrics: "off" } : r);
     }
     const keyOf = (r: DownloadReq) => ({ url: r.url, preset: r.preset, outDir: r.outDir ?? outDir, clipKey: clipKeyOf(r.clip ?? null), extra: buildExtra(settingsRef.current, r.formatId, { playlist: r.playlist, clip: r.clip, subs: r.subs, meta: r.meta, cover: r.cover, lyrics: r.lyrics, audio: r.audio, audioFormat: r.audioFormat }) });
 
@@ -270,5 +278,5 @@ export function useDownloadActions(a: Args) {
     if (search) downloadPicked(search.items, kind, "best");
   };
 
-  return { submitDownloads, queueDownload, downloadAgainMany, previewChoice, downloadCurrent, listingCtx, downloadChecked, downloadAll };
+  return { submitDownloads, queueDownload, downloadAgainMany, previewChoice, downloadCurrent, listingCtx, downloadChecked, downloadAll, batchLyrics, setBatchLyrics };
 }

@@ -58,11 +58,10 @@ pub fn read_for(audio: &Path) -> SongLyrics {
             return classify(text, "file");
         }
     }
-    if let Ok(tagged) = lofty::read_from_path(audio)
-        && let Some(tag) = tagged.primary_tag().or_else(|| tagged.first_tag())
-        && let Some(text) = tag.get_string(ItemKey::Lyrics).or_else(|| tag.get_string(ItemKey::UnsyncLyrics)).and_then(tidy)
-    {
-        return classify(text, "tags");
+    if let Ok(tagged) = lofty::read_from_path(audio) {
+        for tag in tagged.tags() {
+            if let Some(text) = tag.get_string(ItemKey::Lyrics).or_else(|| tag.get_string(ItemKey::UnsyncLyrics)).and_then(tidy) { return classify(text, "tags"); }
+        }
     }
     SongLyrics::default()
 }

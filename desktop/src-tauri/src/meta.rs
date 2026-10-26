@@ -348,24 +348,23 @@ pub async fn write_lyrics_file(audio: &Path, lyrics: &Lyrics) -> Result<PathBuf,
     Ok(path)
 }
 
-/// Writes the plain lyrics into the song's tags.
-pub async fn embed_lyrics(ffmpeg: &Path, audio: &Path, lyrics: &Lyrics) -> Result<(), String> {
+/// Preserve synchronized timestamps in the embedded text so the file remains useful
+/// without its sidecar. Plain lyrics are used when synchronized lyrics are unavailable.
+fn lyrics_to_embed(lyrics: &Lyrics) -> Result<String, String> {
+    lyrics.synced.clone().or_else(|| lyrics.plain.clone()).ok_or("No lyrics to embed.".into())
+}
+/// Writes lyrics into the song's tags.
+pub async fn embed_lyrics(_ffmpeg: &Path, audio: &Path, lyrics: &Lyrics) -> Result<(), String> {
     let ext = audio.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).unwrap_or_default();
-    if !["mp3", "m4a", "flac", "opus"].contains(&ext.as_str()) {
+    if !["mp3", "m4a", "flac", "opus", "wav"].contains(&ext.as_str()) {
         return Err(format!("{} files can't hold lyrics.", ext.to_uppercase()));
     }
-    let text = lyrics.plain.clone().or_else(|| lyrics.synced.as_deref().map(strip_timestamps)).ok_or("No lyrics to embed.")?;
-    let tmp = audio.with_extension(format!("kaisu-tmp.{ext}"));
-    let mut args: Vec<String> = ["-y", "-loglevel", "error", "-i"].map(String::from).into();
-    args.push(audio.display().to_string());
-    args.extend(["-map", "0", "-c", "copy", "-map_metadata", "0"].map(String::from));
-    args.push("-metadata".into());
-    args.push(format!("lyrics={text}"));
-    args.push(tmp.display().to_string());
-    run_ffmpeg_replace(ffmpeg, &args, &tmp, audio).await
+    let text = lyrics_to_embed(lyrics)?;
+    crate::tags::embed_lyrics(audio.to_path_buf(), text).await
 }
 
 /// "[01:23.45] words" → "words"
+#[cfg(test)]
 pub fn strip_timestamps(lrc: &str) -> String {
     lrc.lines()
         .map(|l| {
@@ -424,6 +423,13 @@ pub async fn verify_file(ffprobe: &Path, file: &Path, expected: Option<f64>) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn embedding_prefers_lrc_timestamps_and_falls_back_to_plain_text() {
+        let synced = "[00:01.00] A line";
+        assert_eq!(lyrics_to_embed(&Lyrics { synced: Some(synced.into()), plain: Some("A line".into()) }).unwrap(), synced);
+        assert_eq!(lyrics_to_embed(&Lyrics { synced: None, plain: Some("Plain line".into()) }).unwrap(), "Plain line");
+        assert!(lyrics_to_embed(&Lyrics { synced: None, plain: None }).is_err());
+    }
 
     fn meta(f: impl FnOnce(&mut MetaOptions)) -> MetaOptions {
         let mut m = MetaOptions::default();

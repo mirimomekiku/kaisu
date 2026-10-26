@@ -3,6 +3,7 @@ import { open as pickFile } from "@tauri-apps/plugin-dialog";
 import { Calendar, CheckCircle2, Clock, Download, Eye, MonitorPlay, Music, Radio, ThumbsUp, Video } from "lucide-react";
 import FileActions from "./FileActions";
 import Picture from "./Picture";
+import LyricsChoice from "./LyricsChoice";
 import type { AudioExtras, Clip, CoverMode, CoverOptions, FormatInfo, LyricsMode, MediaInfo, MetaOptions, Preset, SubtitleOptions } from "../lib/api";
 import type { FormatPreset } from "../lib/presets";
 import { changedTags, guessTags, headsUp, type TagGuess } from "../lib/tags";
@@ -36,7 +37,6 @@ export interface ExtraDefaults {
 
 const COVER_LABEL: Record<CoverMode, string> = { default: "The video's thumbnail", square: "The thumbnail, cropped square", none: "No cover art", custom: "My own picture…" };
 const QUALITY_CHOICES: Array<[string, string]> = [["", "Best"], ["256K", "256 kbps"], ["192K", "192 kbps"], ["128K", "128 kbps"], ["96K", "96 kbps"]];
-const LYRICS_LABEL: Record<LyricsMode, string> = { off: "No lyrics", file: "Save as a .lrc file", embed: "Put inside the song", both: "Both" };
 const TAG_FIELDS: Array<[keyof TagGuess, string, "text" | "year" | "track"]> = [
   ["title", "Title", "text"],
   ["artist", "Artist", "text"],
@@ -47,6 +47,7 @@ const TAG_FIELDS: Array<[keyof TagGuess, string, "text" | "year" | "track"]> = [
 ];
 
 interface Props {
+  automaticLyrics?: boolean;
   info: MediaInfo;
   /** The starting choices for cover art, lyrics and audio processing. */
   extras: ExtraDefaults;
@@ -106,7 +107,7 @@ function estimateSize(videos: FormatInfo[], audios: FormatInfo[], kind: "video" 
   return pick.filesize + (pick.kind === "video" ? bestAudio : 0);
 }
 
-export default function MediaCard({ info, extras, presets, onSavePreset, onPreview, onWatchPreview, onLyricsChoice, hasCookies, mode, subtitleDefaults, audioLabel, activeOptions, downloads, onDownload, onOpen, onReveal }: Props) {
+export default function MediaCard({ info, extras, presets, onSavePreset, onPreview, onWatchPreview, onLyricsChoice, automaticLyrics, hasCookies, mode, subtitleDefaults, audioLabel, activeOptions, downloads, onDownload, onOpen, onReveal }: Props) {
   const advanced = mode === "advanced";
   const [kind, setKind] = useState<"video" | "audio">("video");
   const [quality, setQuality] = useState<Quality>("best");
@@ -435,6 +436,7 @@ export default function MediaCard({ info, extras, presets, onSavePreset, onPrevi
               </button>
             </div>
 
+            {kind === "audio" && <LyricsChoice value={lyrics} automatic={automaticLyrics} onChange={(mode) => void chooseLyrics(mode)} />}
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div className="flex items-center gap-2 min-h-[22px]">
                 {kind === "video" && (
@@ -591,16 +593,6 @@ export default function MediaCard({ info, extras, presets, onSavePreset, onPrevi
                             </span>
                           </span>
                         )}
-                        <label className="flex items-center gap-2">
-                          Lyrics
-                          <select value={lyrics} onChange={(e) => void chooseLyrics(e.target.value as LyricsMode)} className="field" aria-label="Lyrics">
-                            {(Object.keys(LYRICS_LABEL) as LyricsMode[]).map((m) => (
-                              <option key={m} value={m}>
-                                {LYRICS_LABEL[m]}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
                       </div>
                       <div className="flex items-center gap-3 flex-wrap">
                         <label className="flex items-center gap-2">

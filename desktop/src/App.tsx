@@ -192,6 +192,7 @@ export default function App() {
   const copyPath = useCallback((path: string) => copyText(path, "File location"), [copyText]);
 
   const actions = useDownloadActions({
+    ensureLyricsConsent,
     settings,
     settingsRef,
     outDir: effectiveOutDir,
