@@ -263,6 +263,16 @@ export async function invoke(cmd: string, args: any = {}): Promise<any> {
       await sleep(w.__mock.feedDelay ?? 30);
       if (w.__mock.feedFail || !w.__mock.feeds?.[args.url]) throw "That isn't a podcast feed.";
       return structuredClone(w.__mock.feeds[args.url]);
+    case "album_release_search":
+      if (!args.allowed) throw "Allow the online lookup first.";
+      await sleep(w.__mock.albumDelay ?? 20);
+      if (w.__mock.albumFail) throw "Couldn't reach MusicBrainz.";
+      return structuredClone(w.__mock.albumReleases ?? []);
+    case "album_release_tracks":
+      if (!args.allowed) throw "Allow the online lookup first.";
+      await sleep(w.__mock.albumDelay ?? 20);
+      if (w.__mock.albumFail || !w.__mock.albumTracklist) throw "This release has no tracklist yet.";
+      return structuredClone(w.__mock.albumTracklist);
     case "lyrics_edit_read": {
       if (w.__mock.lyricsEditReadFail) throw "Couldn't read this song.";
       const found = (w.__mock.lyrics ?? {})[args.path];

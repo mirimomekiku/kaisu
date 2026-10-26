@@ -478,6 +478,8 @@ export interface SongLyrics {
 export const lyricsRead = (path: string) => invoke<SongLyrics>("lyrics_read", { path });
 export const lyricsEditRead = (path: string) => invoke<import("./lyricsEdit").LyricsDocument>("lyrics_edit_read", { path });
 export const lyricsEditSave = (path: string, text: string, revision: string, embed: boolean, sidecar: boolean) => invoke<import("./lyricsEdit").LyricsSaved>("lyrics_edit_save", { path, text, revision, embed, sidecar });
+export const albumReleaseSearch = (path: string, title: string, artist: string, allowed: boolean) => invoke<import("./albumCompletion").AlbumRelease[]>("album_release_search", { path, title, artist, allowed, proxy: currentProxy });
+export const albumReleaseTracks = (path: string, releaseId: string, allowed: boolean) => invoke<import("./albumCompletion").AlbumTracklist>("album_release_tracks", { path, releaseId, allowed, proxy: currentProxy });
 /** Looks the song up on LRCLIB and saves the lyrics beside it. Sends the artist and title to that service, so ask first. */
 export const lyricsFind = (path: string) => invoke<SongLyrics>("lyrics_find", { path, proxy: currentProxy });
 

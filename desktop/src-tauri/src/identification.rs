@@ -36,6 +36,59 @@ fn query(title: &str, artist: &str) -> Result<String, String> {
     Ok(format!("recording:\"{}\"{}", quoted(title), if artist.is_empty() { String::new() } else { format!(" AND artist:\"{}\"", quoted(artist)) }))
 }
 
+#[derive(Serialize)]
+pub struct AlbumRelease {
+    pub id: String, pub title: String, pub artist: String, pub date: String, pub country: String,
+    pub edition: String, pub status: String, pub formats: Vec<String>, pub track_count: u64, pub score: u64,
+}
+#[derive(Serialize)]
+pub struct ReleaseTrack {
+    pub id: String, pub disc: u64, pub position: u64, pub number: String, pub title: String, pub artist: String, pub duration: Option<f64>,
+}
+#[derive(Serialize)]
+pub struct AlbumTracklist { pub release: AlbumRelease, pub tracks: Vec<ReleaseTrack>, pub complete: bool }
+fn album_release(r: &Value) -> Option<AlbumRelease> {
+    let id = r["id"].as_str()?; mbid(id).ok()?;
+    let media = r["media"].as_array();
+    Some(AlbumRelease { id: id.into(), title: text(&r["title"]), artist: credit(&r["artist-credit"]), date: text(&r["date"]), country: text(&r["country"]), edition: text(&r["disambiguation"]), status: text(&r["status"]),
+        formats: media.into_iter().flatten().filter_map(|m| m["format"].as_str().map(str::to_string)).collect(),
+        track_count: r["track-count"].as_u64().unwrap_or_else(|| media.into_iter().flatten().map(|m| m["track-count"].as_u64().unwrap_or(0)).sum()),
+        score: r["score"].as_u64().or_else(|| r["score"].as_str().and_then(|s| s.parse().ok())).unwrap_or(0).min(100),
+    })
+}
+fn album_tracklist(value: &Value) -> Result<AlbumTracklist, String> {
+    let release = album_release(value).ok_or("MusicBrainz returned an invalid release.")?;
+    let mut tracks = Vec::new(); let mut complete = true;
+    let media = value["media"].as_array().ok_or("This release has no tracklist yet.")?;
+    for m in media {
+        let list = m["tracks"].as_array().ok_or("A disc in this release has no tracklist yet.")?;
+        if list.len() as u64 != m["track-count"].as_u64().unwrap_or(list.len() as u64) { complete = false; }
+        let disc = m["position"].as_u64().filter(|n| (1..=999).contains(n)).ok_or("Invalid release disc number.")?;
+        for t in list {
+            if tracks.len() >= 1000 { return Err("This release has more than 1000 tracks. Choose a smaller release.".into()); }
+            let position = t["position"].as_u64().filter(|n| (1..=9999).contains(n)).ok_or("Invalid release track position.")?;
+            let artist = credit(&t["artist-credit"]);
+            tracks.push(ReleaseTrack { id: t["id"].as_str().unwrap_or_default().into(), disc, position, number: text(&t["number"]), title: text(&t["title"]), artist: if artist.is_empty() { release.artist.clone() } else { artist }, duration: t["length"].as_u64().or_else(|| t["recording"]["length"].as_u64()).map(|n| n as f64 / 1000.0) });
+        }
+    }
+    if tracks.is_empty() { return Err("This release has no tracklist yet.".into()); }
+    if release.track_count != tracks.len() as u64 { complete = false; }
+    Ok(AlbumTracklist { release, tracks, complete })
+}
+#[tauri::command]
+pub async fn album_release_search(scope: State<'_, Scope>, service: State<'_, Identification>, path: String, title: String, artist: String, allowed: bool, proxy: Option<String>) -> Result<Vec<AlbumRelease>, String> {
+    consent(allowed)?; scope.media_file(&path)?;
+    let query = query(&title, &artist)?.replacen("recording:", "release:", 1);
+    let proxy = crate::net::proxy_option(proxy.as_deref())?;
+    let value = service.get("release", &[("query", &query), ("fmt", "json"), ("limit", "20")], proxy.as_deref()).await?;
+    Ok(value["releases"].as_array().into_iter().flatten().take(20).filter_map(album_release).collect())
+}
+#[tauri::command]
+pub async fn album_release_tracks(scope: State<'_, Scope>, service: State<'_, Identification>, path: String, release_id: String, allowed: bool, proxy: Option<String>) -> Result<AlbumTracklist, String> {
+    consent(allowed)?; scope.media_file(&path)?; mbid(&release_id)?;
+    let proxy = crate::net::proxy_option(proxy.as_deref())?;
+    album_tracklist(&service.get(&format!("release/{release_id}"), &[("fmt", "json"), ("inc", "recordings+artist-credits")], proxy.as_deref()).await?)
+}
 async fn bytes(mut response: reqwest::Response, maximum: usize) -> Result<Vec<u8>, String> {
     if !response.status().is_success() {
         return Err(match response.status().as_u16() {
@@ -129,6 +182,15 @@ mod tests {
         assert_eq!(query("A \"song\"", "A\\B").unwrap(), "recording:\"A \\\"song\\\"\" AND artist:\"A\\\\B\"");
         assert!(query("", "artist").is_err()); assert!(query(&"x".repeat(201), "").is_err()); assert!(consent(false).is_err());
         assert!(mbid("../bad").is_err());
+    }
+    #[test]
+    fn album_tracklists_keep_discs_and_flag_incomplete_editions() {
+        let value = serde_json::json!({"id":"11111111-1111-4111-8111-111111111111","title":"Album","artist-credit":[{"name":"Artist"}],"media":[{"position":1,"track-count":1,"tracks":[{"id":"track1","position":1,"number":"A1","title":"First","length":123000}]},{"position":2,"track-count":2,"tracks":[{"position":1,"number":"1","title":"Bonus","recording":{"length":90000}}]}]});
+        let result = album_tracklist(&value).unwrap();
+        assert_eq!(result.tracks.len(), 2); assert_eq!(result.tracks[0].number, "A1");
+        assert_eq!(result.tracks[1].disc, 2); assert_eq!(result.tracks[1].duration, Some(90.0)); assert!(!result.complete);
+        let missing = serde_json::json!({"id":"11111111-1111-4111-8111-111111111111","title":"Empty","media":[]});
+        assert!(album_tracklist(&missing).is_err());
     }
     #[test]
     fn release_suggestions_use_the_matching_track_not_the_first_track() {

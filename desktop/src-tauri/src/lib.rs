@@ -132,6 +132,8 @@ pub fn run() {
             identification::identify_search,
             identification::identify_details,
             identification::identify_cover,
+            identification::album_release_search,
+            identification::album_release_tracks,
             lyrics_edit::lyrics_edit_read,
             lyrics_edit::lyrics_edit_save,
             portable_sync::portable_sync_devices,
