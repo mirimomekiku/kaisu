@@ -1,0 +1,58 @@
+[
+  {
+    "args": "--extractor-args 'youtube:po_token=web+private-po-token,android+private-mobile-token;player_client=web' --verbose --embed-chapters",
+    "text": "[debug] extractor_args={'youtube': {'po_token': ['web+private-po-token', 'android+private-mobile-token'], 'player_client': ['web']}}; token private-po-token; format webm; --embed-chapters",
+    "secrets": [
+      "private-po-token",
+      "private-mobile-token"
+    ],
+    "keep": [
+      "webm",
+      "--embed-chapters"
+    ]
+  },
+  {
+    "args": "--extractor-args=youtube:session=private-session --limit-rate 500K",
+    "text": "Command: --extractor-args=youtube:session=private-session --limit-rate 500K; parsed session private-session",
+    "secrets": [
+      "private-session"
+    ],
+    "keep": [
+      "--limit-rate 500K"
+    ]
+  },
+  {
+    "args": "--referer='https://example.com/private/path' --add-headers \"X-Custom: arbitrary-private-header\" --embed-chapters",
+    "text": "Referer https://example.com/private/path; X-Custom: arbitrary-private-header; --embed-chapters",
+    "secrets": [
+      "https://example.com/private/path",
+      "arbitrary-private-header"
+    ],
+    "keep": [
+      "--embed-chapters"
+    ]
+  },
+  {
+    "args": "--add-headers 'X-Short: abc' --extractor-args 'youtube:player_client=web'",
+    "text": "header abc; client web; file abcdef.webm",
+    "secrets": [
+      "header abc;",
+      "client web;"
+    ],
+    "keep": [
+      "abcdef.webm"
+    ]
+  },
+  {
+    "args": "--add-headers \"X-Private: private'quoted\\\"credential\\\\value\"",
+    "text": "['--add-headers', 'X-Private: private\\'quoted\"credential\\\\value'] JSON {\"header\": \"private'quoted\\\"credential\\\\value\"} --embed-chapters",
+    "secrets": [
+      "private'quoted\"credential\\value",
+      "private\\'quoted\"credential\\\\value",
+      "private'quoted\\\"credential\\\\value"
+    ],
+    "keep": [
+      "--embed-chapters"
+    ]
+  }
+]

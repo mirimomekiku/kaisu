@@ -662,7 +662,7 @@ pub async fn start_download(
                 run_download(&app, &engine, &downloads, &req, &on_event).await
             } => result,
         }
-    }).await.map_err(|message: String| net::redact_values(&message, &net::custom_header_values(req.extra.custom_args.as_deref())));
+    }).await.map_err(|message: String| net::redact_values(&message, &net::custom_secret_values(req.extra.custom_args.as_deref())));
     drop(running);
     if job.is_cancelled() { let _ = on_event.send(DownloadEvent::Cancelled); return Ok(()); }
     match &result {
@@ -711,7 +711,7 @@ async fn run_download(
     let mut planning = args.clone();
     let at = planning.len() - 2;
     planning.splice(at..at, ["--simulate".into(), "--print".into(), "KAISU_PLAN|%(filename)s".into(), "--print".into(), "KAISU_TRANSPORT|%(protocol)s|%(is_live)s".into()]);
-    let plan = proc::run_capture_proxied(&ytdlp, &planning.iter().map(String::as_str).collect::<Vec<_>>(), Duration::from_secs(90), proxy.as_deref()).await?;
+    let plan = crate::ytdlp::run_capture(&ytdlp, &planning.iter().map(String::as_str).collect::<Vec<_>>(), Duration::from_secs(90), proxy.as_deref()).await?;
     let planned = plan.lines().find_map(|l| l.strip_prefix("KAISU_PLAN|")).ok_or("Could not resolve the output filename before downloading.")?;
     let planned = PathBuf::from(planned.trim());
     if let Some(transport) = plan.lines().find_map(|l| l.strip_prefix("KAISU_TRANSPORT|")) {
@@ -760,7 +760,7 @@ async fn run_download(
     ]);
     validate_planned_path(&chosen, &req.out_dir)?;
     crate::download_manifest::save(app, req, Some(&chosen.display().to_string()), None)?;
-    let mut child = proc::command_with_proxy(&ytdlp, proxy.as_deref()).args(&args).spawn().map_err(|e| format!("Failed to start yt-dlp: {e}"))?;
+    let mut child = crate::ytdlp::command(&ytdlp, proxy.as_deref()).args(&args).spawn().map_err(|e| format!("Failed to start yt-dlp: {e}"))?;
     let pid = child.id().ok_or("yt-dlp exited immediately")?;
     let job = proc::DOWNLOAD_JOB.with(Clone::clone);
     let mut lease = job.attach(pid);
@@ -768,7 +768,7 @@ async fn run_download(
     let stderr = child.stderr.take().ok_or("no stderr")?;
 
     let log_channel = on_event.clone();
-    let header_values = net::custom_header_values(req.extra.custom_args.as_deref());
+    let header_values = net::custom_secret_values(req.extra.custom_args.as_deref());
     let stderr_secrets = header_values.clone();
     let stderr_task = tokio::spawn(async move {
         let mut lines = BufReader::new(stderr).lines();
@@ -943,12 +943,13 @@ pub async fn preview_command(app: AppHandle, engine: State<'_, Engine>, req: Dow
 }
 fn preview_args(req: &DownloadRequest, ffmpeg_dir: &std::path::Path, runtime: Option<&str>) -> Result<Vec<String>, String> {
     let url = validate_url(&req.url)?.to_string();
-    let mut args = build_args(req, &url, ffmpeg_dir, runtime)?;
+    let values = net::custom_secret_values(req.extra.custom_args.as_deref());
+    let mut args = vec![crate::ytdlp::IGNORE_CONFIG.to_string()];
+    args.extend(build_args(req, &url, ffmpeg_dir, runtime).map_err(|e| net::redact_values(&e, &values))?);
     if let Some(proxy) = net::proxy_option(req.extra.proxy.as_deref())? {
         let at = args.len() - 2;
         args.splice(at..at, ["--proxy".to_string(), net::redact_urls(&proxy)]);
     }
-    let values = net::custom_header_values(req.extra.custom_args.as_deref());
     Ok(args.into_iter().map(|arg| net::redact_values(&arg, &values)).collect())
 }
 fn command_line(executable: &str, args: &[String], powershell: bool) -> String {
@@ -1103,7 +1104,7 @@ pub async fn get_media_info(
     args.extend(["--".into(), url.to_string()]);
     let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
 
-    let json = proc::run_capture_proxied(&ytdlp, &arg_refs, Duration::from_secs(60), proxy.as_deref()).await?;
+    let json = crate::ytdlp::run_capture(&ytdlp, &arg_refs, Duration::from_secs(60), proxy.as_deref()).await?;
     let v: serde_json::Value = serde_json::from_str(&json).map_err(|e| format!("Unreadable response from yt-dlp: {e}"))?;
 
     let text = |k: &str| v.get(k).and_then(|x| x.as_str()).map(str::to_string);
@@ -1386,7 +1387,19 @@ mod tests {
         assert_eq!(shell_quote_for("it's", false), "'it'\\''s'");
         assert_eq!(shell_quote_for("it's", true), "'it''s'");
         let p = preview_command(req(Preset::Best)).unwrap();
-        assert!(p.starts_with("yt-dlp --no-playlist") && p.ends_with("-- https://example.com/v"));
+        assert!(p.starts_with("yt-dlp --ignore-config --no-playlist") && p.ends_with("-- https://example.com/v"));
+    }
+
+    #[test]
+    fn copied_commands_hide_extractor_tokens_referers_and_headers() {
+        let mut r = req(Preset::Best);
+        r.extra.custom_args = Some("--extractor-args 'youtube:po_token=web+private-po-token' --referer https://example.com/private-path --add-headers 'X-Custom: private-header' --embed-chapters".into());
+        let real = args(&r).unwrap().join(" ");
+        assert!(real.contains("private-po-token"), "live credentials must still reach the downloader");
+        let preview = preview_command(r).unwrap();
+        for secret in ["private-po-token", "private-path", "private-header"] { assert!(!preview.contains(secret), "{preview}"); }
+        assert!(preview.contains("--embed-chapters"));
+        assert!(preview.contains("--ignore-config"));
     }
 
     #[test]

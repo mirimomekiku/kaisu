@@ -15,7 +15,7 @@ import { uniqueDownloads } from "../lib/downloadIdentity";
 export { sameDownload } from "../lib/downloadIdentity";
 import { networkAllocation } from "../lib/networkBudget";
 import { pickStartable, resourceGate, type ResourceGate } from "../lib/queueStart";
-import { redactText } from "../lib/redact";
+import { customSecretValues, redactCustomText } from "../lib/redact";
 import type { SavedDownload } from "../lib/storage";
 import { editWaitingDownloads, type QueueEdit } from "../lib/queueEdit";
 
@@ -239,10 +239,14 @@ export function useDownloads(concurrency: number, onCompleted: (item: DownloadIt
       warnings.current.delete(it.id);
       const run = { nativeId: newId(), terminal: false };
       runs.current.set(it.id, run);
+      const secrets = customSecretValues(it.extra.custom_args);
+      const safeText = (text: string) => redactCustomText(text, secrets);
       const receive = (e: DownloadEvent) => {
         if (runs.current.get(it.id) !== run || run.terminal) return;
-        if (e.kind === "log") e = { ...e, line: redactText(e.line) };
-        if (e.kind === "error" || e.kind === "warning") e = { ...e, message: redactText(e.message) };
+        if (e.kind === "log") e = { ...e, line: safeText(e.line) };
+        if (e.kind === "error" || e.kind === "warning") e = { ...e, message: safeText(e.message) };
+        if (e.kind === "meta") e = { ...e, title: safeText(e.title) };
+        if (e.kind === "checked" && e.note) e = { ...e, note: safeText(e.note) };
         if (["done", "skipped", "error", "cancelled"].includes(e.kind)) run.terminal = true;
         handleEvent(it.id, e);
       };

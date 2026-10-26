@@ -91,7 +91,15 @@ pub async fn run_capture(program: &Path, args: &[&str], timeout: Duration) -> Re
 
 /// `run_capture`, through `proxy` when one is given (see `command_with_proxy`).
 pub async fn run_capture_proxied(program: &Path, args: &[&str], timeout: Duration, proxy: Option<&str>) -> Result<String, String> {
-    let mut child = command_with_proxy(program, proxy).args(args).spawn().map_err(|e| format!("Failed to start {}: {e}", program.display()))?;
+    let mut cmd = command_with_proxy(program, proxy);
+    cmd.args(args);
+    capture(cmd, timeout).await
+}
+
+/// Capture an already configured command, retaining the same process leases and cancellation.
+pub async fn capture(mut cmd: Command, timeout: Duration) -> Result<String, String> {
+    let program = cmd.as_std().get_program().to_string_lossy().into_owned();
+    let mut child = cmd.spawn().map_err(|e| format!("Failed to start {program}: {e}"))?;
     let mut lease = track_child(child.id());
     let mut stdout = child.stdout.take().ok_or("no stdout")?;
     let mut stderr = child.stderr.take().ok_or("no stderr")?;

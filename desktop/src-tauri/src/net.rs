@@ -5,7 +5,7 @@ use std::time::Duration;
 use tauri::{AppHandle, State};
 use url::Url;
 
-use crate::{engine::Engine, proc};
+use crate::engine::Engine;
 
 const MAX_PROXY_CHARS: usize = 300;
 const SCHEMES: &[&str] = &["http", "https", "socks4", "socks4a", "socks5", "socks5h"];
@@ -77,22 +77,57 @@ pub fn sensitive_custom_args(text: &str) -> bool {
     let lower = text.to_ascii_lowercase();
     ["--add-headers", "--extractor-args", "--referer", "authorization", "cookie:", "token=", "password="].iter().any(|key| lower.contains(key))
 }
-/// Remember values from explicitly supplied headers, including arbitrary X-* names.
-pub fn custom_header_values(text: Option<&str>) -> Vec<String> {
-    let args = text.and_then(|s| crate::custom_args::parse_custom_args(s).ok()).unwrap_or_default();
+/// Remember sensitive option payloads, not just credentials with recognizable names.
+/// split_args also works before validation, so a rejected custom option cannot leak a
+/// preceding credential through an error message. Whole payloads cover command previews;
+/// individual extractor values cover yt-dlp's parsed debug dictionaries and error messages.
+pub fn custom_secret_values(text: Option<&str>) -> Vec<String> {
+    let args = text.and_then(|s| crate::custom_args::split_args(s).ok()).unwrap_or_default();
     let mut values = Vec::new();
     for (i, arg) in args.iter().enumerate() {
-        let header = arg.strip_prefix("--add-headers=").or_else(|| (arg == "--add-headers").then(|| args.get(i + 1).map(String::as_str)).flatten());
-        if let Some((_, value)) = header.and_then(|s| s.split_once(':')) {
-            let value = value.trim();
-            if !value.is_empty() { values.push(value.to_string()); }
+        let (option, inline) = arg.split_once('=').map(|(k, v)| (k, Some(v))).unwrap_or((arg, None));
+        if !["--add-headers", "--extractor-args", "--referer"].contains(&option) { continue; }
+        let Some(value) = inline.or_else(|| args.get(i + 1).map(String::as_str)) else { continue };
+        values.push(value.to_string());
+        if option == "--add-headers" {
+            if let Some((_, payload)) = value.split_once(':') { values.push(payload.trim().to_string()); }
+        } else if option == "--extractor-args" {
+            for field in value.split(';') {
+                if let Some((_, payload)) = field.split_once('=') {
+                    for token in payload.split(',') {
+                        values.push(token.to_string());
+                        // PO tokens are printed both as CONTEXT+TOKEN and as TOKEN alone.
+                        if let Some((_, token)) = token.split_once('+') { values.push(token.to_string()); }
+                    }
+                }
+            }
         }
+    }
+    values.retain(|v| !v.is_empty());
+    // Python repr/debug dictionaries and JSON diagnostics escape quotes and backslashes.
+    for value in values.clone() {
+        let escaped = value.replace('\\', "\\\\").replace('\n', "\\n").replace('\r', "\\r").replace('\t', "\\t");
+        values.push(escaped.replace('\'', "\\'"));
+        values.push(escaped.replace('"', "\\\""));
     }
     values.sort_by_key(|s| std::cmp::Reverse(s.len())); values.dedup(); values
 }
 pub fn redact_values(text: &str, values: &[String]) -> String {
     let mut safe = text.to_string();
-    for value in values { safe = safe.replace(value, "[REDACTED]"); }
+    for value in values {
+        // Avoid turning benign short extractor values (e.g. player_client=web) into
+        // substring redactions of unrelated words such as webm.
+        if value.len() >= 4 { safe = safe.replace(value, "[REDACTED]"); continue; }
+        let mut out = String::new();
+        let mut end = 0;
+        for (at, _) in safe.match_indices(value) {
+            let boundary = |c: char| !c.is_alphanumeric() && c != '_';
+            if safe[..at].chars().next_back().is_none_or(boundary) && safe[at + value.len()..].chars().next().is_none_or(boundary) {
+                out.push_str(&safe[end..at]); out.push_str("[REDACTED]"); end = at + value.len();
+            }
+        }
+        out.push_str(&safe[end..]); safe = out;
+    }
     redact_urls(&safe)
 }
 /// Names whose values are secret. Checked against `testdata/download-validation.json`, which the frontend reads too.
@@ -129,7 +164,7 @@ pub async fn test_proxy(app: AppHandle, engine: State<'_, Engine>, proxy: String
     let proxy = validate_proxy(&proxy)?;
     let ytdlp = engine.ytdlp_path(&app).await?;
     let args = ["--flat-playlist", "--dump-single-json", "--no-warnings", "--", "ytsearch1:kaisu"];
-    proc::run_capture_proxied(&ytdlp, &args, Duration::from_secs(45), Some(&proxy))
+    crate::ytdlp::run_capture(&ytdlp, &args, Duration::from_secs(45), Some(&proxy))
         .await
         .map(|_| "The proxy works: Kaisu reached YouTube through it.".to_string())
         .map_err(|e| {
@@ -141,6 +176,22 @@ pub async fn test_proxy(app: AppHandle, engine: State<'_, Engine>, proxy: String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sensitive_argument_payloads_are_redacted_in_commands_and_parsed_diagnostics() {
+        let cases: serde_json::Value = serde_json::from_str(include_str!("../../testdata/custom-argument-redaction.json")).unwrap();
+        for fixture in cases.as_array().unwrap() {
+            let values = custom_secret_values(fixture["args"].as_str());
+            let diagnostic = redact_values(fixture["text"].as_str().unwrap(), &values);
+            let command = redact_values(fixture["args"].as_str().unwrap(), &values);
+            for secret in fixture["secrets"].as_array().unwrap() {
+                let secret = secret.as_str().unwrap();
+                assert!(!diagnostic.contains(secret), "{diagnostic}");
+                assert!(!command.contains(secret), "{command}");
+            }
+            for public in fixture["keep"].as_array().unwrap() { assert!(diagnostic.contains(public.as_str().unwrap()), "{diagnostic}"); }
+        }
+    }
 
     #[test]
     fn secret_key_lists_match_the_shared_cases() {
@@ -159,8 +210,8 @@ mod tests {
         let safe = redact_urls(text);
         for secret in ["private", "signature-secret", "private-header", "private-cookie"] { assert!(!safe.contains(secret), "{safe}"); }
         assert!(safe.contains("v=public"));
-        let values = custom_header_values(Some("--add-headers='X-Custom: arbitrary-secret'"));
-        assert_eq!(values, vec!["arbitrary-secret"]);
+        let values = custom_secret_values(Some("--add-headers='X-Custom: arbitrary-secret'"));
+        assert!(values.contains(&"arbitrary-secret".to_string()));
         assert_eq!(redact_values("header value arbitrary-secret", &values), "header value [REDACTED]");
     }
 

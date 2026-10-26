@@ -30,6 +30,7 @@ mod tags;
 mod thumbs;
 mod transfer;
 mod tray;
+mod ytdlp;
 
 use engine::{Engine, EngineInfo, UpdateResult};
 use tauri::{AppHandle, Manager, State};

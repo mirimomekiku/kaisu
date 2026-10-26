@@ -87,7 +87,7 @@ pub async fn preview_clip(app: AppHandle, engine: State<'_, Engine>, downloads: 
 
     let args = preview_args(&dir, &url, &ffmpeg_dir, js.as_deref());
     let refs: Vec<&str> = args.iter().map(String::as_str).collect();
-    let out = proc::run_capture_proxied(&ytdlp, &refs, PREVIEW_TIMEOUT, proxy.as_deref()).await?;
+    let out = crate::ytdlp::run_capture(&ytdlp, &refs, PREVIEW_TIMEOUT, proxy.as_deref()).await?;
     let file = out.lines().map(str::trim).rfind(|l| !l.is_empty()).ok_or("The preview didn't produce a file.")?;
     let real = fs::canonicalize(file).map_err(|_| "The preview didn't produce a file.".to_string())?;
     let real_dir = fs::canonicalize(&dir).map_err(|e| e.to_string())?;
