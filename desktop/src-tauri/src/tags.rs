@@ -174,6 +174,11 @@ pub async fn embed_lyrics(path: std::path::PathBuf, lyrics: String) -> Result<()
     tauri::async_runtime::spawn_blocking(move || rewrite_file(&path, &TagEdit::default(), None, Some(&lyrics), job.as_deref()).map(|_| ())).await.map_err(|e| e.to_string())?
 }
 
+pub(crate) fn embed_lyrics_file(path: &Path, lyrics: &str) -> Result<(), String> {
+    if lyrics.trim().is_empty() || lyrics.len() > 512 * 1024 || lyrics.contains('\0') { return Err("Lyrics are empty, too large, or contain invalid characters.".into()); }
+    rewrite_file(path, &TagEdit::default(), None, Some(lyrics), None).map(|_| ())
+}
+
 fn rewrite_file(path: &Path, edit: &TagEdit, replacement: Option<&[u8]>, lyrics: Option<&str>, job: Option<&crate::proc::JobControl>) -> Result<LibTrack, String> {
     if job.is_some_and(|j| j.is_cancelled()) { return Err("Lyrics embedding cancelled.".into()); }
     let checked = check(edit)?;

@@ -64,7 +64,7 @@ export default function FullScreenPlayer({ engine, onClose }: { engine: PlayerEn
         <div className="full-track" aria-live="polite"><span className="full-kicker">{track.album || "Your music"}</span><h1 title={track.title}>{track.title}</h1><p>{track.artist || "Unknown artist"}</p></div>
       </section>
       <section id={`${id}-panel`} role="tabpanel" aria-labelledby={`${id}-${tab}`} className={`full-panel full-${tab}`}>
-        {tab === "lyrics" ? <LyricsPanel key={track.path} engine={engine} track={track} embedded askConsent={media?.lyricsConsent ?? (async () => false)} onClose={() => setTab("queue")} /> : <QueuePanel engine={engine} onClose={() => setTab("lyrics")} />}
+        {tab === "lyrics" ? <LyricsPanel engine={engine} track={track} embedded askConsent={media?.lyricsConsent ?? (async () => false)} onClose={() => setTab("queue")} /> : <QueuePanel engine={engine} onClose={() => setTab("lyrics")} />}
       </section>
     </main>
     <footer className="full-transport">

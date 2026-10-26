@@ -12,6 +12,7 @@ mod library_folders;
 mod links;
 mod loudness;
 mod lyrics;
+mod lyrics_edit;
 mod media;
 mod media_stream;
 mod meta;
@@ -131,6 +132,8 @@ pub fn run() {
             identification::identify_search,
             identification::identify_details,
             identification::identify_cover,
+            lyrics_edit::lyrics_edit_read,
+            lyrics_edit::lyrics_edit_save,
             portable_sync::portable_sync_devices,
             portable_sync::portable_sync_profiles,
             portable_sync::portable_sync_create,

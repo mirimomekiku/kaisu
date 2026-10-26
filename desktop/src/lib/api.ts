@@ -476,6 +476,8 @@ export interface SongLyrics {
 }
 /** The lyrics a song already has: a .lrc or .txt beside it, or inside its tags. */
 export const lyricsRead = (path: string) => invoke<SongLyrics>("lyrics_read", { path });
+export const lyricsEditRead = (path: string) => invoke<import("./lyricsEdit").LyricsDocument>("lyrics_edit_read", { path });
+export const lyricsEditSave = (path: string, text: string, revision: string, embed: boolean, sidecar: boolean) => invoke<import("./lyricsEdit").LyricsSaved>("lyrics_edit_save", { path, text, revision, embed, sidecar });
 /** Looks the song up on LRCLIB and saves the lyrics beside it. Sends the artist and title to that service, so ask first. */
 export const lyricsFind = (path: string) => invoke<SongLyrics>("lyrics_find", { path, proxy: currentProxy });
 

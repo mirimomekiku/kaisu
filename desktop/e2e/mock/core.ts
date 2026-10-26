@@ -263,6 +263,20 @@ export async function invoke(cmd: string, args: any = {}): Promise<any> {
       await sleep(w.__mock.feedDelay ?? 30);
       if (w.__mock.feedFail || !w.__mock.feeds?.[args.url]) throw "That isn't a podcast feed.";
       return structuredClone(w.__mock.feeds[args.url]);
+    case "lyrics_edit_read": {
+      if (w.__mock.lyricsEditReadFail) throw "Couldn't read this song.";
+      const found = (w.__mock.lyrics ?? {})[args.path];
+      return { text: found?.synced ?? found?.plain ?? "", revision: String(w.__mock.lyricsRevision ?? 1), sidecar: found?.source === "file" };
+    }
+    case "lyrics_edit_save": {
+      await sleep(w.__mock.lyricsEditDelay ?? 20);
+      if (w.__mock.lyricsEditSaveFail) throw "The lyrics file was not saved: permission denied.";
+      if (args.revision !== String(w.__mock.lyricsRevision ?? 1)) throw "The song or its lyrics changed outside this editor. Reload saved lyrics before saving.";
+      w.__mock.lyricsRevision = Number(w.__mock.lyricsRevision ?? 1) + 1;
+      const synced = /^\[\d+:\d+/m.test(args.text);
+      (w.__mock.lyrics ??= {})[args.path] = { synced: synced ? args.text : null, plain: synced ? null : args.text, source: args.sidecar ? "file" : "tags" };
+      return { document: { text: args.text, revision: String(w.__mock.lyricsRevision), sidecar: args.sidecar }, embedded: args.embed, sidecar: args.sidecar, warnings: [] };
+    }
     case "lyrics_read":
       return (w.__mock.lyrics ?? {})[args.path] ?? { synced: null, plain: null, source: null };
     case "lyrics_find": {

@@ -28,8 +28,13 @@ pub struct SongLyrics {
 /// Whether text has the `[mm:ss...]` timestamps that make lyrics followable.
 pub fn looks_synced(text: &str) -> bool {
     text.lines().any(|l| {
-        let b = l.trim_start().as_bytes();
-        b.len() > 5 && b[0] == b'[' && b[1].is_ascii_digit() && b[2].is_ascii_digit() && b[3] == b':' && b[4].is_ascii_digit() && b[5].is_ascii_digit()
+        let Some((stamp, _)) = l.trim_start().strip_prefix('[').and_then(|s| s.split_once(']')) else { return false };
+        let mut fields = stamp.split([':', '.']);
+        let (Some(minutes), Some(seconds)) = (fields.next(), fields.next()) else { return false };
+        let fraction = fields.next();
+        (1..=3).contains(&minutes.len()) && minutes.bytes().all(|b| b.is_ascii_digit())
+            && seconds.len() == 2 && seconds.parse::<u8>().is_ok_and(|s| s < 60)
+            && fraction.is_none_or(|f| (1..=3).contains(&f.len()) && f.bytes().all(|b| b.is_ascii_digit())) && fields.next().is_none()
     })
 }
 
@@ -104,6 +109,9 @@ mod tests {
         assert!(looks_synced("[00:12.50] Hello\n[00:15.00] World"));
         assert!(looks_synced("[ar:Someone]\n[01:02.3]line"));
         assert!(looks_synced("  [10:00] after a gap"));
+        assert!(looks_synced("[1:02.30]One-minute timestamp"));
+        assert!(looks_synced("[123:02.300]Long recording"));
+        assert!(!looks_synced("[00:99.50]Invalid seconds"));
         assert!(!looks_synced("Just words\nand more words"));
         assert!(!looks_synced("[Chorus]\nla la la"));
         assert!(!looks_synced(""));

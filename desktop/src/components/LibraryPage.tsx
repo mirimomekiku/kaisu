@@ -19,6 +19,7 @@ import type { Listening } from "../lib/listening";
 import MusicFolders from "./MusicFolders";
 import DuplicateFinder from "./DuplicateFinder";
 import PortableSync from "./PortableSync";
+import LyricsEditor from "./LyricsEditor";
 
 type View = "songs" | "albums" | "artists" | "playlists" | "listening";
 
@@ -76,6 +77,7 @@ export default function LibraryPage({ playlists, tracks, management, listening, 
   const [foldersOpen, setFoldersOpen] = useState(false);
   const [duplicatesOpen, setDuplicatesOpen] = useState(false);
   const [syncOpen, setSyncOpen] = useState(false);
+  const [lyricTrack, setLyricTrack] = useState<LibTrack | null>(null);
   const [availability, setAvailability] = useState("available");
   const eligible = useMemo(() => tracks.filter((t) => (!favoritesOnly || preferences?.[t.path]?.favorite) && (preferences?.[t.path]?.rating ?? 0) >= minimumRating && (availability === "all" || (availability === "missing" ? !!t.missing : !t.missing))), [tracks, availability, favoritesOnly, minimumRating, preferences]);
 
@@ -205,7 +207,7 @@ export default function LibraryPage({ playlists, tracks, management, listening, 
           <button className="btn" onClick={() => { resetFilters(); setQuery(""); setArtist(""); }}>Reset library filters</button>
         </div>
       ) : view === "songs" ? (
-        <SongList tracks={shown} onLocate={(path) => void locate(path)} onPlay={play} onNext={next} onAdd={add} onReveal={onReveal} onEdit={setEditing} onPlaylist={setAdding} announce={announce} />
+        <SongList tracks={shown} onLyrics={setLyricTrack} onLocate={(path) => void locate(path)} onPlay={play} onNext={next} onAdd={add} onReveal={onReveal} onEdit={setEditing} onPlaylist={setAdding} announce={announce} />
       ) : view === "albums" ? (
         album ? (
           <AlbumDetail album={album} onLocate={(path) => void locate(path)} onBack={() => setOpenAlbum(null)} onPlay={play} onNext={next} onAdd={add} onEdit={setEditing} onPlaylist={setAdding} />
@@ -266,6 +268,7 @@ export default function LibraryPage({ playlists, tracks, management, listening, 
       {foldersOpen && <MusicFolders management={management} onClose={() => setFoldersOpen(false)} />}
       {duplicatesOpen && <DuplicateFinder byPath={byPath} onChanged={onScan} onReveal={onReveal} onClose={() => setDuplicatesOpen(false)} />}
       {syncOpen && <PortableSync tracks={tracks} playlists={playlists.playlists} listening={listening} onClose={() => setSyncOpen(false)} />}
+      {lyricTrack && <LyricsEditor key={lyricTrack.path} path={lyricTrack.path} title={lyricTrack.title} artist={lyricTrack.artist} onSaved={onScan} onClose={() => setLyricTrack(null)} />}
       {editing && (
         <TagEditor
           // A new key for a new selection starts the form afresh.
