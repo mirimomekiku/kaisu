@@ -24,11 +24,12 @@ interface Props {
   onAdd: (list: LibTrack[]) => void;
   onReveal: (path: string) => void;
   onEdit: (tracks: LibTrack[]) => void;
+  onLyrics?: (track: LibTrack) => void;
   onPlaylist: (tracks: LibTrack[]) => void;
   announce: (note: { title: string; subtitle?: string }) => void;
 }
 
-export default function SongList({ tracks, onLocate, onPlay, onNext, onAdd, onReveal, onEdit, onPlaylist, announce }: Props) {
+export default function SongList({ tracks, onLocate, onPlay, onNext, onAdd, onReveal, onEdit, onLyrics, onPlaylist, announce }: Props) {
   const preferences = useMusicPreferences();
   const rows = useVirtualRows(tracks.length, ROW_HEIGHT);
   const [selection, setSelection] = useState(emptySelection);
@@ -174,6 +175,7 @@ export default function SongList({ tracks, onLocate, onPlay, onNext, onAdd, onRe
                   { label: `Add ${t.title} to a playlist`, onSelect: () => onPlaylist([t]) },
                   { kind: "separator" },
                   { label: `Edit tags of ${t.title}`, onSelect: () => onEdit([t]) },
+                  ...(onLyrics ? [{ label: `Edit lyrics of ${t.title}`, onSelect: () => onLyrics(t) }] : []),
                   { label: `Show ${t.title} in its folder`, onSelect: () => onReveal(t.path) },
                 ]} />}
               </span>

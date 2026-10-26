@@ -61,6 +61,7 @@ await page.getByLabel("Bulk speed limit", { exact: true }).fill("500K"); await p
 await page.waitForFunction(() => JSON.parse(localStorage.getItem("__store")).queue.find((q) => q.id === "Alpha").preset === "audio");
 let queue = (await saved(page)).queue;
 check("bulk edits: persist quality, format, folder and speed", queue.find((q) => q.id === "Alpha").outDir === "/home/u/Videos" && queue.find((q) => q.id === "Alpha").extra.audio_format === "flac" && queue.find((q) => q.id === "Alpha").extra.rate_limit === "500K" && queue.find((q) => q.id === "Alpha").extra.format_id === null);
+check("bulk edits: changed output receives a new persisted recovery identity", queue.find((q) => q.id === "Alpha").recoveryId !== "Alpha" && queue.find((q) => q.id === "Beta").recoveryId === "Beta");
 check("bulk edits: unrelated items remain unchanged", queue.find((q) => q.id === "Beta").preset === "best" && queue.find((q) => q.id === "Other").extra.rate_limit === null);
 await page.getByLabel("Search downloads").fill("example.com/Beta");
 check("search: URLs are searchable", await page.getByLabel("Select download Beta", { exact: true }).count() === 1 && await page.getByLabel("Select download Alpha", { exact: true }).count() === 0);

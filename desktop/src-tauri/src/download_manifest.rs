@@ -32,24 +32,56 @@ fn scrub_request(request: &mut DownloadRequest) {
 pub fn save(app: &AppHandle, req: &DownloadRequest, path: Option<&str>, format: Option<&str>) -> Result<(), String> {
     save_at(dir(app)?, req, path, format)
 }
-pub fn owned_path(app: &AppHandle, req: &DownloadRequest) -> Option<PathBuf> {
-    let file = dir(app).ok()?.join(format!("{}.json", key(req).ok()?));
+pub fn owned_path(app: &AppHandle, req: &DownloadRequest, resolved_format: Option<&str>) -> Option<PathBuf> {
+    owned_path_at(dir(app).ok()?, req, resolved_format)
+}
+fn owned_path_at(root: PathBuf, req: &DownloadRequest, resolved_format: Option<&str>) -> Option<PathBuf> {
+    let file = root.join(format!("{}.json", key(req).ok()?));
     let record: Recovery = serde_json::from_slice(&fs::read(file).ok()?).ok()?;
-    // A reused recovery ID must not adopt another request's partial output.
-    if record.request.url != req.url || record.request.out_dir != req.out_dir { return None; }
+    // Redacted credentials cannot establish ownership of a live authenticated request.
+    if record.request.extra.credentials_required || !compatible(&record, req)
+        || resolved_format.is_none() || record.resolved_format.as_deref() != resolved_format { return None; }
+    record.expected_path.map(PathBuf::from)
+}
+
+/// Compare artifact choices separately from operational controls. Recovery can pin an
+/// originally automatic selector to its recorded resolved stream, but cannot choose a new one.
+fn compatible(record: &Recovery, req: &DownloadRequest) -> bool {
+    if record.request.preset != req.preset || record.request.out_dir != req.out_dir
+        || record.request.url != crate::net::redact_urls(&req.url) { return false; }
     let choices = |r: &DownloadRequest| {
         let mut value = serde_json::to_value(&r.extra).unwrap_or_default();
-        if let Some(object) = value.as_object_mut() { for key in ["library_playlist_ids", "proxy", "rate_limit", "fragment_limit", "managed_retries", "verbose", "credentials_required", "collision"] { object.remove(key); } }
+        if let Some(object) = value.as_object_mut() {
+            for key in ["library_playlist_ids", "proxy", "rate_limit", "fragment_limit", "managed_retries", "verbose", "credentials_required", "collision"] { object.remove(key); }
+            if r.extra.custom_args.as_deref().is_some_and(crate::net::sensitive_custom_args) {
+                object.insert("custom_args".into(), serde_json::json!("[REDACTED]"));
+            }
+            // Ignore the selector only when the caller uses the recorded resolution.
+            if record.resolved_format.as_deref() == req.extra.format_id.as_deref() && record.resolved_format.is_some() {
+                object.remove("format_id");
+            }
+        }
         value
     };
-    if choices(&record.request) != choices(req) { return None; }
-    record.expected_path.map(PathBuf::from)
+    choices(&record.request) == choices(req)
+}
+
+pub fn check_compatible(app: &AppHandle, req: &DownloadRequest) -> Result<(), String> {
+    let file = dir(app)?.join(format!("{}.json", key(req)?));
+    if let Ok(bytes) = fs::read(file) {
+        let prior: Recovery = serde_json::from_slice(&bytes).map_err(|_| "The recovery record is unreadable. Queue the link again to start a fresh download.")?;
+        if !compatible(&prior, req) { return Err("This recovery record has different output choices. Queue the link again to start a fresh download; the original partial files have been kept.".into()); }
+    }
+    Ok(())
 }
 fn save_at(root: PathBuf, req: &DownloadRequest, path: Option<&str>, format: Option<&str>) -> Result<(), String> {
     let _edit = EDIT.lock().map_err(|_| "Recovery storage is unavailable.")?; fs::create_dir_all(&root).map_err(|e| e.to_string())?;
     let id = key(req)?;
     let file = root.join(format!("{id}.json"));
     let prior = fs::read(&file).ok().and_then(|b| serde_json::from_slice::<Recovery>(&b).ok());
+    if prior.as_ref().is_some_and(|record| !compatible(record, req)) {
+        return Err("The recovery choices changed. The original recovery record and partial files have been kept.".into());
+    }
     let mut request: DownloadRequest = serde_json::from_value(serde_json::to_value(req).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     scrub_request(&mut request);
     request.expected_volume = req.expected_volume.or_else(|| crate::download::volume_id(&req.out_dir));
@@ -111,6 +143,51 @@ pub fn discard_download_recovery(app: AppHandle, downloads: State<'_, Downloads>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn request() -> DownloadRequest {
+        serde_json::from_value(serde_json::json!({ "id": "attempt", "recovery_id": "saved", "url": "https://example.com/video", "preset": "best", "out_dir": std::env::temp_dir() })).unwrap()
+    }
+
+    #[test]
+    fn changed_output_choices_never_adopt_or_overwrite_original_recovery() {
+        let root = std::env::temp_dir().join(format!("kaisu-recovery-profile-{}", uuid::Uuid::new_v4()));
+        let original = request();
+        save_at(root.clone(), &original, Some("original.mp4"), Some("137+140")).unwrap();
+        let before = fs::read(root.join("saved.json")).unwrap();
+        for (key, value) in [("preset", serde_json::json!("p720")), ("out_dir", serde_json::json!("/different")), ("url", serde_json::json!("https://example.com/other")),
+            ("extra", serde_json::json!({ "format_id": "18" })), ("extra", serde_json::json!({ "output": { "layout": "music" } })),
+            ("extra", serde_json::json!({ "audio_format": "flac" })), ("extra", serde_json::json!({ "clip": { "start": 1, "end": 2 } }))] {
+            let mut changed = serde_json::to_value(&original).unwrap(); changed[key] = value;
+            let changed: DownloadRequest = serde_json::from_value(changed).unwrap();
+            assert!(owned_path_at(root.clone(), &changed, Some("137+140")).is_none());
+            assert!(save_at(root.clone(), &changed, Some("new.mp4"), None).is_err());
+            assert_eq!(fs::read(root.join("saved.json")).unwrap(), before);
+        }
+        let mut fresh = request(); fresh.preset = crate::download::Preset::P720; fresh.recovery_id = Some("fresh".into());
+        save_at(root.clone(), &fresh, Some("new.mp4"), Some("18")).unwrap();
+        assert_eq!(fs::read(root.join("saved.json")).unwrap(), before);
+        assert!(root.join("fresh.json").is_file());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn compatible_controls_resume_only_the_recorded_streams() {
+        let root = std::env::temp_dir().join(format!("kaisu-recovery-streams-{}", uuid::Uuid::new_v4()));
+        let mut req = request();
+        save_at(root.clone(), &req, Some("original.mp4"), Some("137+140")).unwrap();
+        req.extra.rate_limit = Some("500K".into()); req.extra.fragment_limit = Some(2);
+        req.extra.proxy = Some("http://proxy:8080".into()); req.extra.verbose = true; req.extra.managed_retries = true;
+        assert_eq!(owned_path_at(root.clone(), &req, Some("137+140")), Some(PathBuf::from("original.mp4")));
+        assert!(owned_path_at(root.clone(), &req, Some("18")).is_none());
+        assert!(owned_path_at(root.clone(), &req, None).is_none());
+        // Recovery explicitly pins the originally automatic selection to its recorded format.
+        req.extra.format_id = Some("137+140".into());
+        assert_eq!(owned_path_at(root.clone(), &req, Some("137+140")), Some(PathBuf::from("original.mp4")));
+        save_at(root.clone(), &req, None, None).unwrap();
+        req.extra.format_id = Some("18".into());
+        assert!(owned_path_at(root.clone(), &req, Some("18")).is_none());
+        fs::remove_dir_all(root).unwrap();
+    }
     #[test]
     fn private_headers_and_signed_links_are_never_written_to_recovery() {
         let root = std::env::temp_dir().join(format!("kaisu-private-manifest-{}", uuid::Uuid::new_v4()));

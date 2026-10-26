@@ -3,7 +3,7 @@ import { Music } from "lucide-react";
 import { errorText, libraryArtworkPreview, libraryChooseArtwork, libraryDiscardArtwork, type ArtworkChoice } from "../lib/api";
 import type { ArtworkEdit } from "../lib/tagEdit";
 import { CoverArt } from "./Picture";
-export default function ArtworkEditor({ path, count, disabled, value, onChange, onBusy }: { path: string; count: number; disabled: boolean; value?: ArtworkEdit; onChange: (edit?: ArtworkEdit) => void; onBusy: (busy: boolean) => void }) {
+export default function ArtworkEditor({ path, count, disabled, value, externalChoice, onChange, onBusy }: { path: string; count: number; disabled: boolean; value?: ArtworkEdit; externalChoice?: ArtworkChoice; onChange: (edit?: ArtworkEdit) => void; onBusy: (busy: boolean) => void }) {
   const [choice, setChoice] = useState<(ArtworkChoice & { url: string }) | null>(null);
   const selected = useRef<typeof choice>(null);
   const alive = useRef(true);
@@ -11,6 +11,17 @@ export default function ArtworkEditor({ path, count, disabled, value, onChange, 
   const [error, setError] = useState("");
   const discard = () => { const old = selected.current; selected.current = null; if (old) { URL.revokeObjectURL(old.url); void libraryDiscardArtwork(old.token).catch(() => {}); } };
   useEffect(() => { alive.current = true; return () => { alive.current = false; discard(); }; }, []);
+  useEffect(() => {
+    if (!externalChoice || selected.current?.token === externalChoice.token) return;
+    let stale = false; setBusy(true); onBusy(true); setError("");
+    libraryArtworkPreview(externalChoice.token).then((bytes) => {
+      if (stale || !alive.current) { void libraryDiscardArtwork(externalChoice.token).catch(() => {}); return; }
+      const next = { ...externalChoice, url: URL.createObjectURL(new Blob([bytes])) };
+      discard(); selected.current = next; setChoice(next);
+    }).catch((e) => { void libraryDiscardArtwork(externalChoice.token).catch(() => {}); if (!stale && alive.current) { setError(errorText(e)); onChange(undefined); } })
+      .finally(() => { if (!stale && alive.current) { setBusy(false); onBusy(false); } });
+    return () => { stale = true; };
+  }, [externalChoice?.token]);
   const choose = async () => {
     setBusy(true); onBusy(true); setError(""); let picked: ArtworkChoice | null = null;
     try {

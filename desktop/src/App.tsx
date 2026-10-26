@@ -217,6 +217,7 @@ export default function App() {
   const copyPath = useCallback((path: string) => copyText(path, "File location"), [copyText]);
 
   const actions = useDownloadActions({
+    ensureLyricsConsent,
     settings,
     settingsRef,
     outDir: effectiveOutDir,
@@ -669,7 +670,7 @@ export default function App() {
             />
           )}
 
-          {page === "library" && <LibraryPage playlistShortcut={playlistShortcut} onPlaylistShortcutHandled={() => setPlaylistShortcut(null)} pendingPlaylists={pendingPlaylists} tracks={library.tracks} management={library.management} listening={listening.stats} playlists={playlists} onRelocated={onRelocated} unmeasuredCount={library.unmeasuredCount} scanning={library.scanning} loaded={library.loaded} onScan={() => void library.scan()} onReveal={revealDownloaded} onEditTags={async (paths, edit) => { const release = player.releaseFiles(paths); try { const results = await library.editTags(paths, edit); if (edit.artwork) player.invalidateCovers(results.filter((r) => r.ok).map((r) => r.path)); return results; } finally { release(); } }} analysing={library.analysing} onAnalyse={() => void library.analyse()} onStopAnalysing={library.stopAnalysing} announce={setNote} flash={showFlash} />}
+          {page === "library" && <LibraryPage onSearchMusic={flow.searchFor} playlistShortcut={playlistShortcut} onPlaylistShortcutHandled={() => setPlaylistShortcut(null)} pendingPlaylists={pendingPlaylists} tracks={library.tracks} management={library.management} listening={listening.stats} playlists={playlists} onRelocated={onRelocated} unmeasuredCount={library.unmeasuredCount} scanning={library.scanning} loaded={library.loaded} onScan={() => void library.scan()} onReveal={revealDownloaded} onEditTags={async (paths, edit) => { const release = player.releaseFiles(paths); try { const results = await library.editTags(paths, edit); if (edit.artwork) player.invalidateCovers(results.filter((r) => r.ok).map((r) => r.path)); return results; } finally { release(); } }} analysing={library.analysing} onAnalyse={() => void library.analyse()} onStopAnalysing={library.stopAnalysing} announce={setNote} flash={showFlash} />}
 
           {page === "settings" && (
             <SettingsPage

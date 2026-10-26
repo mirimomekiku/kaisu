@@ -122,7 +122,7 @@ pub fn compare_versions(a: &str, b: &str) -> Ordering {
 }
 
 pub async fn version_of(path: &Path) -> Result<String, String> {
-    let out = proc::run_capture(path, &["--version"], Duration::from_secs(30)).await?;
+    let out = crate::ytdlp::run_capture(path, &["--version"], Duration::from_secs(30), None).await?;
     let v = out.trim().to_string();
     if v.is_empty() { Err("yt-dlp printed no version".into()) } else { Ok(v) }
 }

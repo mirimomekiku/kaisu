@@ -20,6 +20,9 @@ import type { LibraryManagement } from "../hooks/useLibrary";
 import type { Listening } from "../lib/listening";
 import MusicFolders from "./MusicFolders";
 import DuplicateFinder from "./DuplicateFinder";
+import PortableSync from "./PortableSync";
+import AlbumCompletion from "./AlbumCompletion";
+import LyricsEditor from "./LyricsEditor";
 
 const LibraryCleanup = lazy(() => import("./LibraryCleanup"));
 
@@ -58,6 +61,7 @@ interface Props {
   onEditTags: (paths: string[], edit: TagEditRequest) => Promise<EditResult[]>;
   announce: (note: { title: string; subtitle?: string }) => void;
   flash: (text: string, error?: boolean) => void;
+  onSearchMusic: (query: string) => void;
 }
 
 const hours = (seconds: number) => {
@@ -66,7 +70,7 @@ const hours = (seconds: number) => {
 };
 
 /** The music library: every sound file found in the download folders, by song, album or artist. */
-export default function LibraryPage({ playlistShortcut, onPlaylistShortcutHandled, pendingPlaylists, playlists, tracks, management, listening, onRelocated, scanning, loaded, onScan, onReveal, onEditTags, analysing, unmeasuredCount, onAnalyse, onStopAnalysing, announce, flash }: Props) {
+export default function LibraryPage({ playlistShortcut, onPlaylistShortcutHandled, pendingPlaylists, playlists, tracks, management, listening, onRelocated, scanning, loaded, onScan, onReveal, onEditTags, analysing, unmeasuredCount, onAnalyse, onStopAnalysing, announce, flash, onSearchMusic }: Props) {
   const preferences = useMusicPreferences()?.preferences;
   const [favoritesOnly, setFavoritesOnly] = useSessionState("library.favoritesOnly", false);
   const [minimumRating, setMinimumRating] = useSessionState("library.minimumRating", 0);
@@ -83,6 +87,10 @@ export default function LibraryPage({ playlistShortcut, onPlaylistShortcutHandle
   const [foldersOpen, setFoldersOpen] = useState(false);
   const [cleanupOpen, setCleanupOpen] = useState(false);
   const [duplicatesOpen, setDuplicatesOpen] = useState(false);
+  const [syncOpen, setSyncOpen] = useState(false);
+  const [completionKey, setCompletionKey] = useState<string | null>(null);
+  const [lyricTrack, setLyricTrack] = useState<LibTrack | null>(null);
+  const completionAlbum = useMemo(() => albumsOf(tracks).find((a) => a.key === completionKey), [tracks, completionKey]);
   const [availability, setAvailability] = useSessionState("library.availability", "available");
   const eligible = useMemo(() => tracks.filter((t) => (!favoritesOnly || preferences?.[t.path]?.favorite) && (preferences?.[t.path]?.rating ?? 0) >= minimumRating && (availability === "all" || (availability === "missing" ? !!t.missing : !t.missing))), [tracks, availability, favoritesOnly, minimumRating, preferences]);
 
@@ -166,6 +174,7 @@ export default function LibraryPage({ playlistShortcut, onPlaylistShortcutHandle
           { label: "Music folders", onSelect: () => setFoldersOpen(true) },
           { label: "Library cleanup", onSelect: () => setCleanupOpen(true) },
           { label: "Find duplicates", onSelect: () => setDuplicatesOpen(true) },
+          { label: "Portable collection sync", onSelect: () => setSyncOpen(true) },
           { kind: "separator" },
           { label: "Rescan", onSelect: onScan, disabled: scanning !== null },
           ...(analysing ? [{ label: `Stop measuring loudness (${analysing.done} of ${analysing.total})`, onSelect: onStopAnalysing }] : [{ label: `Measure loudness (${unmeasuredCount})`, onSelect: onAnalyse, disabled: unmeasuredCount === 0 }]),
@@ -221,10 +230,10 @@ export default function LibraryPage({ playlistShortcut, onPlaylistShortcutHandle
           <button className="btn" onClick={() => { resetFilters(); setQuery(""); setArtist(""); }}>Reset library filters</button>
         </div>
       ) : view === "songs" ? (
-        <SongList tracks={shown} onLocate={(path) => void locate(path)} onPlay={play} onNext={next} onAdd={add} onReveal={onReveal} onEdit={setEditing} onPlaylist={setAdding} announce={announce} />
+        <SongList tracks={shown} onLyrics={setLyricTrack} onLocate={(path) => void locate(path)} onPlay={play} onNext={next} onAdd={add} onReveal={onReveal} onEdit={setEditing} onPlaylist={setAdding} announce={announce} />
       ) : view === "albums" ? (
         album ? (
-          <AlbumDetail album={album} onLocate={(path) => void locate(path)} onBack={() => setOpenAlbum(null)} onPlay={play} onNext={next} onAdd={add} onEdit={setEditing} onPlaylist={setAdding} />
+          <AlbumDetail album={album} onComplete={() => setCompletionKey(album.key)} onLocate={(path) => void locate(path)} onBack={() => setOpenAlbum(null)} onPlay={play} onNext={next} onAdd={add} onEdit={setEditing} onPlaylist={setAdding} />
         ) : (
           <div className="lib-scroll">
             <div className="album-grid" role="list" aria-label="Albums">
@@ -282,6 +291,9 @@ export default function LibraryPage({ playlistShortcut, onPlaylistShortcutHandle
       {foldersOpen && <MusicFolders management={management} onClose={() => setFoldersOpen(false)} />}
       {cleanupOpen && <Suspense fallback={<p role="status">Opening library cleanup…</p>}><LibraryCleanup tracks={tracks} management={management} scanning={scanning !== null} onScan={onScan} onLocate={locate} onEdit={setEditing} onReveal={onReveal} onDuplicates={() => setDuplicatesOpen(true)} onClose={() => setCleanupOpen(false)} /></Suspense>}
       {duplicatesOpen && <DuplicateFinder byPath={byPath} onChanged={onScan} onReveal={onReveal} onClose={() => setDuplicatesOpen(false)} />}
+      {syncOpen && <PortableSync tracks={tracks} playlists={playlists.playlists} listening={listening} onClose={() => setSyncOpen(false)} />}
+      {lyricTrack && <LyricsEditor key={lyricTrack.path} path={lyricTrack.path} title={lyricTrack.title} artist={lyricTrack.artist} onSaved={onScan} onClose={() => setLyricTrack(null)} />}
+      {completionAlbum && <AlbumCompletion key={completionAlbum.key} album={completionAlbum} onClose={() => setCompletionKey(null)} onSearch={(query) => { setCompletionKey(null); onSearchMusic(query); }} />}
       {editing && (
         <TagEditor
           // A new key for a new selection starts the form afresh.
@@ -295,7 +307,7 @@ export default function LibraryPage({ playlistShortcut, onPlaylistShortcutHandle
   );
 }
 
-function AlbumDetail({ album, onLocate, onBack, onPlay, onNext, onAdd, onEdit, onPlaylist }: { album: Album; onLocate: (path: string) => void; onBack: () => void; onPlay: (list: LibTrack[], from: number) => void; onNext: (list: LibTrack[]) => void; onAdd: (list: LibTrack[]) => void; onEdit: (tracks: LibTrack[]) => void; onPlaylist: (tracks: LibTrack[]) => void }) {
+function AlbumDetail({ album, onComplete, onLocate, onBack, onPlay, onNext, onAdd, onEdit, onPlaylist }: { album: Album; onComplete: () => void; onLocate: (path: string) => void; onBack: () => void; onPlay: (list: LibTrack[], from: number) => void; onNext: (list: LibTrack[]) => void; onAdd: (list: LibTrack[]) => void; onEdit: (tracks: LibTrack[]) => void; onPlaylist: (tracks: LibTrack[]) => void }) {
   const available = album.tracks.filter((t) => !t.missing);
   return (
     <div className="lib-scroll">
@@ -329,6 +341,7 @@ function AlbumDetail({ album, onLocate, onBack, onPlay, onNext, onAdd, onEdit, o
               <button type="button" className="btn small" disabled={available.length === 0} onClick={() => onEdit(available)}>
                 <Pencil className="w-3 h-3" /> Edit album
               </button>
+              <button type="button" className="btn small" disabled={available.length === 0} onClick={onComplete}>Check album completeness</button>
             </div>
           </div>
         </div>

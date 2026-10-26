@@ -142,6 +142,8 @@ works behind a proxy, and can check again if you installed the tools yourself. A
 - **Mini-player:** use Playback options > Open mini-player for a compact always-on-top window with playback, seek and volume controls.
   Return to the full window without restarting playback.
 - Read saved lyrics or choose to look them up online. Measure loudness to make loud songs quieter during playback.
+- **Lyrics editor:** song actions > Edit lyrics, or Edit lyrics in the player's lyrics panel, opens a local text and LRC editor. Shift timing, stamp lines while listening, preview timed lyrics, and explicitly save a sidecar, embedded lyrics, or both. Unsaved changes and externally modified files are protected.
+- **Album completion:** open an album and choose Check album completeness. With consent, search MusicBrainz release editions and compare a selected tracklist with the complete local album, including missing files. Missing tracks, uncertain matches, and conflicting titles are listed separately; search individual tracks through your selected source before choosing a download.
 - Podcasts are temporarily hidden, including background checks and automatic episode downloads. Saved subscriptions and
   the implementation are retained.
 

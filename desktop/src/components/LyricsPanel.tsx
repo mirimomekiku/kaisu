@@ -4,6 +4,7 @@ import { usePlayerTime } from "../hooks/usePlayer";
 import { errorText, lyricsFind, lyricsRead, type SongLyrics } from "../lib/api";
 import type { PlayerEngine, Track } from "../lib/audioEngine";
 import { lineAt, parseLrc } from "../lib/lrc";
+import LyricsEditor from "./LyricsEditor";
 
 type State = { status: "loading" } | { status: "ready"; lyrics: SongLyrics } | { status: "none" } | { status: "error"; message: string };
 
@@ -11,6 +12,8 @@ type State = { status: "loading" } | { status: "ready"; lyrics: SongLyrics } | {
 export default function LyricsPanel({ engine, track, askConsent, onClose, embedded = false }: { engine: PlayerEngine; track: Track; askConsent: () => Promise<boolean>; onClose: () => void; embedded?: boolean }) {
   const [state, setState] = useState<State>({ status: "loading" });
   const [finding, setFinding] = useState(false);
+  const [editing, setEditing] = useState<Track | null>(null);
+  const [revision, setRevision] = useState(0);
   const path = track.path;
   const request = useRef(0);
 
@@ -27,6 +30,11 @@ export default function LyricsPanel({ engine, track, askConsent, onClose, embedd
       stale = true;
       request.current++;
     };
+  }, [path, revision]);
+  useEffect(() => {
+    const saved = (event: Event) => { if ((event as CustomEvent<string>).detail === path) setRevision((r) => r + 1); };
+    window.addEventListener("kaisu:lyrics-saved", saved);
+    return () => window.removeEventListener("kaisu:lyrics-saved", saved);
   }, [path]);
 
   const find = async () => {
@@ -44,7 +52,7 @@ export default function LyricsPanel({ engine, track, askConsent, onClose, embedd
   };
 
   return (
-    <section className={`lyricspanel${embedded ? " embedded" : ""}`} aria-label="Lyrics">
+    <><section className={`lyricspanel${embedded ? " embedded" : ""}`} aria-label="Lyrics">
       {!embedded && <header className="qp-head">
         <b>Lyrics</b>
         <span className="dim truncate">{track.title}</span>
@@ -54,6 +62,7 @@ export default function LyricsPanel({ engine, track, askConsent, onClose, embedd
         </button>
       </header>}
       <div className="ly-body">
+        <button type="button" className="btn small mb-2" disabled={finding || state.status === "loading"} onClick={() => setEditing(track)}>Edit lyrics</button>
         {state.status === "loading" && (
           <p className="m-0 flex items-center gap-2" role="status">
             <Loader2 className="w-3.5 h-3.5 animate-spin" /> Looking for lyrics…
@@ -72,7 +81,7 @@ export default function LyricsPanel({ engine, track, askConsent, onClose, embedd
           </div>
         )}
       </div>
-    </section>
+    </section>{editing && <LyricsEditor key={editing.path} path={editing.path} title={editing.title} artist={editing.artist} onClose={() => setEditing(null)} />}</>
   );
 }
 

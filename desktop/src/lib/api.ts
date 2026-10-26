@@ -1,5 +1,7 @@
 import { Channel, convertFileSrc, invoke } from "@tauri-apps/api/core";
 import type { TagEditRequest } from "./tagEdit";
+import type { IdentificationCandidate, SuggestedTags } from "./identification";
+import type { PortableDevice, PortableProfile, PortablePlaylist, SyncPlan, SyncProgress, SyncResult } from "./portableSync";
 import { checkDownloadUrl, checkSpeedLimit } from "./validate";
 
 export type Preset = "best" | "p1080" | "p720" | "audio";
@@ -401,6 +403,18 @@ export interface LibTrack {
 
 /** What was found by the last scan, at once. */
 export const libraryLoad = () => invoke<LibTrack[]>("library_load");
+export const identifySearch = (path: string, title: string, artist: string, allowed: boolean) => invoke<IdentificationCandidate[]>("identify_search", { path, title, artist, allowed, proxy: currentProxy });
+export const identifyDetails = (path: string, recordingId: string, releaseId: string | null, allowed: boolean) => invoke<SuggestedTags>("identify_details", { path, recordingId, releaseId, allowed, proxy: currentProxy });
+export const identifyCover = (path: string, releaseId: string, allowed: boolean) => invoke<ArtworkChoice>("identify_cover", { path, releaseId, allowed, proxy: currentProxy });
+export const portableSyncDevices = () => invoke<PortableDevice[]>("portable_sync_devices");
+export const portableSyncProfiles = () => invoke<PortableProfile[]>("portable_sync_profiles");
+export const portableSyncCreate = (name: string, deviceId: string | null = null) => invoke<PortableProfile | null>("portable_sync_create", { name, deviceId });
+export const portableSyncSave = (profile: PortableProfile) => invoke<PortableProfile>("portable_sync_save", { id: profile.id, name: profile.name, format: profile.format, bitrate: profile.bitrate, sourceKind: profile.source_kind, sourceIds: profile.source_ids });
+export const portableSyncForget = (id: string) => invoke<void>("portable_sync_forget", { id });
+export const portableSyncCancel = (id: string) => invoke<void>("portable_sync_cancel", { id });
+const syncProgress = (onProgress: (progress: SyncProgress) => void) => { const channel = new Channel<SyncProgress>(); channel.onmessage = onProgress; return channel; };
+export const portableSyncPlan = (profileId: string, id: string, paths: string[], playlists: PortablePlaylist[], onProgress: (progress: SyncProgress) => void) => invoke<SyncPlan>("portable_sync_plan", { profileId, id, paths, playlists, onProgress: syncProgress(onProgress) });
+export const portableSyncApply = (id: string, removeOld: boolean, onProgress: (progress: SyncProgress) => void) => invoke<SyncResult>("portable_sync_apply", { id, removeOld, onProgress: syncProgress(onProgress) });
 
 export interface MusicFolder { path: string; available: boolean; download_destination?: boolean; configured?: boolean }
 export const libraryFolders = () => invoke<MusicFolder[]>("library_folders");
@@ -473,6 +487,10 @@ export interface SongLyrics {
 }
 /** The lyrics a song already has: a .lrc or .txt beside it, or inside its tags. */
 export const lyricsRead = (path: string) => invoke<SongLyrics>("lyrics_read", { path });
+export const lyricsEditRead = (path: string) => invoke<import("./lyricsEdit").LyricsDocument>("lyrics_edit_read", { path });
+export const lyricsEditSave = (path: string, text: string, revision: string, embed: boolean, sidecar: boolean) => invoke<import("./lyricsEdit").LyricsSaved>("lyrics_edit_save", { path, text, revision, embed, sidecar });
+export const albumReleaseSearch = (path: string, title: string, artist: string, allowed: boolean) => invoke<import("./albumCompletion").AlbumRelease[]>("album_release_search", { path, title, artist, allowed, proxy: currentProxy });
+export const albumReleaseTracks = (path: string, releaseId: string, allowed: boolean) => invoke<import("./albumCompletion").AlbumTracklist>("album_release_tracks", { path, releaseId, allowed, proxy: currentProxy });
 /** Looks the song up on LRCLIB and saves the lyrics beside it. Sends the artist and title to that service, so ask first. */
 export const lyricsFind = (path: string) => invoke<SongLyrics>("lyrics_find", { path, proxy: currentProxy });
 

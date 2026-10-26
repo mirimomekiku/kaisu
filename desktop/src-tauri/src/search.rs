@@ -6,7 +6,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
-use crate::{engine::Engine, proc};
+use crate::engine::Engine;
 
 const MAX_RESULTS: u32 = 50;
 const MAX_QUERY_CHARS: usize = 200;
@@ -141,7 +141,7 @@ pub async fn search_media(
         args.extend(["--playlist-end", end.as_str()]);
     }
     args.extend(["--", target.as_str()]);
-    let json = proc::run_capture_proxied(&ytdlp, &args, Duration::from_secs(45), proxy.as_deref()).await.map_err(|e| source.explain(e))?;
+    let json = crate::ytdlp::run_capture(&ytdlp, &args, Duration::from_secs(45), proxy.as_deref()).await.map_err(|e| source.explain(e))?;
     let v: serde_json::Value = serde_json::from_str(&json).map_err(|e| format!("Unreadable search response: {e}"))?;
     Ok(match source {
         SearchSource::Youtube => parse_results(&v),

@@ -7,12 +7,14 @@ mod download_manifest;
 mod duplicates;
 mod engine;
 mod files;
+mod identification;
 mod leftovers;
 mod library;
 mod library_folders;
 mod links;
 mod loudness;
 mod lyrics;
+mod lyrics_edit;
 mod media;
 mod media_stream;
 mod meta;
@@ -20,6 +22,7 @@ mod mini;
 mod net;
 mod output;
 mod podcast;
+mod portable_sync;
 mod power;
 mod proc;
 mod removal;
@@ -32,6 +35,7 @@ mod tags;
 mod thumbs;
 mod transfer;
 mod tray;
+mod ytdlp;
 
 use engine::{Engine, EngineInfo, UpdateResult};
 use tauri::{AppHandle, Manager, State};
@@ -84,6 +88,8 @@ pub fn run() {
         .manage(thumbs::Thumbs::default())
         .manage(mini::MiniState::default())
         .manage(artwork::ArtworkStore::default())
+        .manage(identification::Identification::default())
+        .manage(portable_sync::SyncState::default())
         .manage(media_stream::MediaStream::default())
         .setup(|app| {
             library_folders::restore(app.handle(), &app.state::<scope::Scope>());
@@ -129,6 +135,21 @@ pub fn run() {
             artwork::library_choose_artwork,
             artwork::library_artwork_preview,
             artwork::library_discard_artwork,
+            identification::identify_search,
+            identification::identify_details,
+            identification::identify_cover,
+            identification::album_release_search,
+            identification::album_release_tracks,
+            lyrics_edit::lyrics_edit_read,
+            lyrics_edit::lyrics_edit_save,
+            portable_sync::portable_sync_devices,
+            portable_sync::portable_sync_profiles,
+            portable_sync::portable_sync_create,
+            portable_sync::portable_sync_save,
+            portable_sync::portable_sync_forget,
+            portable_sync::portable_sync_plan,
+            portable_sync::portable_sync_apply,
+            portable_sync::portable_sync_cancel,
             library::library_load,
             library_folders::library_folders,
             library_folders::library_add_folder,
@@ -172,6 +193,7 @@ pub fn run() {
             if let tauri::RunEvent::Exit = event {
                 app.state::<waveform::Waveforms>().cancel_all();
                 app.state::<download::Downloads>().kill_all();
+                app.state::<portable_sync::SyncState>().kill_all();
             }
         });
 }

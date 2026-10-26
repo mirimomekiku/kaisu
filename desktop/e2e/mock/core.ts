@@ -80,6 +80,47 @@ function musicFolders() {
 export async function invoke(cmd: string, args: any = {}): Promise<any> {
   w.__mock.calls.push({ cmd, args: JSON.parse(JSON.stringify(args, (k, v) => (k === "onEvent" ? "[channel]" : v))) });
   switch (cmd) {
+    case "identify_search":
+      if (!args.allowed) throw "Online lookup consent is required.";
+      if (w.__mock.identifyFail) throw "Couldn't reach MusicBrainz.";
+      await sleep(w.__mock.identifyDelay ?? 20);
+      return structuredClone(w.__mock.identificationCandidates ?? []);
+    case "identify_details":
+      if (!args.allowed) throw "Online lookup consent is required.";
+      await sleep(w.__mock.identifyDelay ?? 20);
+      return structuredClone(w.__mock.identificationTags ?? {});
+    case "identify_cover":
+      if (!args.allowed) throw "Online lookup consent is required.";
+      if (w.__mock.identifyCoverFail) throw "No artwork was found for this release.";
+      return { token: "identified-cover", name: "Cover Art Archive front cover" };
+    case "portable_sync_devices": return structuredClone(w.__mock.portableDevices ?? []);
+    case "portable_sync_profiles": return structuredClone(w.__mock.portableProfiles ?? []);
+    case "portable_sync_create": {
+      if (w.__mock.portableChooseCancel) return null;
+      const profile = { id: `portable-${Date.now()}`, name: args.name, folder: "/media/USB", volume: 42, format: "original", bitrate: 192, source_kind: "library", source_ids: [], available: true, message: "" };
+      (w.__mock.portableProfiles ??= []).push(profile); return profile;
+    }
+    case "portable_sync_save": {
+      const profile = (w.__mock.portableProfiles ?? []).find((p: any) => p.id === args.id);
+      if (!profile) throw "Profile not found.";
+      Object.assign(profile, { name: args.name, format: args.format, bitrate: args.bitrate, source_kind: args.sourceKind, source_ids: args.sourceIds });
+      return structuredClone(profile);
+    }
+    case "portable_sync_forget": w.__mock.portableProfiles = (w.__mock.portableProfiles ?? []).filter((p: any) => p.id !== args.id); return;
+    case "portable_sync_cancel": (w.__mock.portableCancelled ??= []).push(args.id); return;
+    case "portable_sync_plan": {
+      if (w.__mock.portablePlanFail) throw "Device disconnected. Reconnect the original device.";
+      args.onProgress.onmessage({ phase: "Checking music", done: 1, total: args.paths.length, title: "Checking files" });
+      await sleep(w.__mock.portablePlanDelay ?? 30);
+      if ((w.__mock.portableCancelled ?? []).includes(args.id)) throw "Portable sync cancelled. Original files were kept.";
+      return { id: args.id, destination: "/media/USB/Kaisu-profile", additions: args.paths.map((p: string) => p.split("/").pop()), unchanged: 2, removals: ["Old portable song"], protected: ["Device-side edit"], needed_bytes: 1000, free_bytes: w.__mock.portableFree ?? 1000000000, conversion: (w.__mock.portableProfiles ?? []).find((p: any) => p.id === args.profileId)?.format === "mp3" };
+    }
+    case "portable_sync_apply":
+      if (w.__mock.portableApplyFail) throw "Device disconnected during copying. Original files were kept.";
+      args.onProgress.onmessage({ phase: "Copying", done: 1, total: 2, title: "Song" });
+      await sleep(w.__mock.portableApplyDelay ?? 30);
+      if ((w.__mock.portableCancelled ?? []).includes(args.id)) throw "Portable sync cancelled. Completed copies were kept.";
+      return { copied: 2, removed: args.removeOld ? 1 : 0, unchanged: 2, warnings: [] };
     case "check_setup":
       return {
         engine: engine(w.__mock.ready),
@@ -223,6 +264,30 @@ export async function invoke(cmd: string, args: any = {}): Promise<any> {
       await sleep(w.__mock.feedDelay ?? 30);
       if (w.__mock.feedFail || !w.__mock.feeds?.[args.url]) throw "That isn't a podcast feed.";
       return structuredClone(w.__mock.feeds[args.url]);
+    case "album_release_search":
+      if (!args.allowed) throw "Allow the online lookup first.";
+      await sleep(w.__mock.albumDelay ?? 20);
+      if (w.__mock.albumFail) throw "Couldn't reach MusicBrainz.";
+      return structuredClone(w.__mock.albumReleases ?? []);
+    case "album_release_tracks":
+      if (!args.allowed) throw "Allow the online lookup first.";
+      await sleep(w.__mock.albumDelay ?? 20);
+      if (w.__mock.albumFail || !w.__mock.albumTracklist) throw "This release has no tracklist yet.";
+      return structuredClone(w.__mock.albumTracklist);
+    case "lyrics_edit_read": {
+      if (w.__mock.lyricsEditReadFail) throw "Couldn't read this song.";
+      const found = (w.__mock.lyrics ?? {})[args.path];
+      return { text: found?.synced ?? found?.plain ?? "", revision: String(w.__mock.lyricsRevision ?? 1), sidecar: found?.source === "file" };
+    }
+    case "lyrics_edit_save": {
+      await sleep(w.__mock.lyricsEditDelay ?? 20);
+      if (w.__mock.lyricsEditSaveFail) throw "The lyrics file was not saved: permission denied.";
+      if (args.revision !== String(w.__mock.lyricsRevision ?? 1)) throw "The song or its lyrics changed outside this editor. Reload saved lyrics before saving.";
+      w.__mock.lyricsRevision = Number(w.__mock.lyricsRevision ?? 1) + 1;
+      const synced = /^\[\d+:\d+/m.test(args.text);
+      (w.__mock.lyrics ??= {})[args.path] = { synced: synced ? args.text : null, plain: synced ? null : args.text, source: args.sidecar ? "file" : "tags" };
+      return { document: { text: args.text, revision: String(w.__mock.lyricsRevision), sidecar: args.sidecar }, embedded: args.embed, sidecar: args.sidecar, warnings: [] };
+    }
     case "lyrics_read":
       return (w.__mock.lyrics ?? {})[args.path] ?? { synced: null, plain: null, source: null };
     case "lyrics_find": {

@@ -11,9 +11,9 @@ use std::{
 
 use lofty::{
     config::WriteOptions,
-    file::{AudioFile, TaggedFileExt},
+    file::{AudioFile, FileType, TaggedFileExt},
     prelude::*,
-    tag::{ItemKey, Tag},
+    tag::{ItemKey, Tag, TagType},
     picture::{Picture, PictureType},
 };
 use serde::{Deserialize, Serialize};
@@ -163,8 +163,26 @@ pub fn edit_file(path: &Path, edit: &TagEdit) -> Result<LibTrack, String> {
 }
 
 fn edit_file_with_artwork(path: &Path, edit: &TagEdit, replacement: Option<&[u8]>) -> Result<LibTrack, String> {
+    rewrite_file(path, edit, replacement, None, None)
+}
+
+/// Downloaded and converted lyrics share the verified working-copy writer. WAV keeps
+/// lyrics in an ID3 chunk alongside its existing RIFF INFO tags.
+pub async fn embed_lyrics(path: std::path::PathBuf, lyrics: String) -> Result<(), String> {
+    if lyrics.trim().is_empty() || lyrics.len() > 512 * 1024 || lyrics.contains('\0') { return Err("Lyrics are empty, too large, or contain invalid characters.".into()); }
+    let job = crate::proc::DOWNLOAD_JOB.try_with(Clone::clone).ok();
+    tauri::async_runtime::spawn_blocking(move || rewrite_file(&path, &TagEdit::default(), None, Some(&lyrics), job.as_deref()).map(|_| ())).await.map_err(|e| e.to_string())?
+}
+
+pub(crate) fn embed_lyrics_file(path: &Path, lyrics: &str) -> Result<(), String> {
+    if lyrics.trim().is_empty() || lyrics.len() > 512 * 1024 || lyrics.contains('\0') { return Err("Lyrics are empty, too large, or contain invalid characters.".into()); }
+    rewrite_file(path, &TagEdit::default(), None, Some(lyrics), None).map(|_| ())
+}
+
+fn rewrite_file(path: &Path, edit: &TagEdit, replacement: Option<&[u8]>, lyrics: Option<&str>, job: Option<&crate::proc::JobControl>) -> Result<LibTrack, String> {
+    if job.is_some_and(|j| j.is_cancelled()) { return Err("Lyrics embedding cancelled.".into()); }
     let checked = check(edit)?;
-    if checked.is_empty() && edit.artwork.is_none() {
+    if checked.is_empty() && edit.artwork.is_none() && lyrics.is_none() {
         return Ok(library::read_track(path));
     }
     let before = library::read_track(path);
@@ -196,7 +214,23 @@ fn edit_file_with_artwork(path: &Path, edit: &TagEdit, replacement: Option<&[u8]
             }
         }
     }
+    if let Some(lyrics) = lyrics {
+        let tag = if tagged.file_type() == FileType::Wav {
+            if tagged.tag(TagType::Id3v2).is_none() { tagged.insert_tag(Tag::new(TagType::Id3v2)); }
+            tagged.tag_mut(TagType::Id3v2)
+        } else { tagged.primary_tag_mut() }.ok_or_else(|| cleanup("This audio format cannot hold lyrics.".into()))?;
+        tag.remove_key(ItemKey::Lyrics); tag.remove_key(ItemKey::UnsyncLyrics);
+        // ID3 uses USLT for textual LRC, retaining its timestamps verbatim.
+        let key = if tag.tag_type() == TagType::Id3v2 { ItemKey::UnsyncLyrics } else { ItemKey::Lyrics };
+        tag.insert_text(key, lyrics.to_string());
+    }
     tagged.save_to_path(&tmp, WriteOptions::default()).map_err(|e| cleanup(format!("Couldn't write the tags: {e}")))?;
+    if let Some(lyrics) = lyrics {
+        let reread = lofty::read_from_path(&tmp).map_err(|e| cleanup(e.to_string()))?;
+        if !reread.tags().iter().any(|tag| tag.get_string(ItemKey::Lyrics).or_else(|| tag.get_string(ItemKey::UnsyncLyrics)) == Some(lyrics)) {
+            return Err(cleanup("The embedded lyrics did not round-trip correctly; the original file was kept.".into()));
+        }
+    }
 
     if let Some(art) = &edit.artwork {
         let reread = lofty::read_from_path(&tmp).map_err(|e| cleanup(e.to_string()))?;
@@ -215,6 +249,7 @@ fn edit_file_with_artwork(path: &Path, edit: &TagEdit, replacement: Option<&[u8]
     if before.duration > 0.0 && (after.duration - before.duration).abs() > before.duration * 0.01 + 0.5 {
         return Err(cleanup("The edited copy came out a different length, so the file was left as it was.".into()));
     }
+    if job.is_some_and(|j| j.is_cancelled()) { return Err(cleanup("Lyrics embedding cancelled; the original file was kept.".into())); }
     fs::rename(&tmp, path).map_err(|e| cleanup(format!("Couldn't replace the file ({e}). Is it open in another program?")))?;
     Ok(library::read_track(path))
 }
@@ -280,6 +315,43 @@ mod tests {
         let mut e = TagEdit::default();
         f(&mut e);
         e
+    }
+
+    #[tokio::test]
+    async fn timed_lyrics_roundtrip_in_wav_preserves_existing_tags_and_audio() {
+        let dir = scratch("lyrics-wav");
+        let path = dir.join("song.wav");
+        tagged_wav(&path, 1, "Title", "Artist", "Album", 3, 2001);
+        let text = "[00:00.20]First line\n[00:00.70]Second line";
+        embed_lyrics(path.clone(), text.into()).await.unwrap();
+        let saved = crate::lyrics::read_for(&path);
+        assert_eq!(saved.synced.as_deref(), Some(text));
+        let track = crate::library::read_track(&path);
+        assert_eq!((track.title.as_str(), track.artist.as_str(), track.album.as_str()), ("Title", "Artist", "Album"));
+        assert!((track.duration - 1.0).abs() < 0.1);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "requires KAISU_TEST_FFMPEG_DIR with ffmpeg and ffprobe"]
+    async fn timed_lyrics_roundtrip_in_every_download_audio_format() {
+        let helpers = std::path::PathBuf::from(std::env::var_os("KAISU_TEST_FFMPEG_DIR").expect("set KAISU_TEST_FFMPEG_DIR"));
+        let dir = scratch("lyrics-formats");
+        let source = dir.join("source.wav");
+        tagged_wav(&source, 1, "Title", "Artist", "Album", 3, 2001);
+        for (ext, codec) in [("mp3", "libmp3lame"), ("m4a", "aac"), ("flac", "flac"), ("opus", "libopus")] {
+            let path = dir.join(format!("song.{ext}"));
+            let output = std::process::Command::new(helpers.join(if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" }))
+                .args(["-v", "error", "-i"]).arg(&source).args(["-c:a", codec, "-map_metadata", "0"]).arg(&path).output().unwrap();
+            assert!(output.status.success(), "{ext}: {}", String::from_utf8_lossy(&output.stderr));
+            let text = "[00:00.20]First line\n[00:00.70]Second line";
+            embed_lyrics(path.clone(), text.into()).await.unwrap_or_else(|e| panic!("{ext}: {e}"));
+            assert_eq!(crate::lyrics::read_for(&path).synced.as_deref(), Some(text), "{ext}");
+            let track = crate::library::read_track(&path);
+            assert_eq!(track.title, "Title", "{ext}");
+            assert!((track.duration - 1.0).abs() < 0.15, "{ext}");
+        }
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

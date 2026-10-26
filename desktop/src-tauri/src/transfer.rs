@@ -13,6 +13,8 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::{files::MEDIA_EXTENSIONS, scope::Scope};
+mod target;
+use target::TargetDir;
 
 /// Files that belong next to a download and travel (or go) with it.
 const SIDECAR_EXTENSIONS: &[&str] = &["srt", "vtt", "lrc", "txt"];
@@ -120,40 +122,12 @@ fn sidecars_of(media: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-/// Copies, checks the size, and only then puts the file under its real name.
+/// Exercise the same capability copy implementation with standalone test paths.
+#[cfg(test)]
 fn copy_checked(from: &Path, to: &Path) -> Result<(), String> {
-    let part = to.with_file_name(format!("{}.kaisu-part", to.file_name().and_then(|n| n.to_str()).unwrap_or("file")));
-    // Reserve before copying. An existing staging file is never overwritten or cleaned up by us.
-    let mut options = fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    { use std::os::unix::fs::OpenOptionsExt; options.mode(0o600); }
-    let mut output = options.open(&part)
-        .map_err(|e| format!("Couldn't reserve a working copy: {e}"))?;
-    let result = (|| {
-        let mut input = fs::File::open(from).map_err(|e| format!("Couldn't read the file: {e}"))?;
-        let before = input.metadata().map_err(|e| e.to_string())?;
-        let copied = std::io::copy(&mut input, &mut output).map_err(|e| format!("Couldn't copy the file: {e}"))?;
-        output.sync_all().map_err(|e| format!("Couldn't finish writing the copy: {e}"))?;
-        let after = input.metadata().map_err(|e| e.to_string())?;
-        if copied != before.len() || after.len() != before.len() || before.modified().ok() != after.modified().ok()
-            || output.metadata().map(|m| m.len()).unwrap_or(0) != before.len() {
-            return Err("The file changed or the copy came out the wrong size, so the original was kept.".to_string());
-        }
-        output.set_permissions(before.permissions()).map_err(|e| format!("Couldn't preserve the file permissions: {e}"))?;
-        drop(output);
-        fs::rename(&part, to).map_err(|e| format!("Couldn't finish the copy: {e}"))
-    })();
-    if result.is_err() {
-        #[cfg(windows)]
-        if let Ok(metadata) = fs::metadata(&part) {
-            let mut permissions = metadata.permissions();
-            permissions.set_readonly(false);
-            let _ = fs::set_permissions(&part, permissions);
-        }
-        let _ = fs::remove_file(&part);
-    }
-    result
+    let root = fs::canonicalize(to.parent().ok_or("Invalid destination filename.")?).map_err(|e| e.to_string())?;
+    let target = root.join(to.file_name().ok_or("Invalid destination filename.")?);
+    TargetDir::prepare(&root, &target)?.copy_checked(from, &target)
 }
 
 /// Preserve the complete suffix: song.en.srt follows song (2).mp3 as song (2).en.srt.
@@ -164,18 +138,18 @@ fn companion_target(source: &Path, target: &Path, companion: &Path) -> Result<Pa
     Ok(target.with_file_name(format!("{new_stem}{suffix}")))
 }
 
-fn occupied(path: &Path) -> bool { fs::symlink_metadata(path).is_ok() }
-
 /// Pick a name for the whole group, including companion-only collisions.
-fn group_target(source: &Path, requested: &Path, companions: &[PathBuf]) -> Result<PathBuf, String> {
+fn group_target(directory: &TargetDir, source: &Path, requested: &Path, companions: &[PathBuf]) -> Result<PathBuf, String> {
     let stem = requested.file_stem().and_then(|s| s.to_str()).ok_or("Invalid destination filename.")?;
     let ext = requested.extension().and_then(|s| s.to_str()).map(|s| format!(".{s}")).unwrap_or_default();
     for n in 1..10_000 {
         let target = if n == 1 { requested.to_path_buf() } else { requested.with_file_name(format!("{stem} ({n}){ext}")) };
-        if !occupied(&target) && sidecars_of(&target).is_empty()
-            && companions.iter().all(|side| companion_target(source, &target, side).is_ok_and(|p| !occupied(&p))) {
-            return Ok(target);
+        if directory.occupied(&target)? || directory.has_sidecars(&target)? { continue; }
+        let mut collision = false;
+        for side in companions {
+            collision |= directory.occupied(&companion_target(source, &target, side)?)?;
         }
+        if !collision { return Ok(target); }
     }
     Err("Couldn't find a free name for the media and its companion files.".into())
 }
@@ -183,15 +157,17 @@ fn group_target(source: &Path, requested: &Path, companions: &[PathBuf]) -> Resu
 /// Moves or copies one file. Returns where it ended up (None when it was skipped).
 fn transfer_one(src: &Path, base: &Path, dest_root: &Path, mode: MoveMode, conflict: Conflict, keep_layout: bool) -> Result<Option<Moved>, String> {
     let requested = destination_for(src, base, dest_root, keep_layout).ok_or("Couldn't work out where this file goes.")?;
+    // Hold the parent before reading conflicts or writing anything beneath it. Canonicalize
+    // the root for direct callers as well as the native transfer runner.
+    let real_root = fs::canonicalize(dest_root).map_err(|e| format!("Couldn't find the destination: {e}"))?;
+    let real_requested = real_root.join(requested.strip_prefix(dest_root).map_err(|_| "Invalid destination.")?);
+    let directory = TargetDir::prepare(&real_root, &real_requested)?;
     let sides = sidecars_of(src);
     let target = match conflict {
-        Conflict::KeepBoth => group_target(src, &requested, &sides)?,
-        Conflict::Skip if requested.exists() => return Ok(None),
-        _ => requested,
+        Conflict::KeepBoth => group_target(&directory, src, &real_requested, &sides)?,
+        Conflict::Skip if directory.occupied(&real_requested)? => return Ok(None),
+        _ => real_requested,
     };
-    if let Some(parent) = target.parent() {
-        fs::create_dir_all(parent).map_err(|e| format!("Couldn't create the folder {}: {e}", parent.display()))?;
-    }
     let size = fs::metadata(src).map(|m| m.len()).unwrap_or(0);
     let free = crate::download::free_space_for(dest_root)?;
     // Moving inside one drive needs no extra space, but copying does; checking either way keeps it simple.
@@ -200,29 +176,31 @@ fn transfer_one(src: &Path, base: &Path, dest_root: &Path, mode: MoveMode, confl
     }
     match mode {
         // Same drive: a rename is instant and can't half-finish.
-        MoveMode::Move if fs::rename(src, &target).is_ok() => {}
+        MoveMode::Move if directory.rename_from(src, &target).is_ok() => {}
         MoveMode::Move => {
-            copy_checked(src, &target)?;
+            directory.copy_checked(src, &target)?;
             fs::remove_file(src).map_err(|e| format!("Copied, but couldn't remove the original: {e}"))?;
         }
-        MoveMode::Copy => copy_checked(src, &target)?,
+        MoveMode::Copy => directory.copy_checked(src, &target)?,
     }
     // Companions go along. Losing one doesn't fail the song, but it is reported.
     let mut failed: Vec<String> = Vec::new();
     for side in sides {
-        let t = companion_target(src, &target, &side)?;
-        if t.exists() && conflict == Conflict::Skip { continue; }
-        let done = match mode {
-            MoveMode::Move if fs::rename(&side, &t).is_ok() => Ok(()),
-            MoveMode::Move => copy_checked(&side, &t).and_then(|_| fs::remove_file(&side).map_err(|e| format!("Copied, but couldn't remove the original: {e}"))),
-            MoveMode::Copy => copy_checked(&side, &t),
-        };
+        let done = (|| {
+            let t = companion_target(src, &target, &side)?;
+            if conflict == Conflict::Skip && directory.occupied(&t)? { return Ok(()); }
+            match mode {
+                MoveMode::Move if directory.rename_from(&side, &t).is_ok() => Ok(()),
+                MoveMode::Move => directory.copy_checked(&side, &t).and_then(|_| fs::remove_file(&side).map_err(|e| format!("Copied, but couldn't remove the original: {e}"))),
+                MoveMode::Copy => directory.copy_checked(&side, &t),
+            }
+        })();
         if let Err(e) = done {
             failed.push(format!("{} ({e})", side.file_name().and_then(|n| n.to_str()).unwrap_or("a companion file")));
         }
     }
     let warning = (!failed.is_empty()).then(|| format!("The file was {} but not everything that goes with it: {}", if mode == MoveMode::Copy { "copied" } else { "moved" }, failed.join("; ")));
-    Ok(Some(Moved { path: target, warning }))
+    Ok(Some(Moved { path: dest_root.join(target.strip_prefix(&real_root).map_err(|_| "Invalid destination.")?), warning }))
 }
 
 /// Checks a destination is there and can be written to. Nothing is created.
@@ -237,9 +215,10 @@ fn check_destination_sync(path: &str) -> Result<u64, String> {
     if !dir.is_dir() {
         return Err("That is a file, not a folder.".into());
     }
-    let test = dir.join(format!(".kaisu-write-test-{}", std::process::id()));
-    fs::write(&test, b"").map_err(|_| "Kaisu can't write to that folder. Is the drive read-only?".to_string())?;
-    let _ = fs::remove_file(&test);
+    let root = fs::canonicalize(&dir).map_err(|e| e.to_string())?;
+    let test = root.join(format!(".kaisu-write-test-{}", uuid::Uuid::new_v4()));
+    let directory = TargetDir::prepare(&root, &test)?;
+    directory.probe(&test)?;
     crate::download::free_space_for(&dir)
 }
 
@@ -384,6 +363,73 @@ mod tests {
     fn write(path: &Path, bytes: &[u8]) {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, bytes).unwrap();
+    }
+
+    #[cfg(any(windows, target_os = "linux"))]
+    fn link_directory(link: &Path, destination: &Path) {
+        #[cfg(target_os = "linux")]
+        std::os::unix::fs::symlink(destination, link).unwrap();
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            let output = std::process::Command::new("powershell.exe")
+                .args(["-NoProfile", "-NonInteractive", "-Command", "New-Item -ItemType Junction -Path $env:KAISU_TEST_LINK -Target $env:KAISU_TEST_TARGET -ErrorAction Stop | Out-Null"])
+                .env("KAISU_TEST_LINK", link).env("KAISU_TEST_TARGET", destination)
+                .creation_flags(0x0800_0000).output().unwrap();
+            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        }
+    }
+
+    #[cfg(any(windows, target_os = "linux"))]
+    #[test]
+    fn destination_links_cannot_redirect_media_or_companions() {
+        for mode in [MoveMode::Move, MoveMode::Copy] {
+            for conflict in [Conflict::KeepBoth, Conflict::Skip, Conflict::Replace] {
+                let root = scratch(&format!("linked-destination-{mode:?}-{conflict:?}"));
+                let (base, dest, outside) = (root.join("source"), root.join("destination"), root.join("outside"));
+                fs::create_dir_all(&dest).unwrap(); fs::create_dir_all(&outside).unwrap();
+                write(&base.join("album/song.mp3"), b"original audio");
+                write(&base.join("album/song.lrc"), b"original lyrics");
+                write(&outside.join("song.mp3"), b"outside audio");
+                write(&outside.join("song.lrc"), b"outside lyrics");
+                link_directory(&dest.join("album"), &outside);
+                assert!(transfer_one(&base.join("album/song.mp3"), &base, &dest, mode, conflict, true).is_err());
+                assert_eq!(fs::read(base.join("album/song.mp3")).unwrap(), b"original audio");
+                assert_eq!(fs::read(base.join("album/song.lrc")).unwrap(), b"original lyrics");
+                assert_eq!(fs::read(outside.join("song.mp3")).unwrap(), b"outside audio");
+                assert_eq!(fs::read(outside.join("song.lrc")).unwrap(), b"outside lyrics");
+                assert_eq!(fs::read_dir(&outside).unwrap().count(), 2);
+                // Remove only the test junction/symlink before removing its fixture tree.
+                #[cfg(windows)] fs::remove_dir(dest.join("album")).unwrap();
+                #[cfg(target_os = "linux")] fs::remove_file(dest.join("album")).unwrap();
+                fs::remove_dir_all(root).unwrap();
+            }
+        }
+    }
+
+    #[cfg(any(windows, target_os = "linux"))]
+    #[test]
+    fn a_secured_parent_cannot_be_redirected_after_validation() {
+        let root = scratch("pinned-destination");
+        let (dest, outside) = (root.join("destination"), root.join("outside"));
+        fs::create_dir_all(dest.join("album")).unwrap(); fs::create_dir_all(&outside).unwrap();
+        let dest = fs::canonicalize(dest).unwrap();
+        let target = dest.join("album/song.mp3");
+        let directory = TargetDir::prepare(&dest, &target).unwrap();
+        #[cfg(windows)]
+        assert!(fs::rename(dest.join("album"), dest.join("old-album")).is_err(), "the directory is held without delete sharing");
+        #[cfg(target_os = "linux")]
+        {
+            fs::rename(dest.join("album"), dest.join("old-album")).unwrap();
+            link_directory(&dest.join("album"), &outside);
+        }
+        let source = root.join("source.mp3"); fs::write(&source, b"anchored").unwrap();
+        directory.copy_checked(&source, &target).unwrap();
+        assert!(!outside.join("song.mp3").exists());
+        #[cfg(target_os = "linux")]
+        { assert!(dest.join("old-album/song.mp3").is_file()); fs::remove_file(dest.join("album")).unwrap(); }
+        drop(directory);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

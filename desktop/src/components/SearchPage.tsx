@@ -13,6 +13,7 @@ import { canonicalUrl, playlistOf } from "../lib/links";
 import type { FormatPreset } from "../lib/presets";
 import type { HistoryItem, Settings } from "../lib/storage";
 import MediaCard from "./MediaCard";
+import LyricsChoice from "./LyricsChoice";
 import PageHeading from "./PageHeading";
 import SearchResults from "./SearchResults";
 import type { Page } from "./Sidebar";
@@ -119,12 +120,13 @@ export default function SearchPage({ onSaveSource, playlists, playlistTarget, on
             mode={mode}
             extras={{
               cover: advanced ? settings.coverMode : "default",
-              lyrics: advanced ? settings.lyricsMode : "off",
+              lyrics: settings.searchSource === "youtube_music" ? "both" : advanced ? settings.lyricsMode : "off",
               audioQuality: advanced ? settings.audioQuality : "",
               normalize: advanced && settings.audioNormalize,
               trimSilence: advanced && settings.audioTrimSilence,
             }}
             presets={settings.presets}
+            automaticLyrics={settings.searchSource === "youtube_music"}
             onSavePreset={savePreset}
             onPreview={advanced ? actions.previewChoice : undefined}
             onWatchPreview={mediaActions && media ? () => mediaActions.preview(media.url, visibleMedia.title) : undefined}
@@ -143,7 +145,7 @@ export default function SearchPage({ onSaveSource, playlists, playlistTarget, on
       )}
 
       {search && (
-        <SearchResults
+        <><div className="px-3 pt-2"><LyricsChoice label="Batch audio lyrics" value={actions.batchLyrics} automatic={settings.searchSource === "youtube_music"} onChange={actions.setBatchLyrics} /></div><SearchResults
           query={search.query}
           heading={listingTitle}
           limitNote={isListing && search.total && search.total > search.items.length ? `Showing the first ${search.items.length} of ${search.total} videos.` : null}
@@ -177,7 +179,7 @@ export default function SearchPage({ onSaveSource, playlists, playlistTarget, on
           }}
           onOpenFile={openDownloaded}
           onRevealFile={revealDownloaded}
-        />
+        /></>
       )}
 
       {!search && !visibleMedia && !errorMessage && (

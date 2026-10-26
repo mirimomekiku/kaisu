@@ -24,6 +24,14 @@ pub fn validate(bytes: &[u8]) -> Result<(), String> {
     Ok(())
 }
 impl ArtworkStore {
+    pub fn insert(&self, bytes: Vec<u8>, name: String) -> Result<ArtworkChoice, String> {
+        validate(&bytes)?;
+        let token = format!("art-{}", NEXT.fetch_add(1, Ordering::Relaxed));
+        let mut images = self.0.lock().map_err(|_| "Artwork is unavailable.")?;
+        while images.len() >= 4 { images.pop_front(); }
+        images.push_back((token.clone(), Arc::new(bytes)));
+        Ok(ArtworkChoice { token, name })
+    }
     pub fn get(&self, token: &str) -> Result<Arc<Vec<u8>>, String> {
         self.0.lock().map_err(|_| "Artwork is unavailable.")?.iter().find(|(id, _)| id == token).map(|(_, bytes)| bytes.clone()).ok_or("Choose the artwork again; its preview expired.".into())
     }
@@ -41,11 +49,7 @@ pub async fn library_choose_artwork(app: AppHandle, store: State<'_, ArtworkStor
         let mut bytes = Vec::new(); file.take(MAX_BYTES + 1).read_to_end(&mut bytes).map_err(|e| e.to_string())?;
         validate(&bytes)?; Ok::<_, String>(bytes)
     }).await.map_err(|e| e.to_string())??;
-    let token = format!("art-{}", NEXT.fetch_add(1, Ordering::Relaxed));
-    let mut images = store.0.lock().map_err(|_| "Artwork is unavailable.")?;
-    while images.len() >= 4 { images.pop_front(); }
-    images.push_back((token.clone(), Arc::new(bytes)));
-    Ok(Some(ArtworkChoice { token, name }))
+    Ok(Some(store.insert(bytes, name)?))
 }
 #[tauri::command]
 pub fn library_artwork_preview(store: State<'_, ArtworkStore>, token: String) -> Result<Response, String> { Ok(Response::new(store.get(&token)?.as_ref().clone())) }
