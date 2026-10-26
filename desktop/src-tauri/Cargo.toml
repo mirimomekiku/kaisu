@@ -38,6 +38,7 @@ lofty = "0.25.4"
 uuid = { version = "1", features = ["v4"] }
 quick-xml = "0.42"
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"] }
+cap-primitives = "4.0.3"
 
 
 

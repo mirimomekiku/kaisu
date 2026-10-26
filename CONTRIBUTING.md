@@ -39,6 +39,18 @@ npm run test:real:playback       # real WAV/MP3/M4A/FLAC/Opus playback, seek, ra
 `test:ui` needs Chrome (or `KAISU_E2E_BROWSER=/path/to/chrome`). `test:real` needs `cargo install tauri-driver
 --locked`, `webkit2gtk-driver` and a display (`xvfb-run -a` on servers). Terminal app: `cd tui && uv run python -m unittest`.
 
+The audit regressions run with `npm run test:ui -- hardening downloader queue safety round5 round16 round21 round25`.
+`hardening` verifies that live extractor credentials reach a request but never reach displayed logs, terminal errors,
+history or the saved queue. Rust and TypeScript share `testdata/custom-argument-redaction.json`, including escaped
+diagnostics. Native transfer tests create real Windows junctions (without symlink privileges) or Linux symlinks and
+check all conflict policies, companion files and directory replacement after validation.
+
+The optional native downloader configuration test uses a local metadata fixture and does not contact a media site:
+set `KAISU_TEST_YTDLP` to an installed yt-dlp executable, then run
+`cargo test ytdlp::tests::real_downloader_ignores_output_folder_configuration_without_network -- --ignored` in
+`desktop/src-tauri`. Its negative control proves an output-folder config would be loaded; both application subprocess
+paths must ignore it. The config's exec hook is never executed.
+
 Podcasts are retained behind `VITE_ENABLE_PODCASTS=true`; the default build hides their UI and pauses background checks.
 Use the same environment variable with `npm run test:ui -- round12` to run the retained subscription/download regression suite.
 Without it, round12 checks the hidden/paused state. `round13` covers imported music, polling, relocation, smart playlists,
@@ -55,6 +67,10 @@ a guarded native shell operation; other platforms use the `trash` crate. Never f
 - The frontend never builds command lines. It sends typed requests; `download.rs` builds yt-dlp arguments from an
   allowlist, passes the URL after `--`, and accepts only http(s) links. Custom arguments are validated, and options
   that run programs are blocked.
+- All desktop yt-dlp execution goes through `ytdlp.rs`, which supplies `--ignore-config` for streaming and captured
+  subprocesses. Generic process helpers remain available for ffmpeg and JavaScript runtimes.
+- Finished-file transfers use `cap-primitives` directory handles for destination traversal, staging, rename and cleanup.
+  Destination subfolders are opened without following links; do not replace these operations with ambient path writes.
 - The desktop app downloads yt-dlp, ffmpeg and a JS runtime on first run into the app data folder
   (`~/.local/share/com.kaisu.app/engine` or `%APPDATA%\com.kaisu.app\engine`), verified by SHA-256.
 - Custom yt-dlp arguments (`custom_args.rs`) are checked against an allowlist, not a denylist. The table of options and
