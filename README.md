@@ -59,6 +59,11 @@ works behind a proxy, and can check again if you installed the tools yourself. A
   search and export use every matching record, and Show 500 more expands the list. History shows everything you have downloaded with its size and channel. Sort and filter it, open files,
   download again, clean up entries for files that were deleted, and export the list as CSV or JSON.
 
+**Send from your browser**
+- Install the small extension in `extension/` (Chrome, Edge, Firefox) and turn on Settings > "Let the browser extension send links to Kaisu".
+  The toolbar button, right-click menu or "all tabs" item then opens Kaisu with the links ready to review. Nothing downloads until you
+  choose, and the extension has no network access of its own. See `extension/README.md`.
+
 **Finding your way**
 - **Customization settings:** Settings > Customization includes text size (11–16 px), compact or comfortable spacing, artwork
   shapes and reduced motion. Reorder or hide sidebar sections, change its width, toggle artwork/counts, and pin up to 20 playlists

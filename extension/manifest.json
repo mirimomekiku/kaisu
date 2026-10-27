@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "Send to Kaisu",
+  "version": "0.1.0",
+  "description": "Send the page, link, video or tabs you are looking at to the Kaisu desktop app. Kaisu shows them for you to review; nothing downloads until you choose.",
+  "icons": { "32": "icons/icon-32.png", "128": "icons/icon-128.png" },
+  "action": { "default_title": "Send this page to Kaisu", "default_icon": { "32": "icons/icon-32.png" } },
+  "background": { "service_worker": "background.js", "scripts": ["background.js"], "type": "module" },
+  "permissions": ["contextMenus", "activeTab", "scripting", "tabs"],
+  "browser_specific_settings": { "gecko": { "id": "send-to-kaisu@kaisu.app", "strict_min_version": "128.0" } }
+}
