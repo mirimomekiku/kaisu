@@ -11,6 +11,7 @@ mod identification;
 mod leftovers;
 mod library;
 mod library_folders;
+mod link_handler;
 mod links;
 mod loudness;
 mod lyrics;
@@ -74,12 +75,14 @@ pub fn run() {
     tauri::Builder::default()
         // Must come first: a second launch focuses the running window instead of starting another copy.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| tray::show_main(app)))
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .manage(waveform::Waveforms::default())
+        .manage(link_handler::Incoming::default())
         .manage(Engine::default())
         .manage(download::Downloads::default())
         .manage(tray::TrayState::default())
@@ -95,6 +98,7 @@ pub fn run() {
             library_folders::restore(app.handle(), &app.state::<scope::Scope>());
             media::clean_previews(app.handle());
             tray::init(app.handle());
+            link_handler::init(app.handle());
             Ok(())
         })
         .on_window_event(|window, event| tray::on_window_event(window, event))
@@ -109,6 +113,7 @@ pub fn run() {
             files::file_info,
             files::export_text,
             app_update::check_app_update,
+            link_handler::take_incoming_links, link_handler::link_handler_status, link_handler::link_handler_set,
             files::open_file,
             files::reveal_file,
             files::reveal_engine,

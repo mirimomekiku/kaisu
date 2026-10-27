@@ -368,6 +368,12 @@ export interface SecretStatus { available: boolean; store: string; detail: strin
 export const secretStatus = () => invoke<SecretStatus>("secret_status");
 export const secretDelete = (name: SecretName) => invoke<void>("secret_delete", { name });
 
+/** `kaisu://add?url=` links from the browser extension; the app only offers them, it never starts a download by itself. */
+export interface LinkHandlerStatus { registered: boolean; supported: boolean }
+export const takeIncomingLinks = () => invoke<string[]>("take_incoming_links");
+export const linkHandlerStatus = () => invoke<LinkHandlerStatus>("link_handler_status");
+export const setLinkHandler = (enabled: boolean) => invoke<LinkHandlerStatus>("link_handler_set", { enabled });
+
 export const checkSetup = () => invoke<SetupInfo>("check_setup");
 
 // ---- the music library ----

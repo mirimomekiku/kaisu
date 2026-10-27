@@ -45,6 +45,7 @@ import { outputProfile } from "./lib/downloadIdentity";
 import { redactText } from "./lib/redact";
 import { useDownloads, sameDownload, type DownloadItem } from "./hooks/useDownloads";
 import { useDropLinks } from "./hooks/useDropLinks";
+import { useIncomingLinks } from "./hooks/useIncomingLinks";
 import { useEngine } from "./hooks/useEngine";
 import { useFinishedFiles } from "./hooks/useFinishedFiles";
 import { useHistoryStore } from "./hooks/useHistoryStore";
@@ -353,6 +354,7 @@ export default function App() {
     onLinks: flow.showLinks,
     onNothing: () => showFlash("That doesn't contain a link Kaisu can use.", true),
   });
+  useIncomingLinks(settingsLoaded && !!engine?.ready, { onLink: flow.submitLink, onLinks: flow.showLinks });
   const clipboard = useClipboardOffer(settingsLoaded && settings.watchClipboard && !!engine?.ready, url);
   useSeekShortcuts(player, settings.seekPreferences);
   useShortcuts({

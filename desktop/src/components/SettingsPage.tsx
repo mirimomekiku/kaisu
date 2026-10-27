@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from "
 import { open } from "@tauri-apps/plugin-dialog";
 import { AlertTriangle, FolderOpen, Keyboard, RefreshCw, Route, Wrench } from "lucide-react";
 import { AUDIO_FORMAT_IDS, AUDIO_FORMAT_LABEL, lossyEncodeNote } from "../lib/audioFormats";
+import BrowserLinkSetting from "./BrowserLinkSetting";
 import CredentialStoreStatus from "./CredentialStoreStatus";
 import type { AppUpdateStatus } from "../hooks/useAppUpdate";
 import { allowedCustomOptions, checkCustomArgs, checkFolder, errorText, testProxy, type AudioFormat, type CustomOption, type Browser, type CloseMode, type Component, type EngineInfo, type Layout, type NameStyle, type SponsorBlock } from "../lib/api";
@@ -800,6 +801,7 @@ export default function SettingsPage({ customizationLists, settings, effectiveOu
             Offer to download video links I copy (only well-known sites; nothing is sent anywhere)
           </label>
         </div>
+        <BrowserLinkSetting />
         <Row label="Keyboard shortcuts" hint="Press F1 anywhere to see them.">
           <button onClick={onShowShortcuts} className="btn small">
             <Keyboard className="w-3 h-3" /> Show shortcuts

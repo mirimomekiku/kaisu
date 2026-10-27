@@ -26,6 +26,9 @@
       "csp": "default-src 'self'; img-src 'self' data: blob:; media-src 'self' asset: http://asset.localhost http://127.0.0.1:* blob:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost; object-src 'none'; base-uri 'none'; form-action 'none'"
     }
   },
+  "plugins": {
+    "deep-link": { "desktop": { "schemes": ["kaisu"] } }
+  },
   "bundle": {
     "active": false,
     "icon": [

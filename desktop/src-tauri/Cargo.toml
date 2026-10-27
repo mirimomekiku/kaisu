@@ -30,7 +30,7 @@ zip = { version = "9.0.5", default-features = false, features = ["deflate"] }
 reqwest = { version = "0.13.5", default-features = false, features = ["native-tls", "socks"] }
 tauri-plugin-notification = "2.7.0"
 tauri-plugin-clipboard-manager = "2.5.0"
-tauri-plugin-single-instance = "2.5.4"
+tauri-plugin-single-instance = { version = "2.5.4", features = ["deep-link"] }
 fs4 = "1.1.0"
 url = "2.5.8"
 keyring = "4.2.0"
@@ -39,6 +39,7 @@ uuid = { version = "1", features = ["v4"] }
 quick-xml = "0.42"
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"] }
 cap-primitives = "4.0.3"
+tauri-plugin-deep-link = "2"
 
 
 
