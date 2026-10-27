@@ -1,0 +1,3 @@
+# Public key for verifying Kaisu updates: 64 hex characters on one line.
+# Create the key pair with `node scripts/release-sign.mjs keygen` (the private key stays outside this repository),
+# paste the printed public key here and commit it. While this is empty, Kaisu only announces updates and does not install them.

@@ -40,6 +40,7 @@ quick-xml = "0.42"
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"] }
 cap-primitives = "4.0.3"
 tauri-plugin-deep-link = "2"
+ed25519-dalek = "2"
 
 
 

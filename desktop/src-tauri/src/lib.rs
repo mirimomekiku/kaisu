@@ -82,6 +82,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .manage(waveform::Waveforms::default())
+        .manage(app_update::UpdateState::default())
         .manage(link_handler::Incoming::default())
         .manage(Engine::default())
         .manage(download::Downloads::default())
@@ -97,6 +98,7 @@ pub fn run() {
         .setup(|app| {
             library_folders::restore(app.handle(), &app.state::<scope::Scope>());
             media::clean_previews(app.handle());
+            app_update::clean_leftovers();
             tray::init(app.handle());
             link_handler::init(app.handle());
             Ok(())
@@ -113,7 +115,7 @@ pub fn run() {
             files::file_info,
             files::export_text,
             files::pick_link_file,
-            app_update::check_app_update,
+            app_update::check_app_update, app_update::app_update_install, app_update::app_update_restart,
             link_handler::take_incoming_links, link_handler::link_handler_status, link_handler::link_handler_set,
             files::open_file,
             files::reveal_file,
