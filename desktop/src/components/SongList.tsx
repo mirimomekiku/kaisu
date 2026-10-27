@@ -25,12 +25,13 @@ interface Props {
   onReveal: (path: string) => void;
   onEdit: (tracks: LibTrack[]) => void;
   onAutoTag: (tracks: LibTrack[]) => void;
+  onFindLyrics: (tracks: LibTrack[]) => void;
   onLyrics?: (track: LibTrack) => void;
   onPlaylist: (tracks: LibTrack[]) => void;
   announce: (note: { title: string; subtitle?: string }) => void;
 }
 
-export default function SongList({ tracks, onLocate, onPlay, onNext, onAdd, onReveal, onEdit, onAutoTag, onLyrics, onPlaylist, announce }: Props) {
+export default function SongList({ tracks, onLocate, onPlay, onNext, onAdd, onReveal, onEdit, onAutoTag, onFindLyrics, onLyrics, onPlaylist, announce }: Props) {
   const preferences = useMusicPreferences();
   const rows = useVirtualRows(tracks.length, ROW_HEIGHT);
   const [selection, setSelection] = useState(emptySelection);
@@ -130,6 +131,7 @@ export default function SongList({ tracks, onLocate, onPlay, onNext, onAdd, onRe
           { kind: "separator" },
           { label: "Edit selected tags", onSelect: () => onEdit(available), disabled: !playableBatch },
           { label: "Auto-tag selected songs", onSelect: () => onAutoTag(available), disabled: !playableBatch },
+          { label: "Find lyrics for selected songs", onSelect: () => onFindLyrics(available), disabled: !playableBatch },
           { label: "Favorite selected", onSelect: () => setFavorite(true), disabled: !preferences?.loaded },
           { label: "Unfavorite selected", onSelect: () => setFavorite(false), disabled: !preferences?.loaded },
         ]} />

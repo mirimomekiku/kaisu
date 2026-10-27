@@ -294,6 +294,7 @@ export async function invoke(cmd: string, args: any = {}): Promise<any> {
     case "lyrics_find": {
       await sleep(w.__mock.lyricsDelay ?? 40);
       if (w.__mock.lyricsFindFail) throw "No lyrics were found for Artist - Song.";
+      if (w.__mock.lyricsFailFor?.[args.path]) throw w.__mock.lyricsFailFor[args.path];
       const found = w.__mock.lyricsFound ?? { synced: "[00:01.00] Found line one\n[00:02.00] Found line two", plain: null, source: "online" };
       (w.__mock.lyrics ??= {})[args.path] = found;
       return found;
@@ -482,10 +483,10 @@ export async function invoke(cmd: string, args: any = {}): Promise<any> {
     case "secret_get":
       if (w.__mock.noKeyring) throw "The system's password store isn't available: no store";
       return (w.__mock.secrets ??= {})[args.name] ?? null;
-    case "take_incoming_links":
     case "pick_link_file":
       if (w.__mock.linkFileError) throw w.__mock.linkFileError;
       return w.__mock.linkFile ?? null;
+    case "take_incoming_links":
       return (w.__mock.incomingLinks ?? []).splice(0);
     case "link_handler_status":
       return { registered: !!w.__mock.linkHandler, supported: true };
