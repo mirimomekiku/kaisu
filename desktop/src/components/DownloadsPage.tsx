@@ -5,6 +5,7 @@ import { fileMenu } from "../lib/fileMenu";
 import { Download } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import BulkDownloadEditor from "./BulkDownloadEditor";
+import FailedDownloads from "./FailedDownloads";
 import { editableDownload, type QueueEdit } from "../lib/queueEdit";
 import type { DownloadItem } from "../hooks/useDownloads";
 import { queuePositions } from "../lib/queueOrder";
@@ -71,7 +72,8 @@ export default function DownloadsPage({ items, mode, view, onSetRateLimit, onEdi
     <button className="btn small" disabled={!selection.length} onClick={() => setSelected(new Set())}>Clear selection</button>
     <button className="btn small" disabled={!selection.length} onClick={() => setEditing(true)}>Edit selected downloads ({selection.length})</button>
     <div className="download-selection-items" role="group" aria-label="Select waiting downloads">{waiting.map((item) => <label key={item.id} title={item.title}><input type="checkbox" aria-label={`Select download ${item.title}`} checked={selected.has(item.id)} onChange={(e) => setSelected((old) => { const next = new Set(old); if (e.target.checked) next.add(item.id); else next.delete(item.id); return next; })} /><span className="truncate">{item.title}</span></label>)}</div>
-  </div>}</>;
+  </div>}
+  <FailedDownloads items={items} onRetry={actions.onRetry} onRemove={actions.onRemove} /></>;
   if (shown.length === 0) {
     return <>{heading}
       <div className="empty" style={{ minHeight: 340 }}>

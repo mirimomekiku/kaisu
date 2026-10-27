@@ -45,6 +45,9 @@ works behind a proxy, and can check again if you installed the tools yourself. A
 - **Private links and headers:** signed-link tokens and private headers are removed from the queue, history, recovery files, logs and
   copied commands. Header values live in the system password store; a restored download that needs them asks for a fresh link.
 
+- **Retry what failed:** when downloads fail, Downloads groups them by playlist with the usual reason, and one button tries a whole group again
+  or removes it from the list.
+
 **Stay organised**
 - **Move to an external drive:** choose a drive or folder and Kaisu moves (or copies) finished downloads there by
   itself, keeping your folders. If the drive isn't plugged in, files wait and go as soon as it appears. Nothing is
