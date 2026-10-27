@@ -112,6 +112,7 @@ pub fn run() {
             files::file_exists,
             files::file_info,
             files::export_text,
+            files::pick_link_file,
             app_update::check_app_update,
             link_handler::take_incoming_links, link_handler::link_handler_status, link_handler::link_handler_set,
             files::open_file,

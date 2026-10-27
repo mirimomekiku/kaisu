@@ -129,6 +129,40 @@ pub async fn export_text(app: AppHandle, title: String, default_name: String, ex
     Ok(Some(path.display().to_string()))
 }
 
+const MAX_LINK_FILE: u64 = 2 * 1024 * 1024;
+
+#[derive(serde::Serialize)]
+pub struct LinkFile { pub name: String, pub text: String }
+
+/// Reads a small text file of links. Binary files and anything over 2 MB are refused.
+fn read_link_text(path: &Path) -> Result<String, String> {
+    use std::io::Read;
+    let file = std::fs::File::open(path).map_err(|e| format!("Couldn't open that file: {e}"))?;
+    let meta = file.metadata().map_err(|e| e.to_string())?;
+    if !meta.is_file() { return Err("Choose a text or CSV file.".into()); }
+    if meta.len() > MAX_LINK_FILE { return Err("That file is larger than 2 MB. Split it into smaller lists.".into()); }
+    let mut bytes = Vec::new();
+    file.take(MAX_LINK_FILE + 1).read_to_end(&mut bytes).map_err(|e| e.to_string())?;
+    if bytes.len() as u64 > MAX_LINK_FILE { return Err("That file is larger than 2 MB. Split it into smaller lists.".into()); }
+    if bytes.contains(&0) { return Err("That doesn't look like a text file.".into()); }
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// Asks the user for a text or CSV file of links and returns its contents. The dialog is opened here, so the page cannot
+/// choose which file is read.
+#[tauri::command]
+pub async fn pick_link_file(app: AppHandle) -> Result<Option<LinkFile>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog().file().set_title("Choose a file of links").add_filter("Text or CSV", &["txt", "csv", "tsv", "md", "list"]).blocking_pick_file()
+    }).await.map_err(|e| e.to_string())?;
+    let Some(picked) = picked else { return Ok(None) };
+    let path = picked.into_path().map_err(|e| e.to_string())?;
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("links").chars().take(120).collect();
+    let text = tauri::async_runtime::spawn_blocking(move || read_link_text(&path)).await.map_err(|e| e.to_string())??;
+    Ok(Some(LinkFile { name, text }))
+}
+
 fn write_export(p: &Path, contents: &str) -> Result<(), String> {
     if !p.is_absolute() {
         return Err("Not a valid file location.".into());
@@ -233,6 +267,23 @@ pub fn check_folder(path: String) -> Result<FolderCheck, String> {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn link_files_must_be_small_text_files() {
+        let dir = std::env::temp_dir().join(format!("kaisu-links-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let list = dir.join("list.csv");
+        fs::write(&list, "url,title
+https://example.com/a,A
+").unwrap();
+        assert!(read_link_text(&list).unwrap().contains("https://example.com/a"));
+        fs::write(dir.join("bin"), [1u8, 0, 2]).unwrap();
+        assert!(read_link_text(&dir.join("bin")).unwrap_err().contains("text file"));
+        fs::write(dir.join("big"), vec![b'a'; (MAX_LINK_FILE + 1) as usize]).unwrap();
+        assert!(read_link_text(&dir.join("big")).unwrap_err().contains("2 MB"));
+        assert!(read_link_text(&dir).is_err());
+        fs::remove_dir_all(dir).ok();
+    }
 
     fn temp(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("kaisu-files-{}", std::process::id()));

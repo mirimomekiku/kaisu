@@ -45,6 +45,8 @@ works behind a proxy, and can check again if you installed the tools yourself. A
 - **Private links and headers:** signed-link tokens and private headers are removed from the queue, history, recovery files, logs and
   copied commands. Header values live in the system password store; a restored download that needs them asks for a fresh link.
 
+- **Import links from a file:** Search > Import links from a file reads a text, CSV or TSV file (up to 2 MB, 500 links per run), finds the web
+  addresses in any column, drops repeats and lists them for review. Nothing downloads until you choose.
 - **Retry what failed:** when downloads fail, Downloads groups them by playlist with the usual reason, and one button tries a whole group again
   or removes it from the list.
 

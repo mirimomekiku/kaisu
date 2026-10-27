@@ -374,6 +374,9 @@ export const takeIncomingLinks = () => invoke<string[]>("take_incoming_links");
 export const linkHandlerStatus = () => invoke<LinkHandlerStatus>("link_handler_status");
 export const setLinkHandler = (enabled: boolean) => invoke<LinkHandlerStatus>("link_handler_set", { enabled });
 
+/** Asks for a text or CSV file of links and returns its contents, or null when cancelled. */
+export const pickLinkFile = () => invoke<{ name: string; text: string } | null>("pick_link_file");
+
 export const checkSetup = () => invoke<SetupInfo>("check_setup");
 
 // ---- the music library ----

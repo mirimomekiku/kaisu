@@ -483,6 +483,9 @@ export async function invoke(cmd: string, args: any = {}): Promise<any> {
       if (w.__mock.noKeyring) throw "The system's password store isn't available: no store";
       return (w.__mock.secrets ??= {})[args.name] ?? null;
     case "take_incoming_links":
+    case "pick_link_file":
+      if (w.__mock.linkFileError) throw w.__mock.linkFileError;
+      return w.__mock.linkFile ?? null;
       return (w.__mock.incomingLinks ?? []).splice(0);
     case "link_handler_status":
       return { registered: !!w.__mock.linkHandler, supported: true };

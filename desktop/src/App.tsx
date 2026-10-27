@@ -45,6 +45,7 @@ import { outputProfile } from "./lib/downloadIdentity";
 import { redactText } from "./lib/redact";
 import { useDownloads, sameDownload, type DownloadItem } from "./hooks/useDownloads";
 import { useDropLinks } from "./hooks/useDropLinks";
+import { linksFromFile } from "./lib/linkFile";
 import { useIncomingLinks } from "./hooks/useIncomingLinks";
 import { useEngine } from "./hooks/useEngine";
 import { useFinishedFiles } from "./hooks/useFinishedFiles";
@@ -54,7 +55,7 @@ import { useSchedule } from "./hooks/useSchedule";
 import { SEARCH_PAGE_SIZE, useSearchFlow } from "./hooks/useSearchFlow";
 import { useShortcuts } from "./hooks/useShortcuts";
 import { useTrayBridge } from "./hooks/useTrayBridge";
-import { checkSetup, defaultDownloadDir, errorText, exportText, openFolder, openUrl, revealEngine, type SearchSource } from "./lib/api";
+import { checkSetup, defaultDownloadDir, errorText, exportText, openFolder, openUrl, pickLinkFile, revealEngine, type SearchSource } from "./lib/api";
 import { defaultSubs } from "./lib/extra";
 import { formatBytes } from "./lib/format";
 import { historyToCsv, historyToJson, type HistoryRow } from "./lib/history";
@@ -354,6 +355,17 @@ export default function App() {
     onLinks: flow.showLinks,
     onNothing: () => showFlash("That doesn't contain a link Kaisu can use.", true),
   });
+  const importLinks = async () => {
+    try {
+      const file = await pickLinkFile();
+      if (!file) return;
+      const result = linksFromFile(file.text);
+      if (result.links.length === 0) return showFlash(`No web links were found in ${file.name}.`, true);
+      if (result.links.length === 1) flow.submitLink(result.links[0]);
+      else flow.showLinks(result.links);
+      showFlash(`Found ${result.links.length} link${result.links.length === 1 ? "" : "s"} in ${file.name}${result.duplicates ? ` (${result.duplicates} repeated)` : ""}${result.truncated ? `. Only the first ${result.links.length} are listed` : ""}.`);
+    } catch (e) { showFlash(errorText(e), true); }
+  };
   useIncomingLinks(settingsLoaded && !!engine?.ready, { onLink: flow.submitLink, onLinks: flow.showLinks });
   const clipboard = useClipboardOffer(settingsLoaded && settings.watchClipboard && !!engine?.ready, url);
   useSeekShortcuts(player, settings.seekPreferences);
@@ -599,6 +611,7 @@ export default function App() {
           {page === "sources" && <SavedSourcesPage api={savedSources} playlists={playlists} ready={files.ready && !!engine?.ready} onOpen={flow.submitLink} />}
           {page === "search" && (
             <SearchPage
+              onImportLinks={() => void importLinks()}
               onSaveSource={search && (search.kind === "playlist" || search.kind === "channel") && search.sourceUrl ? async () => {
                 if (await savedSources.save(search.sourceUrl!, { title: search.title ?? "Saved source", uploader: null, kind: search.kind === "channel" ? "channel" : "playlist", total: search.total ?? null, entries: search.items })) setPage("sources");
               } : undefined}

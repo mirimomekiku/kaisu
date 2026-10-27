@@ -19,6 +19,7 @@ import SearchResults from "./SearchResults";
 import type { Page } from "./Sidebar";
 
 interface Props {
+  onImportLinks: () => void;
   onSaveSource?: () => Promise<void>;
   playlists: PlaylistsApi;
   playlistTarget: string;
@@ -40,7 +41,7 @@ interface Props {
 }
 
 /** The Search page: the open video's card, search results or a playlist listing, and any message about the lookup. */
-export default function SearchPage({ onSaveSource, playlists, playlistTarget, onPlaylistTarget, flow, actions, settings, visibleMedia, history, existing, setPage, openDownloaded, revealDownloaded, copyText, showFlash, ensureLyricsConsent, savePreset }: Props) {
+export default function SearchPage({ onImportLinks, onSaveSource, playlists, playlistTarget, onPlaylistTarget, flow, actions, settings, visibleMedia, history, existing, setPage, openDownloaded, revealDownloaded, copyText, showFlash, ensureLyricsConsent, savePreset }: Props) {
   const { url, media, search, errorMessage } = flow;
   const mediaActions = useMediaActions();
   const mode = settings.mode;
@@ -59,7 +60,9 @@ export default function SearchPage({ onSaveSource, playlists, playlistTarget, on
 
   return (
     <div className="page flush">
-      <PageHeading title="Search" description="Find a video or paste a link, then choose video or audio." />
+      <PageHeading title="Search" description="Find a video or paste a link, then choose video or audio.">
+        <button type="button" className="btn small" onClick={onImportLinks}>Import links from a file</button>
+      </PageHeading>
       {(visibleMedia || search) && <div className="px-3 py-2"><DownloadPlaylistTarget api={playlists} value={playlistTarget} onChange={onPlaylistTarget} /></div>}
       {(errorMessage && friendlyInputError) || (previouslyDownloaded && !visibleMedia) ? (
         <div className="px-4 pt-3 flex flex-col gap-2">
