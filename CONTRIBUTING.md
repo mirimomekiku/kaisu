@@ -151,8 +151,31 @@ There is no CI: releases are built on a developer machine. Versions are 0.0.x un
    ```
 
    The result is `desktop/src-tauri/target/x86_64-pc-windows-msvc/release/desktop.exe`.
-3. Tag and publish: `git tag v0.0.4 && git push origin v0.0.4`, then
-   `gh release create v0.0.4 desktop/src-tauri/target/x86_64-pc-windows-msvc/release/desktop.exe#kaisu-windows-x64.exe --prerelease --generate-notes`.
+3. Sign it, so installed copies can verify and install the update themselves (see "In-app updates" below):
+
+   ```bash
+   cp desktop/src-tauri/target/x86_64-pc-windows-msvc/release/desktop.exe kaisu-windows-x64.exe
+   node scripts/release-sign.mjs sign kaisu-windows-x64.exe 0.0.4      # writes kaisu-windows-x64.exe.sig
+   ```
+4. Tag and publish both files: `git tag v0.0.4 && git push origin v0.0.4`, then
+   `gh release create v0.0.4 kaisu-windows-x64.exe kaisu-windows-x64.exe.sig --generate-notes`.
+   Do not pass `--prerelease`: Kaisu finds the newest release through `/releases/latest`, which skips prereleases.
+
+### In-app updates
+
+`app_update.rs` can install a release on Windows. It downloads `kaisu-windows-x64.exe` from the newest release (re-reading the
+`/releases/latest` redirect itself and requiring it to match the version the page asked for), streams it beside the running program
+(at most 300 MB, must start with `MZ`), then checks `kaisu-windows-x64.exe.sig`: an Ed25519 signature over
+`"kaisu-update-v1 " + version + " " + SHA-256(file)`. Only a matching signature replaces the program: the running exe is renamed to
+`<name>.exe.old`, the new one takes its place (rolled back if that fails), and the leftovers are deleted at the next start. The
+new version starts only when the user chooses Restart; a short hidden PowerShell waits for the old process to exit first, because
+a second copy would hand over to the running one and quit. Installing is refused while downloads run.
+
+One-time setup: `node scripts/release-sign.mjs keygen` writes the private key to `~/.kaisu-update-key.pem` (never in the repository;
+back it up, since losing it strands installed copies) and prints the public key, which goes into `desktop/src-tauri/update-key.pub`.
+While that file has no key, `installable` is false and the app only announces updates. Linux builds only announce them.
+`scripts/release-sign.test.mjs` and `a_signature_made_by_the_release_script_verifies` check the same signature vector, so the script
+and the app cannot drift apart. The install and restart steps need a real Windows run against a published signed release.
 
 
 ## Saved sources and download playlists
