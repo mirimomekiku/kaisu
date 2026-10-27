@@ -9,6 +9,7 @@ import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { usePlayerEngine } from "../hooks/usePlayer";
 import type { EditResult, LibTrack } from "../lib/api";
 import type { TagEditRequest } from "../lib/tagEdit";
+import BulkIdentify from "./BulkIdentify";
 import TagEditor from "./TagEditor";
 import PlaylistPicker from "./PlaylistPicker";
 import PlaylistsView from "./PlaylistsView";
@@ -84,6 +85,7 @@ export default function LibraryPage({ playlistShortcut, onPlaylistShortcutHandle
   const [artist, setArtist] = useSessionState("library.artist", "");
   const [openAlbum, setOpenAlbum] = useSessionState<string | null>("library.openAlbum", null);
   const [editing, setEditing] = useState<LibTrack[] | null>(null);
+  const [autoTagging, setAutoTagging] = useState<LibTrack[] | null>(null);
   const [foldersOpen, setFoldersOpen] = useState(false);
   const [cleanupOpen, setCleanupOpen] = useState(false);
   const [duplicatesOpen, setDuplicatesOpen] = useState(false);
@@ -230,10 +232,10 @@ export default function LibraryPage({ playlistShortcut, onPlaylistShortcutHandle
           <button className="btn" onClick={() => { resetFilters(); setQuery(""); setArtist(""); }}>Reset library filters</button>
         </div>
       ) : view === "songs" ? (
-        <SongList tracks={shown} onLyrics={setLyricTrack} onLocate={(path) => void locate(path)} onPlay={play} onNext={next} onAdd={add} onReveal={onReveal} onEdit={setEditing} onPlaylist={setAdding} announce={announce} />
+        <SongList tracks={shown} onLyrics={setLyricTrack} onLocate={(path) => void locate(path)} onPlay={play} onNext={next} onAdd={add} onReveal={onReveal} onEdit={setEditing} onAutoTag={setAutoTagging} onPlaylist={setAdding} announce={announce} />
       ) : view === "albums" ? (
         album ? (
-          <AlbumDetail album={album} onComplete={() => setCompletionKey(album.key)} onLocate={(path) => void locate(path)} onBack={() => setOpenAlbum(null)} onPlay={play} onNext={next} onAdd={add} onEdit={setEditing} onPlaylist={setAdding} />
+          <AlbumDetail album={album} onComplete={() => setCompletionKey(album.key)} onLocate={(path) => void locate(path)} onBack={() => setOpenAlbum(null)} onPlay={play} onNext={next} onAdd={add} onEdit={setEditing} onAutoTag={setAutoTagging} onPlaylist={setAdding} />
         ) : (
           <div className="lib-scroll">
             <div className="album-grid" role="list" aria-label="Albums">
@@ -294,6 +296,7 @@ export default function LibraryPage({ playlistShortcut, onPlaylistShortcutHandle
       {syncOpen && <PortableSync tracks={tracks} playlists={playlists.playlists} listening={listening} onClose={() => setSyncOpen(false)} />}
       {lyricTrack && <LyricsEditor key={lyricTrack.path} path={lyricTrack.path} title={lyricTrack.title} artist={lyricTrack.artist} onSaved={onScan} onClose={() => setLyricTrack(null)} />}
       {completionAlbum && <AlbumCompletion key={completionAlbum.key} album={completionAlbum} onClose={() => setCompletionKey(null)} onSearch={(query) => { setCompletionKey(null); onSearchMusic(query); }} />}
+      {autoTagging && <BulkIdentify key={autoTagging.map((t) => t.path).join("|")} tracks={autoTagging} onEdit={onEditTags} onClose={() => setAutoTagging(null)} />}
       {editing && (
         <TagEditor
           // A new key for a new selection starts the form afresh.
@@ -307,7 +310,7 @@ export default function LibraryPage({ playlistShortcut, onPlaylistShortcutHandle
   );
 }
 
-function AlbumDetail({ album, onComplete, onLocate, onBack, onPlay, onNext, onAdd, onEdit, onPlaylist }: { album: Album; onComplete: () => void; onLocate: (path: string) => void; onBack: () => void; onPlay: (list: LibTrack[], from: number) => void; onNext: (list: LibTrack[]) => void; onAdd: (list: LibTrack[]) => void; onEdit: (tracks: LibTrack[]) => void; onPlaylist: (tracks: LibTrack[]) => void }) {
+function AlbumDetail({ album, onComplete, onLocate, onBack, onPlay, onNext, onAdd, onEdit, onAutoTag, onPlaylist }: { album: Album; onComplete: () => void; onLocate: (path: string) => void; onBack: () => void; onPlay: (list: LibTrack[], from: number) => void; onNext: (list: LibTrack[]) => void; onAdd: (list: LibTrack[]) => void; onEdit: (tracks: LibTrack[]) => void; onAutoTag: (tracks: LibTrack[]) => void; onPlaylist: (tracks: LibTrack[]) => void }) {
   const available = album.tracks.filter((t) => !t.missing);
   return (
     <div className="lib-scroll">
@@ -342,6 +345,7 @@ function AlbumDetail({ album, onComplete, onLocate, onBack, onPlay, onNext, onAd
                 <Pencil className="w-3 h-3" /> Edit album
               </button>
               <button type="button" className="btn small" disabled={available.length === 0} onClick={onComplete}>Check album completeness</button>
+              <button type="button" className="btn small" disabled={available.length === 0} onClick={() => onAutoTag(available)}>Auto-tag album</button>
             </div>
           </div>
         </div>

@@ -151,6 +151,8 @@ works behind a proxy, and can check again if you installed the tools yourself. A
 - **Album completion:** open an album and choose Check album completeness. With consent, search MusicBrainz release editions and compare a selected tracklist with the complete local album, including missing files. Missing tracks, uncertain matches, and conflicting titles are listed separately; search individual tracks through your selected source before choosing a download.
 - Podcasts are temporarily hidden, including background checks and automatic episode downloads. Saved subscriptions and
   the implementation are retained.
+- **Auto-tag songs:** select songs (or open an album) and choose Auto-tag. Kaisu looks each one up on MusicBrainz after you give consent,
+  lists every proposed change, ticks only close matches, and writes only the rows you apply. It can also fetch front covers from the Cover Art Archive (by default only for songs without one). A run covers up to 100 songs.
 
 **Stay in control**
 - Run in the background from the tray icon, get a notification when downloads finish, or have Kaisu open the folder,

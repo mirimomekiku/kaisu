@@ -84,11 +84,11 @@ export async function invoke(cmd: string, args: any = {}): Promise<any> {
       if (!args.allowed) throw "Online lookup consent is required.";
       if (w.__mock.identifyFail) throw "Couldn't reach MusicBrainz.";
       await sleep(w.__mock.identifyDelay ?? 20);
-      return structuredClone(w.__mock.identificationCandidates ?? []);
+      return structuredClone(w.__mock.identifyByTitle?.[args.title] ?? w.__mock.identificationCandidates ?? []);
     case "identify_details":
       if (!args.allowed) throw "Online lookup consent is required.";
       await sleep(w.__mock.identifyDelay ?? 20);
-      return structuredClone(w.__mock.identificationTags ?? {});
+      return structuredClone(w.__mock.identifyTagsById?.[args.recordingId] ?? w.__mock.identificationTags ?? {});
     case "identify_cover":
       if (!args.allowed) throw "Online lookup consent is required.";
       if (w.__mock.identifyCoverFail) throw "No artwork was found for this release.";
