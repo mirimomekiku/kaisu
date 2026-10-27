@@ -9,7 +9,9 @@ and Linux, plus a text-based version for the terminal. Behind the scenes it uses
 ## Getting it
 
 Download the latest **kaisu** file for your system from the
-[Releases page](https://github.com/mirimomekiku/kaisu/releases) and run it. There is nothing to install.
+[Releases page](https://github.com/mirimomekiku/kaisu/releases) and run it. There is nothing to install. On Windows, later versions can
+update themselves: Kaisu tells you when a new release is out, and **Install update** downloads it, checks its signature and keeps the
+old version beside it until the next start. It restarts only when you say so.
 
 The first time you open it, Kaisu offers to download the helper tools it needs (about 100-200 MB). It takes one click,
 keeps everything in its own folder, and changes nothing else on your computer. It warns you if the disk is too full,

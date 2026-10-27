@@ -1,5 +1,6 @@
 import { AlertTriangle, Link2, X } from "lucide-react";
 import { formatBytes } from "../lib/format";
+import type { InstallState } from "../hooks/useAppUpdate";
 import { shortLink } from "../lib/links";
 
 interface Props {
@@ -14,7 +15,7 @@ interface Props {
   /** A link found on the clipboard. */
   clipboard: { link: string; onLookUp: () => void; onDismiss: () => void } | null;
   /** A newer Kaisu release exists. Kaisu never installs it by itself. */
-  appUpdate: { version: string; onOpen: () => void; onDismiss: () => void } | null;
+  appUpdate: { version: string; onOpen: () => void; onDismiss: () => void; installable: boolean; install: InstallState; onInstall: () => void; onRestart: () => void; onClearError: () => void } | null;
   flash: { text: string; error: boolean } | null;
   onDismissFlash: () => void;
   /** Unfinished downloads (`.part` files) found in the download folder. */
@@ -37,11 +38,20 @@ export default function AppBanners({ toolsMissing, onFixTools, countdown, onCanc
 
       {appUpdate && (
         <div role="status" className="banner" aria-label="Kaisu update available">
-          <span>Kaisu {appUpdate.version} is available.</span>
-          <button className="btn small primary" onClick={appUpdate.onOpen}>See what's new</button>
-          <button className="row-btn" aria-label="Dismiss this update notice" title="Dismiss" onClick={appUpdate.onDismiss}>
-            <X className="w-3 h-3" />
-          </button>
+          {appUpdate.install.kind === "installing" && <span>Installing Kaisu {appUpdate.version}… {appUpdate.install.percent}%</span>}
+          {appUpdate.install.kind === "ready" && <>
+            <span>Kaisu {appUpdate.install.version} is installed. Restart to start using it.</span>
+            <button className="btn small primary" onClick={appUpdate.onRestart}>Restart Kaisu</button>
+          </>}
+          {(appUpdate.install.kind === "idle" || appUpdate.install.kind === "failed") && <>
+            <span>Kaisu {appUpdate.version} is available.</span>
+            {appUpdate.installable && <button className="btn small primary" onClick={appUpdate.onInstall}>Install update</button>}
+            <button className={`btn small${appUpdate.installable ? "" : " primary"}`} onClick={appUpdate.onOpen}>See what's new</button>
+            {appUpdate.install.kind === "failed" && <span role="alert" style={{ color: "#b3261e" }}>{appUpdate.install.message}</span>}
+            <button className="row-btn" aria-label="Dismiss this update notice" title="Dismiss" onClick={() => { appUpdate.onClearError(); appUpdate.onDismiss(); }}>
+              <X className="w-3 h-3" />
+            </button>
+          </>}
         </div>
       )}
 

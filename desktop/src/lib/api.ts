@@ -290,9 +290,16 @@ export interface DeleteResult {
 export const deleteFiles = (paths: string[], includeMoved: boolean, permanent = false, includeLibrary = false) => invoke<DeleteResult[]>("delete_files", { paths, includeMoved, permanent, includeLibrary });
 export const openFile = (path: string) => invoke<void>("open_file", { path });
 export const revealFile = (path: string) => invoke<void>("reveal_file", { path });
-export interface AppUpdate { current: string; latest: string | null; newer: boolean; url: string }
+export interface AppUpdate { current: string; latest: string | null; newer: boolean; url: string; installable: boolean }
 /** Reads the newest Kaisu release number from the public releases page. Never downloads or installs anything. */
 export const checkAppUpdate = () => invoke<AppUpdate>("check_app_update", { proxy: currentProxy });
+/** Downloads the release, checks its signature and installs it beside the running program. Nothing restarts until `restartApp`. */
+export const installAppUpdate = (version: string, onProgress: (percent: number) => void) => {
+  const channel = new Channel<number>();
+  channel.onmessage = onProgress;
+  return invoke<void>("app_update_install", { version, proxy: currentProxy, onProgress: channel });
+};
+export const restartApp = () => invoke<void>("app_update_restart");
 export const openUrl = (url: string) => invoke<void>("open_url", { url });
 export const revealEngine = () => invoke<void>("reveal_engine");
 

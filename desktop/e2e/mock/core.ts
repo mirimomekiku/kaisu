@@ -499,8 +499,19 @@ export async function invoke(cmd: string, args: any = {}): Promise<any> {
       if (w.__mock.appUpdateFail) throw "Couldn't reach GitHub.";
       const latest = w.__mock.appLatest ?? "0.0.4";
       (w.__mock.appUpdateChecks = (w.__mock.appUpdateChecks ?? 0) + 1);
-      return { current: "0.0.4", latest, newer: latest !== "0.0.4", url: "https://github.com/mirimomekiku/kaisu/releases" };
+      return { current: "0.0.4", latest, newer: latest !== "0.0.4", url: "https://github.com/mirimomekiku/kaisu/releases", installable: latest !== "0.0.4" && !!w.__mock.appInstallable };
     }
+    case "app_update_install": {
+      (w.__mock.appInstalls ??= []).push(args.version);
+      args.onProgress.onmessage?.(40);
+      await sleep(w.__mock.appInstallDelay ?? 60);
+      if (w.__mock.appInstallFail) throw w.__mock.appInstallFail;
+      args.onProgress.onmessage?.(100);
+      return;
+    }
+    case "app_update_restart":
+      w.__mock.appRestarted = true;
+      return;
     case "secret_delete":
       if (w.__mock.noKeyring) throw "The system's password store isn't available: no store";
       delete (w.__mock.secrets ??= {})[args.name];

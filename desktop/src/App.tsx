@@ -552,7 +552,7 @@ export default function App() {
         onFixTools={() => setup.setSetupRequested(true)}
         countdown={countdown}
         onCancelCountdown={cancelCountdown}
-        appUpdate={appUpdate.status.kind === "available" && appUpdate.status.update.latest ? { version: appUpdate.status.update.latest, onOpen: () => openUrl(appUpdate.status.kind === "available" ? appUpdate.status.update.url : "").catch((e) => showFlash(errorText(e), true)), onDismiss: appUpdate.dismiss } : null}
+        appUpdate={appUpdate.status.kind === "available" && appUpdate.status.update.latest ? { version: appUpdate.status.update.latest, onOpen: () => openUrl(appUpdate.status.kind === "available" ? appUpdate.status.update.url : "").catch((e) => showFlash(errorText(e), true)), onDismiss: appUpdate.dismiss, installable: appUpdate.status.update.installable, install: appUpdate.install, onInstall: () => void appUpdate.installUpdate(), onRestart: appUpdate.restart, onClearError: appUpdate.clearInstallError } : null}
         restored={
           restoredCount > 0 && pausedCount > 0
             ? {
@@ -732,7 +732,7 @@ export default function App() {
               }
               onOpenSetup={() => setup.setSetupRequested(true)}
               onRevealEngine={() => revealEngine().catch((e) => showFlash(errorText(e), true))}
-              appUpdate={{ status: appUpdate.status, checkNow: appUpdate.checkNow, onOpen: (url) => openUrl(url).catch((e) => showFlash(errorText(e), true)) }}
+              appUpdate={{ status: appUpdate.status, install: appUpdate.install, onInstall: () => void appUpdate.installUpdate(), onRestart: appUpdate.restart, checkNow: appUpdate.checkNow, onOpen: (url) => openUrl(url).catch((e) => showFlash(errorText(e), true)) }}
               onShowShortcuts={() => setShortcutsOpen(true)}
               onShowTour={() => setTourOpen(true)}
               scheduleState={schedule}

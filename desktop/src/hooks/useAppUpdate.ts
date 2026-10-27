@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { checkAppUpdate, errorText, type AppUpdate } from "../lib/api";
+import { checkAppUpdate, errorText, installAppUpdate, restartApp, type AppUpdate } from "../lib/api";
 import type { Settings } from "../lib/storage";
 
 const DAY = 24 * 60 * 60 * 1000;
 
 export type AppUpdateStatus = { kind: "idle" } | { kind: "checking" } | { kind: "current"; version: string } | { kind: "available"; update: AppUpdate } | { kind: "error"; message: string };
+
+export type InstallState = { kind: "idle" } | { kind: "installing"; percent: number } | { kind: "ready"; version: string } | { kind: "failed"; message: string };
 
 /** Whether a background check is due: switched on, and not tried in the last day. */
 export const updateCheckDue = (settings: Pick<Settings, "appUpdateChecks" | "appUpdateLastCheck">, now: number) =>
@@ -17,6 +19,8 @@ export const updateCheckDue = (settings: Pick<Settings, "appUpdateChecks" | "app
 export function useAppUpdate(settingsLoaded: boolean, settingsRef: { current: Settings }, changeSettings: (patch: Partial<Settings>) => void) {
   const [status, setStatus] = useState<AppUpdateStatus>({ kind: "idle" });
   const running = useRef(false);
+  const [install, setInstall] = useState<InstallState>({ kind: "idle" });
+  const installing = useRef(false);
 
   const check = useCallback(async (manual: boolean) => {
     if (running.current) return;
@@ -45,5 +49,23 @@ export function useAppUpdate(settingsLoaded: boolean, settingsRef: { current: Se
     setStatus({ kind: "idle" });
   }, [status, changeSettings]);
 
-  return { status, checkNow: () => check(true), dismiss };
+  /** Downloads, verifies and installs the announced release. The new version starts only when `restart` is used. */
+  const installUpdate = useCallback(async () => {
+    if (status.kind !== "available" || !status.update.installable || !status.update.latest || installing.current) return;
+    installing.current = true;
+    const version = status.update.latest;
+    setInstall({ kind: "installing", percent: 0 });
+    try {
+      await installAppUpdate(version, (percent) => setInstall((now) => (now.kind === "installing" ? { kind: "installing", percent: Math.round(percent) } : now)));
+      setInstall({ kind: "ready", version });
+    } catch (e) {
+      setInstall({ kind: "failed", message: errorText(e) });
+    } finally {
+      installing.current = false;
+    }
+  }, [status]);
+
+  const restart = useCallback(() => { restartApp().catch((e) => setInstall({ kind: "failed", message: errorText(e) })); }, []);
+
+  return { status, checkNow: () => check(true), dismiss, install, installUpdate, restart, clearInstallError: () => setInstall((now) => (now.kind === "failed" ? { kind: "idle" } : now)) };
 }

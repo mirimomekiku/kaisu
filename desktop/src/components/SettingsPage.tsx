@@ -6,7 +6,7 @@ import { AlertTriangle, FolderOpen, Keyboard, RefreshCw, Route, Wrench } from "l
 import { AUDIO_FORMAT_IDS, AUDIO_FORMAT_LABEL, lossyEncodeNote } from "../lib/audioFormats";
 import BrowserLinkSetting from "./BrowserLinkSetting";
 import CredentialStoreStatus from "./CredentialStoreStatus";
-import type { AppUpdateStatus } from "../hooks/useAppUpdate";
+import type { AppUpdateStatus, InstallState } from "../hooks/useAppUpdate";
 import { allowedCustomOptions, checkCustomArgs, checkFolder, errorText, testProxy, type AudioFormat, type CustomOption, type Browser, type CloseMode, type Component, type EngineInfo, type Layout, type NameStyle, type SponsorBlock } from "../lib/api";
 import type { ScheduleState } from "../lib/schedule";
 import { SUBTITLE_MODE_LABEL } from "../lib/subtitles";
@@ -36,7 +36,7 @@ interface Props {
   onChange: (patch: Partial<Settings>) => void;
   onCheckUpdate: () => void;
   /** Looking for a newer Kaisu release (never installs it). */
-  appUpdate: { status: AppUpdateStatus; checkNow: () => void; onOpen: (url: string) => void };
+  appUpdate: { status: AppUpdateStatus; install: InstallState; onInstall: () => void; onRestart: () => void; checkNow: () => void; onOpen: (url: string) => void };
   onOpenSetup: () => void;
   onRevealEngine: () => void;
   onShowShortcuts: () => void;
@@ -861,7 +861,7 @@ export default function SettingsPage({ customizationLists, settings, effectiveOu
             <input type="checkbox" checked={settings.appUpdateChecks} onChange={(e) => onChange({ appUpdateChecks: e.target.checked })} />
             Tell me when a new version of Kaisu is out
           </label>
-          <span className="dim text-[11px]">Once a day Kaisu reads the version number on its public releases page. It never downloads or installs anything.</span>
+          <span className="dim text-[11px]">Once a day Kaisu reads the version number on its public releases page. Nothing is downloaded or installed unless you choose Install update.</span>
         </div>
         <div className="pref-row">
           <div className="min-w-0" role="status">
@@ -869,9 +869,14 @@ export default function SettingsPage({ customizationLists, settings, effectiveOu
             {appUpdate.status.kind === "current" && `Kaisu ${appUpdate.status.version} is the newest version.`}
             {appUpdate.status.kind === "available" && `Kaisu ${appUpdate.status.update.latest} is available (you have ${appUpdate.status.update.current}).`}
             {appUpdate.status.kind === "error" && <span style={{ color: "#b3261e" }}>{appUpdate.status.message}</span>}
-            {appUpdate.status.kind === "idle" && <span className="dim">Kaisu itself is updated by downloading a new file from the releases page.</span>}
+            {appUpdate.status.kind === "idle" && <span className="dim">Check for a newer Kaisu. Updates are installed only if their signature checks out.</span>}
+            {appUpdate.install.kind === "installing" && <div>Installing… {appUpdate.install.percent}%</div>}
+            {appUpdate.install.kind === "ready" && <div>Kaisu {appUpdate.install.version} is installed. Restart to start using it.</div>}
+            {appUpdate.install.kind === "failed" && <div role="alert" style={{ color: "#b3261e" }}>{appUpdate.install.message}</div>}
           </div>
           <div className="flex items-center gap-2">
+            {appUpdate.install.kind === "ready" && <button onClick={appUpdate.onRestart} className="btn small primary">Restart Kaisu</button>}
+            {appUpdate.status.kind === "available" && appUpdate.status.update.installable && (appUpdate.install.kind === "idle" || appUpdate.install.kind === "failed") && <button onClick={appUpdate.onInstall} className="btn small primary">Install update</button>}
             {appUpdate.status.kind === "available" && <button onClick={() => appUpdate.status.kind === "available" && appUpdate.onOpen(appUpdate.status.update.url)} className="btn small primary">Open releases page</button>}
             <button onClick={appUpdate.checkNow} disabled={appUpdate.status.kind === "checking"} className="btn small">
               <RefreshCw className={`w-3 h-3 ${appUpdate.status.kind === "checking" ? "animate-spin" : ""}`} />
