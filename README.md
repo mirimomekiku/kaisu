@@ -153,6 +153,8 @@ works behind a proxy, and can check again if you installed the tools yourself. A
   the implementation are retained.
 - **Auto-tag songs:** select songs (or open an album) and choose Auto-tag. Kaisu looks each one up on MusicBrainz after you give consent,
   lists every proposed change, ticks only close matches, and writes only the rows you apply. It can also fetch front covers from the Cover Art Archive (by default only for songs without one). A run covers up to 100 songs.
+- **Phones over MTP (experimental, Windows):** portable sync can write to an unlocked phone set to File transfer. It only adds new files,
+  never replaces one, verifies each copy by reading it back, and removes only its own unchanged copies. Linux users mount the phone and choose its folder.
 
 **Stay in control**
 - Run in the background from the tray icon, get a notification when downloads finish, or have Kaisu open the folder,

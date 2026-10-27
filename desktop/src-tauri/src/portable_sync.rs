@@ -1,6 +1,7 @@
 //! Reviewed, incremental exports to mounted folders. Sources are never moved or deleted.
 mod fs;
 mod device;
+mod mtp;
 use std::{collections::{HashMap, HashSet}, fs as disk, io::Cursor, path::{Path, PathBuf}, sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}}, time::{Duration, Instant}};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -15,10 +16,17 @@ const FLOOR: u64 = 32 * 1024 * 1024;
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Format { Original, Mp3 }
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Transport { #[default] Folder, Mtp }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Profile {
     pub id: String, pub name: String, pub folder: String, pub volume: Option<u64>, pub format: Format, pub bitrate: u16,
     pub source_kind: String, pub source_ids: Vec<String>,
+    /// Profiles saved before MTP support are folders.
+    #[serde(default)] pub transport: Transport,
+    #[serde(default)] pub device_id: Option<String>,
+    #[serde(default)] pub storage_id: Option<String>,
 }
 #[derive(Serialize)]
 pub struct ProfileStatus { #[serde(flatten)] pub profile: Profile, pub available: bool, pub message: String }
@@ -86,6 +94,7 @@ fn ledger(root: &Path, profile: &Profile) -> Result<Ledger, String> {
     }
 }
 fn connected(profile: &Profile) -> Result<(), String> {
+    if profile.transport == Transport::Mtp { return mtp::check_device(profile); }
     if !Path::new(&profile.folder).is_dir() { return Err("Device folder is unavailable. Reconnect the drive.".into()); }
     let resolved = disk::canonicalize(&profile.folder).map_err(|e| e.to_string())?;
     if scope::plain_path(&resolved) != profile.folder { return Err("The device folder now resolves to a different location. Choose the original mounted folder again.".into()); }
@@ -94,6 +103,7 @@ fn connected(profile: &Profile) -> Result<(), String> {
 }
 fn device_folder(profile: &Profile, before: &Ledger, create: bool) -> Result<Option<Box<dyn CollectionStorage>>, String> {
     connected(profile)?;
+    if profile.transport == Transport::Mtp { return mtp::open(profile, &namespace(profile), create, before.entries.is_empty()); }
     let root = Folder::root(Path::new(&profile.folder))?;
     let name = namespace(profile);
     // A missing folder is valid for a new profile, never for an existing export on a
@@ -104,7 +114,12 @@ fn device_folder(profile: &Profile, before: &Ledger, create: bool) -> Result<Opt
         Err(e) => Err(format!("The original portable collection folder is unavailable. {e}")),
     }
 }
-fn status(profile: Profile) -> ProfileStatus { let message = connected(&profile).err().unwrap_or_default(); ProfileStatus { available: message.is_empty(), message, profile } }
+fn free_bytes(profile: &Profile) -> Result<u64, String> {
+    if profile.transport == Transport::Mtp { mtp::free(profile) } else { crate::download::free_space_for(Path::new(&profile.folder)) }
+}
+fn status(profile: Profile) -> ProfileStatus {
+    // The phone is busy with a sync; opening it again for a status check could disturb the transfer.
+    let message = if profile.transport == Transport::Mtp && mtp::paused() { String::new() } else { connected(&profile).err().unwrap_or_default() }; ProfileStatus { available: message.is_empty(), message, profile } }
 fn safe(value: &str, fallback: &str) -> String {
     let mut out = String::new();
     for c in value.chars().filter(|c| !c.is_control() && !"<>:\"/\\|?*".contains(*c)) { if out.len() + c.len_utf8() > 45 { break; } out.push(c); }
@@ -123,13 +138,29 @@ fn sidecar(media: &Path, path: &Path) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn portable_sync_devices() -> Vec<device::Device> { device::discover() }
+pub async fn portable_sync_devices() -> Vec<device::Device> { tauri::async_runtime::spawn_blocking(device::discover).await.unwrap_or_default() }
 #[tauri::command]
-pub fn portable_sync_profiles(app: AppHandle) -> Result<Vec<ProfileStatus>, String> { Ok(profiles(&data_dir(&app)?)?.into_iter().map(status).collect()) }
+pub async fn portable_sync_profiles(app: AppHandle) -> Result<Vec<ProfileStatus>, String> {
+    let saved = profiles(&data_dir(&app)?)?;
+    // Checking a phone opens it, so this stays off the thread that drives the window.
+    tauri::async_runtime::spawn_blocking(move || saved.into_iter().map(status).collect()).await.map_err(|e| e.to_string())
+}
 #[tauri::command]
 pub async fn portable_sync_create(app: AppHandle, scope: State<'_, Scope>, name: String, device_id: Option<String>) -> Result<Option<ProfileStatus>, String> {
+    let mut name = name.trim().chars().filter(|c| !c.is_control()).take(80).collect::<String>(); if name.is_empty() { name = "Portable collection".into(); }
     let folder = if let Some(id) = device_id {
-        PathBuf::from(device::discover().into_iter().find(|d| d.id == id).ok_or("That removable device is no longer connected.")?.location)
+        let found = tauri::async_runtime::spawn_blocking(move || device::discover().into_iter().find(|d| d.id == id)).await.map_err(|e| e.to_string())?.ok_or("That removable device is no longer connected.")?;
+        if found.transport == "mtp" {
+            let (device, storage) = mtp::id_parts(&found.id).ok_or("That device could not be identified.")?;
+            let profile = Profile { id: uuid::Uuid::new_v4().to_string(), name, folder: found.label.clone(), volume: None, format: Format::Original, bitrate: 192, source_kind: "library".into(), source_ids: Vec::new(), transport: Transport::Mtp, device_id: Some(device.into()), storage_id: Some(storage.into()) };
+            {
+                let data = data_dir(&app)?; let _edit = EDIT.lock().map_err(|_| "Portable profiles are busy.")?;
+                let mut profiles = profiles(&data)?; if profiles.len() >= 30 { return Err("You can save up to 30 portable profiles.".into()); }
+                profiles.push(profile.clone()); atomic_json(&data.join("profiles.json"), &profiles)?;
+            }
+            return Ok(Some(tauri::async_runtime::spawn_blocking(move || status(profile)).await.map_err(|e| e.to_string())?));
+        }
+        PathBuf::from(found.location)
     } else {
         let (tx, rx) = tokio::sync::oneshot::channel();
         app.dialog().file().set_title("Choose a portable collection folder").pick_folder(move |folder| { let _ = tx.send(folder); });
@@ -138,8 +169,7 @@ pub async fn portable_sync_create(app: AppHandle, scope: State<'_, Scope>, name:
     };
     let root = disk::canonicalize(folder).map_err(|_| "That folder is unavailable.")?;
     if scope.library_dirs().iter().filter_map(|p| disk::canonicalize(p).ok()).any(|p| root.starts_with(p)) { return Err("Choose a destination outside your music folders so the library cannot sync into itself.".into()); }
-    let mut name = name.trim().chars().filter(|c| !c.is_control()).take(80).collect::<String>(); if name.is_empty() { name = "Portable collection".into(); }
-    let profile = Profile { id: uuid::Uuid::new_v4().to_string(), name, folder: scope::plain_path(&root), volume: device::identity(&root), format: Format::Original, bitrate: 192, source_kind: "library".into(), source_ids: Vec::new() };
+    let profile = Profile { id: uuid::Uuid::new_v4().to_string(), name, folder: scope::plain_path(&root), volume: device::identity(&root), format: Format::Original, bitrate: 192, source_kind: "library".into(), source_ids: Vec::new(), transport: Transport::Folder, device_id: None, storage_id: None };
     let data = data_dir(&app)?; let _edit = EDIT.lock().map_err(|_| "Portable profiles are busy.")?;
     let mut profiles = profiles(&data)?; if profiles.len() >= 30 { return Err("You can save up to 30 portable profiles.".into()); }
     profiles.push(profile.clone()); atomic_json(&data.join("profiles.json"), &profiles)?; Ok(Some(status(profile)))
@@ -173,7 +203,7 @@ fn build_plan(profile: Profile, before: Ledger, paths: Vec<PathBuf>, playlists: 
         let key = hash(signature.as_bytes());
         let ext = if profile.format == Format::Mp3 { "mp3".to_string() } else { path.extension().and_then(|e| e.to_str()).unwrap_or("audio").to_ascii_lowercase() };
         let relative = format!("Music/{}/{}/{}{}-{}.{}", safe(&track.artist, "Unknown artist"), safe(&track.album, "Unknown album"), track.track.map(|n| format!("{n:02} - ")).unwrap_or_default(), safe(&track.title, "Track"), &key[..16], ext);
-        #[cfg(windows)] if Path::new(&profile.folder).join(namespace(&profile)).join(&relative).as_os_str().to_string_lossy().encode_utf16().count() >= 260 { return Err("A portable filename is too long. Choose a shorter destination folder.".into()); }
+        #[cfg(windows)] if profile.transport == Transport::Folder && Path::new(&profile.folder).join(namespace(&profile)).join(&relative).as_os_str().to_string_lossy().encode_utf16().count() >= 260 { return Err("A portable filename is too long. Choose a shorter destination folder.".into()); }
         exported.insert(scope::plain_path(path), (relative.clone(), track.title.clone(), track.duration));
         let expected = if profile.format == Format::Mp3 { ((track.duration.max(0.0) * f64::from(profile.bitrate) * 125.0 * 1.2) as u64).max(size) } else { size };
         wanted.push(Item { entry: Entry { key: key.clone(), relative: relative.clone(), title: track.title.clone(), source_hash, output_hash: String::new(), size: expected }, input: Input::File(path.clone(), None), convert: profile.format == Format::Mp3, duration: track.duration, replaces: None });
@@ -252,7 +282,7 @@ pub async fn portable_sync_plan(app: AppHandle, state: State<'_, SyncState>, sco
     let result = tauri::async_runtime::spawn_blocking(move || build_plan(profile, before, sources, playlists, &job, &on_progress)).await.map_err(|e| e.to_string())?;
     let plan = match result { Ok(plan) => plan, Err(error) => { state.sessions.lock().map_err(|_| "Portable sync is busy.")?.remove(&id); return Err(error); } };
     let needed_bytes = plan.additions.iter().map(|i| plan.wanted[*i].entry.size).fold(FLOOR, u64::saturating_add);
-    let free_bytes = crate::download::free_space_for(Path::new(&plan.profile.folder))?;
+    let free_bytes = free_bytes(&plan.profile)?;
     let view = PlanView { id: id.clone(), destination: Path::new(&plan.profile.folder).join(namespace(&plan.profile)).display().to_string(), additions: plan.additions.iter().map(|i| plan.wanted[*i].entry.title.clone()).collect(), unchanged: plan.wanted.len() - plan.additions.len(), removals: plan.removals.iter().map(|e| e.title.clone()).collect(), protected: plan.kept.iter().map(|e| e.title.clone()).collect(), needed_bytes, free_bytes, conversion: plan.profile.format == Format::Mp3 };
     let mut sessions = state.sessions.lock().map_err(|_| "Portable sync is busy.")?;
     let session = sessions.get_mut(&id).ok_or("Sync preview was cancelled.")?; session.plan = Some(plan);
@@ -261,7 +291,7 @@ pub async fn portable_sync_plan(app: AppHandle, state: State<'_, SyncState>, sco
 }
 
 struct Applying<'a>(&'a AtomicBool);
-impl Drop for Applying<'_> { fn drop(&mut self) { self.0.store(false, Ordering::SeqCst); } }
+impl Drop for Applying<'_> { fn drop(&mut self) { self.0.store(false, Ordering::SeqCst); mtp::set_paused(false); } }
 struct SessionCleanup<'a> { sessions: &'a Mutex<HashMap<String, Session>>, id: String, armed: bool }
 impl Drop for SessionCleanup<'_> {
     fn drop(&mut self) { if self.armed { if let Ok(mut sessions) = self.sessions.lock() { sessions.remove(&self.id); } } }
@@ -272,6 +302,7 @@ impl Drop for Temporary { fn drop(&mut self) { let _ = disk::remove_file(&self.0
 pub async fn portable_sync_apply(app: AppHandle, state: State<'_, SyncState>, scope: State<'_, Scope>, id: String, remove_old: bool, on_progress: Channel<Progress>) -> Result<SyncResult, String> {
     if state.applying.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() { return Err("Another portable sync is running.".into()); }
     let _applying = Applying(&state.applying);
+    mtp::set_paused(true);
     let (plan, job) = {
         let mut sessions = state.sessions.lock().map_err(|_| "Portable sync is busy.")?;
         let session = sessions.get_mut(&id).ok_or("Preview the portable collection again.")?;
@@ -297,7 +328,7 @@ pub async fn portable_sync_apply(app: AppHandle, state: State<'_, SyncState>, sc
 async fn apply_plan(root: &Path, cache: &Path, plan: &Plan, helpers: Option<&Path>, remove_old: bool, job: Arc<JobControl>, channel: Channel<Progress>) -> Result<SyncResult, String> {
     connected(&plan.profile)?;
     let needed = plan.additions.iter().map(|i| plan.wanted[*i].entry.size).fold(FLOOR, u64::saturating_add);
-    if crate::download::free_space_for(Path::new(&plan.profile.folder))? < needed { return Err("There isn't enough free device space. Preview again after freeing space.".into()); }
+    if free_bytes(&plan.profile)? < needed { return Err("There isn't enough free device space. Preview again after freeing space.".into()); }
     let folder = device_folder(&plan.profile, &plan.before, true)?.ok_or("Device folder unavailable.")?;
     let mut ledger = plan.before.clone(); let mut result = SyncResult { copied: 0, removed: 0, unchanged: plan.wanted.len() - plan.additions.len(), warnings: Vec::new() };
     // Recheck every reused output before adding anything; a stale preview must not overwrite device edits.
@@ -361,7 +392,7 @@ mod tests {
         let source = root.join("original.wav"); disk::create_dir_all(root.join("device")).unwrap(); disk::create_dir_all(root.join("cache")).unwrap();
         library::tests::tagged_wav(&source, 1, "Song", "Artist", "Album", 1, 2001);
         let folder = disk::canonicalize(root.join("device")).unwrap();
-        let profile = Profile { id: uuid::Uuid::new_v4().to_string(), name: "Test device".into(), folder: scope::plain_path(&folder), volume: device::identity(&folder), format: Format::Original, bitrate: 192, source_kind: "library".into(), source_ids: vec![] };
+        let profile = Profile { id: uuid::Uuid::new_v4().to_string(), name: "Test device".into(), folder: scope::plain_path(&folder), volume: device::identity(&folder), format: Format::Original, bitrate: 192, source_kind: "library".into(), source_ids: vec![], transport: Transport::Folder, device_id: None, storage_id: None };
         (root, source, profile)
     }
     #[tokio::test]

@@ -97,7 +97,8 @@ export async function invoke(cmd: string, args: any = {}): Promise<any> {
     case "portable_sync_profiles": return structuredClone(w.__mock.portableProfiles ?? []);
     case "portable_sync_create": {
       if (w.__mock.portableChooseCancel) return null;
-      const profile = { id: `portable-${Date.now()}`, name: args.name, folder: "/media/USB", volume: 42, format: "original", bitrate: 192, source_kind: "library", source_ids: [], available: true, message: "" };
+      const phone = typeof args.deviceId === "string" && args.deviceId.startsWith("mtp:");
+      const profile = { id: `portable-${Date.now()}`, name: args.name, folder: phone ? "Pixel — Internal storage (MTP, experimental)" : "/media/USB", volume: phone ? null : 42, transport: phone ? "mtp" : "folder", format: "original", bitrate: 192, source_kind: "library", source_ids: [], available: true, message: "" };
       (w.__mock.portableProfiles ??= []).push(profile); return profile;
     }
     case "portable_sync_save": {
@@ -481,7 +482,6 @@ export async function invoke(cmd: string, args: any = {}): Promise<any> {
     case "secret_get":
       if (w.__mock.noKeyring) throw "The system's password store isn't available: no store";
       return (w.__mock.secrets ??= {})[args.name] ?? null;
-    case "secret_status":
     case "take_incoming_links":
       return (w.__mock.incomingLinks ?? []).splice(0);
     case "link_handler_status":
@@ -489,6 +489,7 @@ export async function invoke(cmd: string, args: any = {}): Promise<any> {
     case "link_handler_set":
       w.__mock.linkHandler = !!args.enabled;
       return { registered: !!w.__mock.linkHandler, supported: true };
+    case "secret_status":
       return w.__mock.noKeyring ? { available: false, store: "Secret Service", detail: "The system's password store isn't available: no store" } : { available: true, store: "Secret Service", detail: null };
     case "check_app_update": {
       if (w.__mock.appUpdateFail) throw "Couldn't reach GitHub.";

@@ -5,8 +5,8 @@ import type { MusicPreferences } from "./musicPreferences";
 import { albumsOf } from "./library";
 import { smartTracks } from "./smartPlaylists";
 
-export interface PortableDevice { id: string; label: string; location: string; transport: "mounted_folder" }
-export interface PortableProfile { id: string; name: string; folder: string; volume: number | null; format: "original" | "mp3"; bitrate: number; source_kind: "library" | "playlists" | "albums"; source_ids: string[]; available: boolean; message: string }
+export interface PortableDevice { id: string; label: string; location: string; transport: "mounted_folder" | "mtp" }
+export interface PortableProfile { id: string; name: string; folder: string; volume: number | null; transport?: "folder" | "mtp"; format: "original" | "mp3"; bitrate: number; source_kind: "library" | "playlists" | "albums"; source_ids: string[]; available: boolean; message: string }
 export interface PortablePlaylist { id: string; name: string; paths: string[] }
 export interface SyncProgress { phase: string; done: number; total: number; title: string }
 export interface SyncPlan { id: string; destination: string; additions: string[]; unchanged: number; removals: string[]; protected: string[]; needed_bytes: number; free_bytes: number; conversion: boolean }

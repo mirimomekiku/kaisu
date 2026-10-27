@@ -4,7 +4,7 @@ use std::path::Path;
 #[cfg(target_os = "linux")] use std::fs;
 use serde::Serialize;
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 pub struct Device { pub id: String, pub label: String, pub location: String, pub transport: &'static str }
 
 #[cfg(windows)]
@@ -48,8 +48,10 @@ pub fn discover() -> Vec<Device> {
         }
     }
     locations.sort(); locations.dedup();
-    locations.into_iter().filter(|p| Path::new(p).is_dir()).map(|location| Device {
+    let mut devices: Vec<Device> = locations.into_iter().filter(|p| Path::new(p).is_dir()).map(|location| Device {
         id: format!("folder:{}:{}", identity(Path::new(&location)).map(|v| v.to_string()).unwrap_or_default(), location),
         label: format!("Removable folder {location}"), location, transport: "mounted_folder",
-    }).collect()
+    }).collect();
+    devices.extend(super::mtp::discover());
+    devices
 }
