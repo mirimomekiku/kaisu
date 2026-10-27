@@ -6,7 +6,8 @@ export const SHORTCUT_GROUPS: Array<{ title: string; items: Array<{ keys: string
   {
     title: "Search",
     items: [
-      { keys: ["Mod", "F"], action: "Focus the search box (also Mod+L, Mod+K)" },
+      { keys: ["Mod", "F"], action: "Focus the search box (also Mod+L)" },
+      { keys: ["Mod", "K"], action: "Open the command palette: find and run any action" },
       { keys: ["Mod", "A"], action: "Select all results" },
       { keys: ["Esc"], action: "Clear the selection, or leave the search box" },
       { keys: ["Menu key"], action: "Open the context menu on the focused result (or Shift+F10)" },

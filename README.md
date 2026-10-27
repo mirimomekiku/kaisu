@@ -160,6 +160,7 @@ works behind a proxy, and can check again if you installed the tools yourself. A
   lists every proposed change, ticks only close matches, and writes only the rows you apply. It can also fetch front covers from the Cover Art Archive (by default only for songs without one). A run covers up to 100 songs.
 - **Lyrics in bulk:** select songs or open an album and choose Find lyrics. After consent, Kaisu looks each song up on LRCLIB and saves a `.lrc` or
   `.txt` beside it. Songs that already have lyrics are skipped and the music files are not changed. A run covers up to 200 songs.
+- **Command palette:** press Ctrl/Cmd+K to find any page, library tool or action by typing, and run it with Enter. (Ctrl/Cmd+F and Ctrl/Cmd+L still focus the search box.)
 - **Phones over MTP (experimental, Windows):** portable sync can write to an unlocked phone set to File transfer. It only adds new files,
   never replaces one, verifies each copy by reading it back, and removes only its own unchanged copies. Linux users mount the phone and choose its folder.
 

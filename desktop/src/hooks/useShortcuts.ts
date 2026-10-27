@@ -10,6 +10,7 @@ export interface ShortcutContext {
   hasOutDir: boolean;
   selectedCount: number;
   showShortcuts: () => void;
+  openPalette: () => void;
   goTo: (page: Page) => void;
   focusSearch: () => void;
   selectAll: () => void;
@@ -44,9 +45,12 @@ export function useShortcuts(ctx: ShortcutContext) {
       if (e.key === "F1" || (mod && key === "/")) {
         e.preventDefault();
         c.showShortcuts();
-      } else if (mod && !e.altKey && !e.shiftKey && ["f", "l", "k"].includes(key)) {
+      } else if (mod && !e.altKey && !e.shiftKey && ["f", "l"].includes(key)) {
         e.preventDefault();
         c.focusSearch();
+      } else if (mod && !e.altKey && !e.shiftKey && key === "k") {
+        e.preventDefault();
+        c.openPalette();
       } else if (mod && !e.altKey && /^[1-6]$/.test(key) && Number(key) <= PAGES.length) {
         e.preventDefault();
         c.goTo(PAGES[Number(key) - 1]);

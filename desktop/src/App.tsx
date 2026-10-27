@@ -45,6 +45,9 @@ import { outputProfile } from "./lib/downloadIdentity";
 import { redactText } from "./lib/redact";
 import { useDownloads, sameDownload, type DownloadItem } from "./hooks/useDownloads";
 import { useDropLinks } from "./hooks/useDropLinks";
+import CommandPalette from "./components/CommandPalette";
+import type { Command } from "./lib/commands";
+import type { LibraryCommand } from "./components/LibraryPage";
 import { linksFromFile } from "./lib/linkFile";
 import { useIncomingLinks } from "./hooks/useIncomingLinks";
 import { useEngine } from "./hooks/useEngine";
@@ -99,6 +102,8 @@ export default function App() {
   const [restoredCount, setRestoredCount] = useState(0);
   const [tourOpen, setTourOpen] = useState(false);
   const [playlistShortcut, setPlaylistShortcut] = useState<{ id: string; serial: number } | null>(null);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [libraryCommand, setLibraryCommand] = useState<{ id: LibraryCommand; serial: number } | null>(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const searchInput = useRef<HTMLInputElement>(null);
   const session = useSessionStats();
@@ -366,6 +371,30 @@ export default function App() {
       showFlash(`Found ${result.links.length} link${result.links.length === 1 ? "" : "s"} in ${file.name}${result.duplicates ? ` (${result.duplicates} repeated)` : ""}${result.truncated ? `. Only the first ${result.links.length} are listed` : ""}.`);
     } catch (e) { showFlash(errorText(e), true); }
   };
+  const paletteCommands = (): Command[] => {
+    const go = (id: string, title: string, target: Page, keywords = ""): Command => ({ id, title, group: "Go to", keywords, run: () => setPage(target) });
+    const library = (id: LibraryCommand, title: string, keywords = ""): Command => ({ id: `library-${id}`, title, group: "Library", keywords, run: () => { setPage("library"); setLibraryCommand({ id, serial: Date.now() }); } });
+    const failed = items.filter((item) => item.status === "error");
+    return [
+      go("go-search", "Go to Search", "search", "find youtube paste link"), go("go-downloads", "Go to Downloads", "downloads", "queue progress"), go("go-history", "Go to History", "history", "finished"),
+      go("go-library", "Go to Library", "library", "music songs"), go("go-sources", "Go to Saved sources", "sources", "channels playlists subscriptions"), go("go-settings", "Go to Settings", "settings", "preferences options"),
+      { id: "focus-search", title: "Focus the search box", group: "Search", run: () => { setPage("search"); setTimeout(() => { searchInput.current?.focus(); searchInput.current?.select(); }, 0); } },
+      { id: "import-links", title: "Import links from a file", group: "Search", keywords: "text csv txt list bulk", run: () => { setPage("search"); void importLinks(); } },
+      { id: "pause-all", title: pausedCount > 0 ? "Resume all downloads" : "Pause all downloads", group: "Downloads", keywords: "stop continue", run: () => (pausedCount > 0 ? resumeAll() : pauseAll()) },
+      ...(failed.length > 0 ? [{ id: "retry-failed", title: `Try ${failed.length} failed download${failed.length === 1 ? "" : "s"} again`, group: "Downloads", keywords: "retry errors", run: () => { failed.forEach((item) => retry(item.id)); setPage("downloads"); } }] : []),
+      { id: "clear-finished", title: "Clear finished downloads from the list", group: "Downloads", run: () => clearFinished() },
+      ...(effectiveOutDir ? [{ id: "open-download-folder", title: "Open the download folder", group: "Downloads", keywords: "reveal explorer", run: () => { openFolder(effectiveOutDir).catch((err) => showFlash(errorText(err), true)); } }] : []),
+      library("view:songs", "Library: show songs", "list tracks"), library("view:albums", "Library: show albums"), library("view:artists", "Library: show artists"), library("view:playlists", "Library: show playlists", "smart folders"), library("view:listening", "Library: show listening stats", "dashboard plays history"),
+      library("folders", "Library: music folders", "import add watch"), library("cleanup", "Library: cleanup", "missing unreadable broken health"), library("duplicates", "Library: find duplicates", "same copies"),
+      library("sync", "Library: portable collection sync", "phone usb sd card device mtp export"), library("rescan", "Library: rescan music folders", "refresh"),
+      { id: "player-toggle", title: playerState.playing ? "Pause music" : "Play music", group: "Player", keywords: "playback", run: () => player.toggle() },
+      { id: "player-next", title: "Next track", group: "Player", run: () => player.next() }, { id: "player-previous", title: "Previous track", group: "Player", run: () => player.previous() },
+      { id: "mini-player", title: "Open the mini-player", group: "Player", keywords: "compact small window", run: () => void mini.change(true) },
+      { id: "check-updates", title: "Check Kaisu for updates", group: "App", keywords: "new version release", run: () => appUpdate.checkNow() },
+      { id: "shortcuts", title: "Show keyboard shortcuts", group: "Help", keywords: "keys cheat sheet", run: () => setShortcutsOpen(true) },
+      { id: "tour", title: "Show the quick tour", group: "Help", keywords: "walkthrough intro", run: () => setTourOpen(true) },
+    ];
+  };
   useIncomingLinks(settingsLoaded && !!engine?.ready, { onLink: flow.submitLink, onLinks: flow.showLinks });
   const clipboard = useClipboardOffer(settingsLoaded && settings.watchClipboard && !!engine?.ready, url);
   useSeekShortcuts(player, settings.seekPreferences);
@@ -377,6 +406,7 @@ export default function App() {
     hasOutDir: !!effectiveOutDir,
     selectedCount: checked.size,
     showShortcuts: () => setShortcutsOpen(true),
+    openPalette: () => setPaletteOpen(true),
     goTo: setPage,
     focusSearch: () => {
       setPage("search");
@@ -685,7 +715,7 @@ export default function App() {
             />
           )}
 
-          {page === "library" && <LibraryPage onSearchMusic={flow.searchFor} playlistShortcut={playlistShortcut} onPlaylistShortcutHandled={() => setPlaylistShortcut(null)} pendingPlaylists={pendingPlaylists} tracks={library.tracks} management={library.management} listening={listening.stats} playlists={playlists} onRelocated={onRelocated} unmeasuredCount={library.unmeasuredCount} scanning={library.scanning} loaded={library.loaded} onScan={() => void library.scan()} onReveal={revealDownloaded} onEditTags={async (paths, edit) => { const release = player.releaseFiles(paths); try { const results = await library.editTags(paths, edit); if (edit.artwork) player.invalidateCovers(results.filter((r) => r.ok).map((r) => r.path)); return results; } finally { release(); } }} analysing={library.analysing} onAnalyse={() => void library.analyse()} onStopAnalysing={library.stopAnalysing} announce={setNote} flash={showFlash} />}
+          {page === "library" && <LibraryPage command={libraryCommand} onCommandHandled={() => setLibraryCommand(null)} onSearchMusic={flow.searchFor} playlistShortcut={playlistShortcut} onPlaylistShortcutHandled={() => setPlaylistShortcut(null)} pendingPlaylists={pendingPlaylists} tracks={library.tracks} management={library.management} listening={listening.stats} playlists={playlists} onRelocated={onRelocated} unmeasuredCount={library.unmeasuredCount} scanning={library.scanning} loaded={library.loaded} onScan={() => void library.scan()} onReveal={revealDownloaded} onEditTags={async (paths, edit) => { const release = player.releaseFiles(paths); try { const results = await library.editTags(paths, edit); if (edit.artwork) player.invalidateCovers(results.filter((r) => r.ok).map((r) => r.path)); return results; } finally { release(); } }} analysing={library.analysing} onAnalyse={() => void library.analyse()} onStopAnalysing={library.stopAnalysing} announce={setNote} flash={showFlash} />}
 
           {page === "settings" && (
             <SettingsPage
@@ -764,6 +794,7 @@ export default function App() {
           }}
         />
       )}
+      {paletteOpen && <CommandPalette commands={paletteCommands()} onClose={() => setPaletteOpen(false)} />}
       {shortcutsOpen && <ShortcutsDialog onClose={() => setShortcutsOpen(false)} />}
       {dragging && (
         <div className="drop-overlay" aria-hidden="true">

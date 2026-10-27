@@ -29,6 +29,7 @@ import LyricsEditor from "./LyricsEditor";
 const LibraryCleanup = lazy(() => import("./LibraryCleanup"));
 
 type View = "songs" | "albums" | "artists" | "playlists" | "listening";
+export type LibraryCommand = `view:${View}` | "folders" | "cleanup" | "duplicates" | "sync" | "rescan";
 
 /** Playing from a long list queues this many tracks from the one chosen, so the queue stays manageable. */
 const QUEUE_FROM_HERE = 500;
@@ -43,6 +44,9 @@ const SORTS: Array<[SortKey, string]> = [
 ];
 
 interface Props {
+  /** A library action chosen from the command palette. */
+  command?: { id: LibraryCommand; serial: number } | null;
+  onCommandHandled?: () => void;
   playlistShortcut?: { id: string; serial: number } | null;
   onPlaylistShortcutHandled?: () => void;
   pendingPlaylists: Record<string, number>;
@@ -72,13 +76,24 @@ const hours = (seconds: number) => {
 };
 
 /** The music library: every sound file found in the download folders, by song, album or artist. */
-export default function LibraryPage({ playlistShortcut, onPlaylistShortcutHandled, pendingPlaylists, playlists, tracks, management, listening, onRelocated, scanning, loaded, onScan, onReveal, onEditTags, analysing, unmeasuredCount, onAnalyse, onStopAnalysing, announce, flash, onSearchMusic }: Props) {
+export default function LibraryPage({ command, onCommandHandled, playlistShortcut, onPlaylistShortcutHandled, pendingPlaylists, playlists, tracks, management, listening, onRelocated, scanning, loaded, onScan, onReveal, onEditTags, analysing, unmeasuredCount, onAnalyse, onStopAnalysing, announce, flash, onSearchMusic }: Props) {
   const preferences = useMusicPreferences()?.preferences;
   const [favoritesOnly, setFavoritesOnly] = useSessionState("library.favoritesOnly", false);
   const [minimumRating, setMinimumRating] = useSessionState("library.minimumRating", 0);
   const player = usePlayerEngine();
   const [adding, setAdding] = useState<LibTrack[] | null>(null);
   const [view, setView] = useSessionState<View>("library.view", "songs");
+  useEffect(() => {
+    if (!command) return;
+    if (command.id.startsWith("view:")) { setView(command.id.slice(5) as View); setOpenAlbum(null); }
+    else if (command.id === "folders") setFoldersOpen(true);
+    else if (command.id === "cleanup") setCleanupOpen(true);
+    else if (command.id === "duplicates") setDuplicatesOpen(true);
+    else if (command.id === "sync") setSyncOpen(true);
+    else if (command.id === "rescan") onScan();
+    onCommandHandled?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [command]);
   useEffect(() => { if (playlistShortcut) { setView("playlists"); setOpenAlbum(null); } }, [playlistShortcut, setView]);
   const [query, setQuery] = useSessionState("library.query", "");
   const [format, setFormat] = useSessionState("library.format", "");

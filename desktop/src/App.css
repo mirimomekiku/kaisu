@@ -2015,3 +2015,10 @@ html[data-custom-theme="true"] :is(select.source-select, .track-rating select) {
 html[data-custom-theme="true"] :is(select.field, select.source-select, .track-rating select) { appearance:auto; -webkit-appearance:auto; padding-right:9px; }
 html[data-custom-theme="true"] .playerbar .pb-sub { color:var(--ink-2); }
 html[data-custom-theme="true"] input[type="range"], html[data-custom-theme="true"] input[type="checkbox"], html[data-custom-theme="true"] input[type="radio"] { accent-color:var(--blue-3); }
+
+/* Command palette */
+.palette-list { list-style:none; margin:8px 0 0; padding:0; max-height:min(52vh, 380px); overflow-y:auto; }
+.palette-item { display:flex; align-items:center; gap:12px; padding:6px 10px; border-radius:6px; cursor:pointer; }
+.palette-item.active { background:#3b82f6; color:#fff; }
+.palette-item.active .dim { color:rgba(255,255,255,.8); }
+html[data-custom-theme="true"] .palette-item.active { background:var(--accent, #3b82f6); }
